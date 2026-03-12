@@ -16,6 +16,8 @@ import CloseOutlined from "@mui/icons-material/CloseOutlined";
 import CalendarMonthOutlined from "@mui/icons-material/CalendarMonthOutlined";
 import ChevronLeft from "@mui/icons-material/ChevronLeft";
 import ChevronRight from "@mui/icons-material/ChevronRight";
+import SyncAltOutlined from "@mui/icons-material/SyncAltOutlined";
+import ShowChartOutlined from "@mui/icons-material/ShowChartOutlined";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -431,6 +433,801 @@ function CSVTable({ title, icon, color, headers, rows, resampled, originalRows }
 // ── CSV Chart (Plotly): multi-column dropdown, multiple series ─────────────────
 const CHART_COLORS = ["#2563eb", "#dc2626", "#16a34a", "#d97706", "#7c3aed", "#0891b2"];
 
+/** Find column index by name (case-insensitive). Tries exact match then uppercase. */
+function findColIndex(headers, ...names) {
+  const h = (headers || []).map((x) => String(x ?? "").trim());
+  for (const n of names) {
+    const want = String(n ?? "").trim();
+    const idx = h.findIndex((x) => x.toLowerCase() === want.toLowerCase() || x === want);
+    if (idx >= 0) return idx;
+  }
+  return -1;
+}
+
+// ── Sync chart: dual Y-axis — PV time/P_DC (left) + Weather time/GHI (right) ─────
+function SyncChart({ pvHeaders, pvRows, weatherHeaders, weatherRows }) {
+  const safePvH = Array.isArray(pvHeaders) ? pvHeaders : [];
+  const safePvR = Array.isArray(pvRows) ? pvRows : [];
+  const safeWh = Array.isArray(weatherHeaders) ? weatherHeaders : [];
+  const safeWr = Array.isArray(weatherRows) ? weatherRows : [];
+
+  const config = useMemo(() => {
+    const timeColPv = safePvH.length > 0 ? 0 : -1;
+    const pdcCol = findColIndex(safePvH, "P_DC", "P DC", "PDC");
+    const timeColWeather = safeWh.length > 0 ? 0 : -1;
+    const ghiCol = findColIndex(safeWh, "GHI", "Ghi");
+    if (timeColPv < 0 || pdcCol < 0 || timeColWeather < 0 || ghiCol < 0) return null;
+
+    const pvTimes = safePvR.map((r) => (Array.isArray(r) ? r[timeColPv] : ""));
+    const pvPdc = safePvR.map((r) => {
+      const v = parseFloat(Array.isArray(r) ? r[pdcCol] : "");
+      return isNaN(v) ? null : v;
+    });
+    const weatherTimes = safeWr.map((r) => (Array.isArray(r) ? r[timeColWeather] : ""));
+    const weatherGhi = safeWr.map((r) => {
+      const v = parseFloat(Array.isArray(r) ? r[ghiCol] : "");
+      return isNaN(v) ? null : v;
+    });
+
+    const tracePdc = {
+      x: pvTimes,
+      y: pvPdc,
+      type: "scattergl",
+      mode: "lines",
+      name: safePvH[pdcCol] ?? "P_DC",
+      line: { color: O, width: 1.5 },
+      yaxis: "y",
+      hovertemplate: "<b>P_DC</b>: %{y}<extra></extra>",
+    };
+    const traceGhi = {
+      x: weatherTimes,
+      y: weatherGhi,
+      type: "scattergl",
+      mode: "lines",
+      name: safeWh[ghiCol] ?? "GHI",
+      line: { color: B, width: 1.5 },
+      yaxis: "y2",
+      hovertemplate: "<b>GHI</b>: %{y}<extra></extra>",
+    };
+
+    const layout = {
+      height: 360,
+      margin: { t: 24, r: 56, b: 50, l: 56 },
+      hovermode: "x unified",
+      showlegend: true,
+      legend: { x: 1, y: 1, xanchor: "right", font: { family: FONT, size: 11 } },
+      xaxis: {
+        title: { text: "Time", font: { family: FONT, size: 12, color: "#94a3b8" } },
+        gridcolor: "#F1F5F9",
+        tickfont: { family: MONO, size: 10, color: "#94a3b8" },
+      },
+      yaxis: {
+        title: { text: safePvH[pdcCol] ?? "P_DC", font: { family: FONT, size: 12, color: O } },
+        gridcolor: "#F1F5F9",
+        tickfont: { family: MONO, size: 10, color: "#94a3b8" },
+        side: "left",
+      },
+      yaxis2: {
+        title: { text: safeWh[ghiCol] ?? "GHI", font: { family: FONT, size: 12, color: B } },
+        gridcolor: "rgba(0,0,0,0)",
+        tickfont: { family: MONO, size: 10, color: "#94a3b8" },
+        side: "right",
+        overlaying: "y",
+        anchor: "x",
+      },
+      plot_bgcolor: "#fff",
+      paper_bgcolor: "#fff",
+      font: { family: FONT },
+    };
+
+    return { data: [tracePdc, traceGhi], layout };
+  }, [safePvH, safePvR, safeWh, safeWr]);
+
+  if (!config) return null;
+
+  return (
+    <div style={{
+      background: "#ffffff",
+      borderRadius: 16,
+      border: "1px solid #E2E8F0",
+      boxShadow: "0 18px 45px rgba(15, 23, 42, 0.10)",
+      padding: "16px 18px 20px",
+      display: "flex",
+      flexDirection: "column",
+      gap: 14,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+        <div style={{
+          width: 30,
+          height: 30,
+          borderRadius: 10,
+          background: `${P}12`,
+          border: `1px solid ${P}35`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}>
+          <TimelineOutlined sx={{ fontSize: 18, color: P }} />
+        </div>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <span style={{ fontFamily: FONT, fontSize: 14, fontWeight: 800, color: "#0F172A" }}>
+            P_DC vs GHI
+          </span>
+          <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>
+            PV power (left axis) and global horizontal irradiance (right axis) over time.
+          </span>
+        </div>
+      </div>
+      <Plot
+        data={config.data}
+        layout={config.layout}
+        config={{
+          displaylogo: false,
+          responsive: true,
+          modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d"],
+        }}
+        style={{ width: "100%" }}
+      />
+    </div>
+  );
+}
+
+// ── Helpers to build synced-series arrays from rules on the frontend ───────────
+function parseRuleDate(str) {
+  if (!str) return null;
+  const s = String(str).trim().replace(" ", "T");
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function applySyncRulesToTimes(times, rules, shiftColUnits = "minutes") {
+  if (!Array.isArray(times) || !Array.isArray(rules)) return times ?? [];
+  return times.map((tStr) => {
+    const base = tStr ? new Date(String(tStr).replace(" ", "T")) : null;
+    if (!base || Number.isNaN(base.getTime())) return tStr;
+    let shifted = base;
+    for (const r of rules) {
+      const start = parseRuleDate(r.start);
+      const end = parseRuleDate(r.end);
+      if (!start || !end) continue;
+      if (base >= start && base <= end) {
+        const minutes = Number(r.shiftMinutes) || 0;
+        shifted = new Date(base.getTime() + minutes * 60 * 1000);
+        break;
+      }
+    }
+    const yyyy = shifted.getFullYear();
+    const mm = String(shifted.getMonth() + 1).padStart(2, "0");
+    const dd = String(shifted.getDate()).padStart(2, "0");
+    const HH = String(shifted.getHours()).padStart(2, "0");
+    const MM = String(shifted.getMinutes()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd} ${HH}:${MM}`;
+  });
+}
+
+function SyncRuleRangeEditor({ rule, onChange }) {
+  const fromValue = rule.start ? rule.start.replace(" ", "T") : "";
+  const toValue = rule.end ? rule.end.replace(" ", "T") : "";
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <input
+        type="datetime-local"
+        value={fromValue}
+        onChange={(e) => {
+          const v = e.target.value;
+          onChange({ ...rule, start: v ? v.replace("T", " ") : "" });
+        }}
+        style={{
+          flex: 1,
+          fontFamily: MONO,
+          fontSize: 11,
+          padding: "6px 8px",
+          borderRadius: 8,
+          border: "1px solid #CBD5F5",
+          background: "#F9FAFB",
+          color: "#0F172A",
+          outline: "none",
+        }}
+      />
+      <span style={{ fontSize: 11, color: "#94a3b8", fontFamily: MONO }}>→</span>
+      <input
+        type="datetime-local"
+        value={toValue}
+        onChange={(e) => {
+          const v = e.target.value;
+          onChange({ ...rule, end: v ? v.replace("T", " ") : "" });
+        }}
+        style={{
+          flex: 1,
+          fontFamily: MONO,
+          fontSize: 11,
+          padding: "6px 8px",
+          borderRadius: 8,
+          border: "1px solid #CBD5F5",
+          background: "#F9FAFB",
+          color: "#0F172A",
+          outline: "none",
+        }}
+      />
+    </div>
+  );
+}
+
+/** Simple linear regression: returns { slope, intercept, r2 } from x[], y[]. */
+function linearRegression(x, y) {
+  const n = x.length;
+  if (n < 2) return { slope: 0, intercept: 0, r2: 0 };
+  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
+  for (let i = 0; i < n; i++) {
+    sumX += x[i];
+    sumY += y[i];
+    sumXY += x[i] * y[i];
+    sumX2 += x[i] * x[i];
+    sumY2 += y[i] * y[i];
+  }
+  const denom = n * sumX2 - sumX * sumX;
+  const slope = denom === 0 ? 0 : (n * sumXY - sumX * sumY) / denom;
+  const intercept = (sumY - slope * sumX) / n;
+  let ssRes = 0, ssTot = 0;
+  const meanY = sumY / n;
+  for (let i = 0; i < n; i++) {
+    const fit = slope * x[i] + intercept;
+    ssRes += (y[i] - fit) ** 2;
+    ssTot += (y[i] - meanY) ** 2;
+  }
+  const r2 = ssTot === 0 ? 0 : 1 - ssRes / ssTot;
+  return { slope, intercept, r2 };
+}
+
+// ── Correlation chart: x = GHI, y = P_DC (aligned by time, same filtered data) ───
+function CorrelationChart({ pvHeaders, pvRows, weatherHeaders, weatherRows }) {
+  const safePvH = Array.isArray(pvHeaders) ? pvHeaders : [];
+  const safePvR = Array.isArray(pvRows) ? pvRows : [];
+  const safeWh = Array.isArray(weatherHeaders) ? weatherHeaders : [];
+  const safeWr = Array.isArray(weatherRows) ? weatherRows : [];
+
+  const config = useMemo(() => {
+    const timeColPv = safePvH.length > 0 ? 0 : -1;
+    const pdcCol = findColIndex(safePvH, "P_DC", "P DC", "PDC");
+    const timeColWeather = safeWh.length > 0 ? 0 : -1;
+    const ghiCol = findColIndex(safeWh, "GHI", "Ghi");
+    if (timeColPv < 0 || pdcCol < 0 || timeColWeather < 0 || ghiCol < 0) return null;
+
+    // Map time -> GHI from weather
+    const timeToGhi = new Map();
+    for (const r of safeWr) {
+      const t = Array.isArray(r) ? String(r[timeColWeather] ?? "").trim() : "";
+      const g = parseFloat(Array.isArray(r) ? r[ghiCol] : "");
+      if (t && !isNaN(g) && isFinite(g)) timeToGhi.set(t, g);
+    }
+
+    const ghiArr = [];
+    const pdcArr = [];
+    for (const r of safePvR) {
+      const t = Array.isArray(r) ? String(r[timeColPv] ?? "").trim() : "";
+      const pdc = parseFloat(Array.isArray(r) ? r[pdcCol] : "");
+      if (t === "" || isNaN(pdc) || !isFinite(pdc)) continue;
+      const ghi = timeToGhi.get(t);
+      if (ghi == null) continue;
+      ghiArr.push(ghi);
+      pdcArr.push(pdc);
+    }
+    if (ghiArr.length === 0) return null;
+
+    const { slope, intercept, r2 } = linearRegression(ghiArr, pdcArr);
+    const minX = Math.min(...ghiArr);
+    const maxX = Math.max(...ghiArr);
+    const lineX = [minX, maxX];
+    const lineY = [slope * minX + intercept, slope * maxX + intercept];
+
+    const traceScatter = {
+      x: ghiArr,
+      y: pdcArr,
+      type: "scattergl",
+      mode: "markers",
+      name: "Data",
+      marker: {
+        size: 8,
+        color: P,
+        opacity: 0.65,
+        line: { width: 1, color: "rgba(255,255,255,0.9)" },
+        symbol: "circle",
+      },
+      hovertemplate: "<b>GHI</b>: %{x:.2f}<br><b>P_DC</b>: %{y:.2f}<extra></extra>",
+    };
+
+    const traceLine = {
+      x: lineX,
+      y: lineY,
+      type: "scattergl",
+      mode: "lines",
+      name: `Trend (R² = ${r2.toFixed(3)})`,
+      line: {
+        color: O,
+        width: 2.5,
+        dash: "solid",
+      },
+      hovertemplate: "Trend: P_DC = %{y:.2f}<extra></extra>",
+    };
+
+    const layout = {
+      height: 380,
+      margin: { t: 40, r: 40, b: 56, l: 60 },
+      hovermode: "x unified",
+      showlegend: true,
+      legend: {
+        x: 1,
+        y: 1.02,
+        xanchor: "right",
+        yanchor: "bottom",
+        font: { family: FONT, size: 12, color: "#475569" },
+        bgcolor: "rgba(255,255,255,0.9)",
+        bordercolor: "#E2E8F0",
+        borderwidth: 1,
+      },
+      xaxis: {
+        title: {
+          text: safeWh[ghiCol] ?? "GHI",
+          font: { family: FONT, size: 13, color: "#334155", standoff: 10 },
+        },
+        gridcolor: "#E2E8F0",
+        zerolinecolor: "#E2E8F0",
+        zerolinewidth: 1,
+        tickfont: { family: MONO, size: 11, color: "#64748B" },
+        ticklen: 4,
+        showline: true,
+        linecolor: "#E2E8F0",
+        linewidth: 1,
+        mirror: false,
+      },
+      yaxis: {
+        title: {
+          text: safePvH[pdcCol] ?? "P_DC",
+          font: { family: FONT, size: 13, color: "#334155", standoff: 10 },
+        },
+        gridcolor: "#E2E8F0",
+        zerolinecolor: "#E2E8F0",
+        zerolinewidth: 1,
+        tickfont: { family: MONO, size: 11, color: "#64748B" },
+        ticklen: 4,
+        showline: true,
+        linecolor: "#E2E8F0",
+        linewidth: 1,
+        mirror: false,
+      },
+      plot_bgcolor: "#FAFBFC",
+      paper_bgcolor: "#fff",
+      font: { family: FONT },
+    };
+
+    return { data: [traceScatter, traceLine], layout };
+  }, [safePvH, safePvR, safeWh, safeWr]);
+
+  if (!config) return null;
+
+  return (
+    <div style={{
+      background: "#ffffff",
+      borderRadius: 16,
+      border: "1px solid #E2E8F0",
+      boxShadow: "0 18px 45px rgba(15, 23, 42, 0.10)",
+      padding: "16px 18px 20px",
+      display: "flex",
+      flexDirection: "column",
+      gap: 14,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+        <div style={{
+          width: 30,
+          height: 30,
+          borderRadius: 10,
+          background: `${P}12`,
+          border: `1px solid ${P}35`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}>
+          <TimelineOutlined sx={{ fontSize: 18, color: P }} />
+        </div>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <span style={{ fontFamily: FONT, fontSize: 14, fontWeight: 800, color: "#0F172A" }}>
+            Correlation: GHI vs P_DC
+          </span>
+          <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>
+            Scatter of PV power vs irradiance (points aligned by time). Same date range as above.
+          </span>
+        </div>
+      </div>
+      <Plot
+        data={config.data}
+        layout={config.layout}
+        config={{
+          displaylogo: false,
+          responsive: true,
+          modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d"],
+        }}
+        style={{ width: "100%" }}
+      />
+    </div>
+  );
+}
+
+// ── Synced data charts (after applying frontend rules) ─────────────────────────
+function SyncedLineChart({ merged }) {
+  if (!merged || merged.length === 0) return null;
+  const x = merged.map((d) => d.time);
+  const pdc = merged.map((d) => d.pdc);
+  const ghi = merged.map((d) => d.ghi);
+
+  const data = [
+    {
+      x,
+      y: pdc,
+      type: "scattergl",
+      mode: "lines",
+      name: "P_DC (synced)",
+      line: { color: O, width: 1.6 },
+      yaxis: "y",
+      hovertemplate: "<b>P_DC</b>: %{y:.2f}<extra></extra>",
+    },
+    {
+      x,
+      y: ghi,
+      type: "scattergl",
+      mode: "lines",
+      name: "GHI (synced)",
+      line: { color: B, width: 1.6 },
+      yaxis: "y2",
+      hovertemplate: "<b>GHI</b>: %{y:.2f}<extra></extra>",
+    },
+  ];
+
+  const layout = {
+    height: 360,
+    margin: { t: 30, r: 56, b: 50, l: 56 },
+    hovermode: "x unified",
+    showlegend: true,
+    legend: {
+      x: 1,
+      y: 1,
+      xanchor: "right",
+      font: { family: FONT, size: 11, color: "#475569" },
+    },
+    xaxis: {
+      title: { text: "Synced time", font: { family: FONT, size: 12, color: "#94a3b8" } },
+      gridcolor: "#F1F5F9",
+      tickfont: { family: MONO, size: 10, color: "#94a3b8" },
+    },
+    yaxis: {
+      title: { text: "P_DC", font: { family: FONT, size: 12, color: O } },
+      gridcolor: "#F1F5F9",
+      tickfont: { family: MONO, size: 10, color: "#94a3b8" },
+      side: "left",
+    },
+    yaxis2: {
+      title: { text: "GHI", font: { family: FONT, size: 12, color: B } },
+      gridcolor: "rgba(0,0,0,0)",
+      tickfont: { family: MONO, size: 10, color: "#94a3b8" },
+      side: "right",
+      overlaying: "y",
+      anchor: "x",
+    },
+    plot_bgcolor: "#fff",
+    paper_bgcolor: "#fff",
+    font: { family: FONT },
+  };
+
+  return (
+    <div style={{
+      background: "#ffffff",
+      borderRadius: 16,
+      border: "1px solid #E2E8F0",
+      boxShadow: "0 18px 45px rgba(15, 23, 42, 0.10)",
+      padding: "16px 18px 20px",
+      display: "flex",
+      flexDirection: "column",
+      gap: 14,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+        <div style={{
+          width: 30,
+          height: 30,
+          borderRadius: 10,
+          background: `${P}12`,
+          border: `1px solid ${P}35`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}>
+          <TimelineOutlined sx={{ fontSize: 18, color: P }} />
+        </div>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <span style={{ fontFamily: FONT, fontSize: 14, fontWeight: 800, color: "#0F172A" }}>
+            Synced Data — Time Series
+          </span>
+          <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>
+            PV P_DC and Weather GHI after applying time-shift rules.
+          </span>
+        </div>
+      </div>
+      <Plot
+        data={data}
+        layout={layout}
+        config={{
+          displaylogo: false,
+          responsive: true,
+          modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d"],
+        }}
+        style={{ width: "100%" }}
+      />
+    </div>
+  );
+}
+
+function SyncedCorrelationChart({ merged }) {
+  if (!merged || merged.length === 0) return null;
+  const x = merged.map((d) => d.ghi);
+  const y = merged.map((d) => d.pdc);
+  const { slope, intercept, r2 } = linearRegression(x, y);
+  const minX = Math.min(...x);
+  const maxX = Math.max(...x);
+  const lineX = [minX, maxX];
+  const lineY = [slope * minX + intercept, slope * maxX + intercept];
+
+  const traceScatter = {
+    x,
+    y,
+    type: "scattergl",
+    mode: "markers",
+    name: "Synced data",
+    marker: {
+      size: 8,
+      color: P,
+      opacity: 0.65,
+      line: { width: 1, color: "rgba(255,255,255,0.9)" },
+      symbol: "circle",
+    },
+    hovertemplate: "<b>GHI (synced)</b>: %{x:.2f}<br><b>P_DC</b>: %{y:.2f}<extra></extra>",
+  };
+
+  const traceLine = {
+    x: lineX,
+    y: lineY,
+    type: "scattergl",
+    mode: "lines",
+    name: `Trend (R² = ${r2.toFixed(3)})`,
+    line: { color: O, width: 2.5, dash: "solid" },
+    hovertemplate: "Trend: P_DC = %{y:.2f}<extra></extra>",
+  };
+
+  const layout = {
+    height: 360,
+    margin: { t: 32, r: 40, b: 56, l: 60 },
+    hovermode: "x unified",
+    showlegend: true,
+    legend: {
+      x: 1,
+      y: 1.02,
+      xanchor: "right",
+      yanchor: "bottom",
+      font: { family: FONT, size: 12, color: "#475569" },
+      bgcolor: "rgba(255,255,255,0.9)",
+      bordercolor: "#E2E8F0",
+      borderwidth: 1,
+    },
+    xaxis: {
+      title: {
+        text: "GHI (synced)",
+        font: { family: FONT, size: 13, color: "#334155", standoff: 10 },
+      },
+      gridcolor: "#E2E8F0",
+      zerolinecolor: "#E2E8F0",
+      zerolinewidth: 1,
+      tickfont: { family: MONO, size: 11, color: "#64748B" },
+      ticklen: 4,
+      showline: true,
+      linecolor: "#E2E8F0",
+      linewidth: 1,
+    },
+    yaxis: {
+      title: {
+        text: "P_DC",
+        font: { family: FONT, size: 13, color: "#334155", standoff: 10 },
+      },
+      gridcolor: "#E2E8F0",
+      zerolinecolor: "#E2E8F0",
+      zerolinewidth: 1,
+      tickfont: { family: MONO, size: 11, color: "#64748B" },
+      ticklen: 4,
+      showline: true,
+      linecolor: "#E2E8F0",
+      linewidth: 1,
+    },
+    plot_bgcolor: "#FAFBFC",
+    paper_bgcolor: "#fff",
+    font: { family: FONT },
+  };
+
+  return (
+    <div style={{
+      background: "#ffffff",
+      borderRadius: 16,
+      border: "1px solid #E2E8F0",
+      boxShadow: "0 18px 45px rgba(15, 23, 42, 0.10)",
+      padding: "16px 18px 20px",
+      display: "flex",
+      flexDirection: "column",
+      gap: 14,
+    }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+        <div style={{
+          width: 30,
+          height: 30,
+          borderRadius: 10,
+          background: `${P}12`,
+          border: `1px solid ${P}35`,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}>
+          <TimelineOutlined sx={{ fontSize: 18, color: P }} />
+        </div>
+        <div style={{ display: "flex", flexDirection: "column" }}>
+          <span style={{ fontFamily: FONT, fontSize: 14, fontWeight: 800, color: "#0F172A" }}>
+            Synced Data — Correlation
+          </span>
+          <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>
+            Correlation of P_DC vs GHI after applying time-shift rules.
+          </span>
+        </div>
+      </div>
+      <Plot
+        data={[traceScatter, traceLine]}
+        layout={layout}
+        config={{
+          displaylogo: false,
+          responsive: true,
+          modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d"],
+        }}
+        style={{ width: "100%" }}
+      />
+    </div>
+  );
+}
+
+function ColumnMultiSelect({ options, selected, onChange }) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef(null);
+  const popRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => {
+      if (btnRef.current && btnRef.current.contains(e.target)) return;
+      if (popRef.current && popRef.current.contains(e.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  const selectedLabels = useMemo(() => {
+    const map = new Map(options.map((o) => [o.index, o.header]));
+    return selected.map((i) => map.get(i)).filter(Boolean);
+  }, [options, selected]);
+
+  return (
+    <div style={{ position: "relative", minWidth: 260 }}>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 10,
+          padding: "8px 10px",
+          borderRadius: 10,
+          border: "1.5px solid #E2E8F0",
+          background: "#FAFBFC",
+          cursor: "pointer",
+          fontFamily: FONT,
+          color: "#0F172A",
+          fontSize: 13,
+          fontWeight: 650,
+        }}
+        title="Select columns"
+      >
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {selectedLabels.length === 0 ? "Select columns" : selectedLabels.slice(0, 2).join(", ")}
+          {selectedLabels.length > 2 ? ` +${selectedLabels.length - 2}` : ""}
+        </span>
+        <span style={{ display: "flex", alignItems: "center", color: "#94a3b8" }}>
+          {open ? <ExpandLessIcon sx={{ fontSize: 18 }} /> : <ExpandMoreIcon sx={{ fontSize: 18 }} />}
+        </span>
+      </button>
+
+      {open && (
+        <div
+          ref={popRef}
+          style={{
+            position: "absolute",
+            top: "calc(100% + 8px)",
+            right: 0,
+            zIndex: 20,
+            width: 340,
+            maxHeight: 320,
+            overflow: "auto",
+            background: "#fff",
+            border: "1px solid #E2E8F0",
+            borderRadius: 12,
+            boxShadow: "0 10px 30px rgba(2, 6, 23, 0.14)",
+            padding: 10,
+          }}
+        >
+          <div style={{ fontFamily: FONT, fontSize: 12, fontWeight: 700, color: "#64748B", padding: "2px 6px 8px" }}>
+            Columns
+          </div>
+          {options.map((opt) => {
+            const checked = selected.includes(opt.index);
+            return (
+              <button
+                key={opt.index}
+                type="button"
+                onClick={() => {
+                  const next = checked ? selected.filter((i) => i !== opt.index) : [...selected, opt.index];
+                  onChange(next.length ? next : [options[0].index]);
+                  setOpen(false); // collapse after selection
+                }}
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                  padding: "9px 10px",
+                  border: "none",
+                  background: checked ? "#EEF2FF" : "transparent",
+                  borderRadius: 10,
+                  cursor: "pointer",
+                  textAlign: "left",
+                }}
+              >
+                <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                  <span
+                    style={{
+                      width: 18,
+                      height: 18,
+                      borderRadius: 6,
+                      border: checked ? "none" : "1.5px solid #CBD5E1",
+                      background: checked ? "#8b5cf6" : "#fff",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {checked && <CheckCircleOutline sx={{ fontSize: 14, color: "#fff" }} />}
+                  </span>
+                  <span style={{ fontFamily: FONT, fontSize: 13, fontWeight: 650, color: "#0F172A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {opt.header}
+                  </span>
+                </span>
+                <span style={{ fontFamily: MONO, fontSize: 11, color: "#94a3b8" }}>
+                  #{opt.index}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function CSVChart({ title, color, headers, rows }) {
   const [expanded, setExpanded] = useState(true);
   const safeHeaders = Array.isArray(headers) ? headers : [];
@@ -452,9 +1249,14 @@ function CSVChart({ title, color, headers, rows }) {
       });
   }, [safeHeaders, safeRows]);
 
-  const [selectedIndices, setSelectedIndices] = useState(() =>
-    plottableCols.length > 0 ? [plottableCols[0].index] : []
-  );
+  const [selectedIndices, setSelectedIndices] = useState(() => {
+    // Prefer second column (index 1) as default y-series if available,
+    // otherwise fall back to the first plottable column.
+    if (safeHeaders.length > 1) {
+      return [1];
+    }
+    return plottableCols.length > 0 ? [plottableCols[0].index] : [];
+  });
 
   const xValues = useMemo(() => {
     if (safeRows.length === 0) return [];
@@ -504,29 +1306,12 @@ function CSVChart({ title, color, headers, rows }) {
             {title} — Chart
           </span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }} onClick={(e) => e.stopPropagation()}>
-          <div style={{ minWidth: 200 }}>
-            <select
-              multiple
-              value={selectedIndices.map(String)}
-              onChange={(e) => {
-                const opts = Array.from(e.target.selectedOptions, (o) => Number(o.value));
-                setSelectedIndices(opts.length ? opts : [plottableCols[0].index]);
-              }}
-              style={{
-                padding: "6px 12px", borderRadius: 8, border: "1.5px solid #E2E8F0",
-                fontSize: 13, fontFamily: FONT, fontWeight: 600, color: "#0F172A",
-                background: "#FAFBFC", cursor: "pointer", outline: "none", width: "100%",
-                minHeight: 36,
-              }}
-              title="Hold Ctrl/Cmd to select multiple columns"
-            >
-              {plottableCols.map(({ header, index }) => (
-                <option key={index} value={index}>{header}</option>
-              ))}
-            </select>
-            <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>Hold Ctrl/Cmd for multiple</div>
-          </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }} onClick={(e) => e.stopPropagation()}>
+          <ColumnMultiSelect
+            options={plottableCols}
+            selected={selectedIndices}
+            onChange={setSelectedIndices}
+          />
           {expanded
             ? <ExpandLessIcon sx={{ fontSize: 20, color: "#94a3b8" }} />
             : <ExpandMoreIcon sx={{ fontSize: 20, color: "#94a3b8" }} />
@@ -543,6 +1328,7 @@ function CSVChart({ title, color, headers, rows }) {
           layout={{
             height: 340,
             margin: { t: 20, r: 24, b: 50, l: 60 },
+            hovermode: "x unified",
             showlegend: chartData.length > 1,
             legend: { x: 1, y: 1, xanchor: "right", font: { family: FONT, size: 11 } },
             xaxis: {
@@ -680,12 +1466,13 @@ function SingleMonthGrid({ year, month, fromYmdStr, toYmdStr, onDayClick }) {
   );
 }
 
-function DateRangePickerPopover({ dateFrom, dateTo, onDateFromChange, onDateToChange, onClear, onApply, onCancel }) {
+function DateRangePickerPopover({ dateFrom, dateTo, onDateFromChange, onDateToChange, onClear, onApply, onCancel, accentColor = CALENDAR_PURPLE, compact = false, showHourHint = false }) {
   const today = new Date();
   const [pendingFrom, setPendingFrom] = useState(dateFrom || null);
   const [pendingTo, setPendingTo] = useState(dateTo || null);
   const [leftYear, setLeftYear] = useState(() => (dateFrom ? new Date(dateFrom).getFullYear() : today.getFullYear()));
   const [leftMonth, setLeftMonth] = useState(() => (dateFrom ? new Date(dateFrom).getMonth() : today.getMonth()));
+  const containerRef = useRef(null);
 
   useEffect(() => {
     setPendingFrom(dateFrom || null);
@@ -737,19 +1524,37 @@ function DateRangePickerPopover({ dateFrom, dateTo, onDateFromChange, onDateToCh
   const applyRangeInput = () => {
     const parsed = parseRangeText(rangeInput);
     if (parsed) {
-      setPendingFrom(parsed[0]);
-      setPendingTo(parsed[1]);
+      const [fromStr, toStr] = parsed;
+      setPendingFrom(fromStr);
+      setPendingTo(toStr);
+      if (onDateFromChange) onDateFromChange(fromStr);
+      if (onDateToChange) onDateToChange(toStr);
+      if (onApply) onApply();
     }
   };
 
+  useEffect(() => {
+    if (!onCancel) return;
+    const handleClickOutside = (e) => {
+      if (!containerRef.current) return;
+      if (!containerRef.current.contains(e.target)) {
+        onCancel();
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [onCancel]);
+
   return (
-    <div style={{
+    <div
+      ref={containerRef}
+      style={{
       background: "#fff",
       borderRadius: 12,
       border: "1px solid #e5e7eb",
       boxShadow: "0 10px 40px rgba(0,0,0,0.12)",
       overflow: "hidden",
-      minWidth: 480,
+      minWidth: compact ? 420 : 480,
     }}>
       <div style={{ padding: "12px 16px", borderBottom: "1px solid #e5e7eb", display: "flex", alignItems: "center", gap: 8 }}>
         <input
@@ -757,7 +1562,12 @@ function DateRangePickerPopover({ dateFrom, dateTo, onDateFromChange, onDateToCh
           value={rangeInput}
           onChange={(e) => setRangeInput(e.target.value)}
           onBlur={applyRangeInput}
-          onKeyDown={(e) => { if (e.key === "Enter") applyRangeInput(); }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              applyRangeInput();
+            }
+          }}
           placeholder="YYYY-MM-DD ~ YYYY-MM-DD"
           style={{ flex: 1, fontFamily: MONO, fontSize: 13, color: "#374151", padding: "8px 10px", border: "1px solid #e5e7eb", borderRadius: 8, outline: "none" }}
         />
@@ -768,36 +1578,38 @@ function DateRangePickerPopover({ dateFrom, dateTo, onDateFromChange, onDateToCh
         )}
       </div>
       <div style={{ display: "flex" }}>
-        <div style={{ width: 120, padding: "12px 8px", borderRight: "1px solid #e5e7eb" }}>
-          {QUICK_SELECTS.map(({ label, getRange }) => (
-            <button
-              key={label}
-              type="button"
-              onClick={() => {
-                const [from, to] = getRange();
-                setPendingFrom(from);
-                setPendingTo(to);
-              }}
-              style={{
-                display: "block",
-                width: "100%",
-                padding: "8px 10px",
-                marginBottom: 2,
-                textAlign: "left",
-                border: "none",
-                background: "none",
-                fontFamily: FONT,
-                fontSize: 12,
-                color: CALENDAR_PURPLE,
-                cursor: "pointer",
-                borderRadius: 6,
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-        <div style={{ flex: 1, display: "flex", gap: 20, padding: 16, justifyContent: "center" }}>
+        {!compact && (
+          <div style={{ width: 120, padding: "12px 8px", borderRight: "1px solid #e5e7eb" }}>
+            {QUICK_SELECTS.map(({ label, getRange }) => (
+              <button
+                key={label}
+                type="button"
+                onClick={() => {
+                  const [from, to] = getRange();
+                  setPendingFrom(from);
+                  setPendingTo(to);
+                }}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  padding: "8px 10px",
+                  marginBottom: 2,
+                  textAlign: "left",
+                  border: "none",
+                  background: "none",
+                  fontFamily: FONT,
+                  fontSize: 12,
+                  color: accentColor,
+                  cursor: "pointer",
+                  borderRadius: 6,
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+        <div style={{ flex: 1, display: "flex", gap: compact ? 12 : 20, padding: compact ? 12 : 16, justifyContent: "center" }}>
           <div>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8, gap: 8 }}>
               <button type="button" onClick={() => { if (leftMonth === 0) { setLeftMonth(11); setLeftYear((y) => y - 1); } else setLeftMonth((m) => m - 1); }} style={{ background: "none", border: "none", cursor: "pointer", padding: 4 }}><ChevronLeft sx={{ fontSize: 20, color: "#6b7280" }} /></button>
@@ -832,9 +1644,14 @@ function DateRangePickerPopover({ dateFrom, dateTo, onDateFromChange, onDateToCh
           </div>
         </div>
       </div>
+      {showHourHint && (
+        <div style={{ padding: "6px 16px 0", fontFamily: MONO, fontSize: 10, color: "#94a3b8" }}>
+          Hours are controlled via the shift (minutes) field. This calendar selects full days only.
+        </div>
+      )}
       <div style={{ padding: "12px 16px", borderTop: "1px solid #e5e7eb", display: "flex", justifyContent: "flex-end", gap: 8 }}>
         <button type="button" onClick={onCancel} style={{ padding: "8px 16px", borderRadius: 8, border: "1px solid #d1d5db", background: "#fff", fontFamily: FONT, fontSize: 13, fontWeight: 600, color: "#374151", cursor: "pointer" }}>Cancel</button>
-        <button type="button" onClick={() => { onDateFromChange(pendingFrom); onDateToChange(pendingTo); onApply(); }} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: CALENDAR_PURPLE, fontFamily: FONT, fontSize: 13, fontWeight: 600, color: "#fff", cursor: "pointer" }}>Apply</button>
+        <button type="button" onClick={() => { onDateFromChange(pendingFrom); onDateToChange(pendingTo); onApply(); }} style={{ padding: "8px 16px", borderRadius: 8, border: "none", background: accentColor, fontFamily: FONT, fontSize: 13, fontWeight: 600, color: "#fff", cursor: "pointer" }}>Apply</button>
       </div>
     </div>
   );
@@ -854,7 +1671,7 @@ function parseRangeTextBar(text) {
 }
 
 // ── Date filter bar: calendar only when icon clicked; editable text range ──────
-function DateFilterBar({ dateFrom, dateTo, onDateFromChange, onDateToChange, onClear, totalRows, filteredRows }) {
+function DateFilterBar({ dateFrom, dateTo, onDateFromChange, onDateToChange, onClear, totalRows, filteredRows, accentColor = CALENDAR_PURPLE }) {
   const hasFilter = dateFrom || dateTo;
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [rangeText, setRangeText] = useState(() => (dateFrom && dateTo) ? `${dateFrom} → ${dateTo}` : "");
@@ -897,8 +1714,8 @@ function DateFilterBar({ dateFrom, dateTo, onDateFromChange, onDateToChange, onC
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
         <div ref={triggerRef} style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }} onClick={() => setCalendarOpen((o) => !o)} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setCalendarOpen((o) => !o); }}>
-          <div style={{ width: 36, height: 36, borderRadius: 8, background: `${CALENDAR_PURPLE}14`, border: `1px solid ${CALENDAR_PURPLE}40`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <CalendarMonthOutlined sx={{ fontSize: 20, color: CALENDAR_PURPLE }} />
+          <div style={{ width: 36, height: 36, borderRadius: 8, background: `${accentColor}14`, border: `1px solid ${accentColor}40`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <CalendarMonthOutlined sx={{ fontSize: 20, color: accentColor }} />
           </div>
           <span style={{ fontSize: 14, fontWeight: 700, color: "#0F172A", fontFamily: FONT }}>Date range</span>
         </div>
@@ -950,6 +1767,7 @@ function DateFilterBar({ dateFrom, dateTo, onDateFromChange, onDateToChange, onC
             onClear={onClear}
             onApply={() => setCalendarOpen(false)}
             onCancel={() => setCalendarOpen(false)}
+            accentColor={accentColor}
           />
         </div>
       )}
@@ -1075,6 +1893,36 @@ function NestedObject({ obj }) {
   );
 }
 
+// ── Default time-sync rules (empty dates; user chooses) ───────────────────────
+const DEFAULT_SYNC_RULES = [
+  { id: 1, start: "", end: "", shiftMinutes: 0 },
+];
+
+// ── Cache keys for saved uploads (persist until user clears) ──────────────────
+const CACHE_PV = "pvcopilot_quality_pv";
+const CACHE_WEATHER = "pvcopilot_quality_weather";
+const CACHE_SYS = "pvcopilot_quality_sys";
+
+function loadCached(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveCache(key, value) {
+  try {
+    if (value == null) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(value));
+  } catch (e) {
+    if (e.name === "QuotaExceededError") {
+      try { localStorage.removeItem(key); } catch (_) {}
+    }
+  }
+}
+
 // ── Main Page ────────────────────────────────────────────────────────────────
 export default function QualityCheckPage() {
   const [pvFile, setPvFile] = useState(null);
@@ -1088,6 +1936,25 @@ export default function QualityCheckPage() {
   const [pvDateTo, setPvDateTo] = useState(null);
   const [weatherDateFrom, setWeatherDateFrom] = useState(null);
   const [weatherDateTo, setWeatherDateTo] = useState(null);
+  const [syncRules, setSyncRules] = useState(DEFAULT_SYNC_RULES);
+
+  useEffect(() => {
+    const pv = loadCached(CACHE_PV);
+    if (pv?.fileName && pv?.data) {
+      setPvFile(pv.fileName);
+      setPvData(pv.data);
+    }
+    const weather = loadCached(CACHE_WEATHER);
+    if (weather?.fileName && weather?.data) {
+      setWeatherFile(weather.fileName);
+      setWeatherData(weather.data);
+    }
+    const sys = loadCached(CACHE_SYS);
+    if (sys?.fileName && sys?.data) {
+      setSysFile(sys.fileName);
+      setSysData(sys.data);
+    }
+  }, []);
 
   const showToast = useCallback((message, type = "success") => {
     setToast({ message, type, key: Date.now() });
@@ -1137,16 +2004,54 @@ export default function QualityCheckPage() {
           </div>
         </div>
 
+        {/* Data Visualization card */}
+        <div style={{
+          background: "#ffffff",
+          borderRadius: 16,
+          border: "1px solid #E2E8F0",
+          boxShadow: "0 18px 45px rgba(15, 23, 42, 0.10)",
+          padding: "16px 18px 20px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+          marginTop: 28,
+          marginBottom: 20,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 2 }}>
+            <div style={{
+              width: 30,
+              height: 30,
+              borderRadius: 10,
+              background: `${P}12`,
+              border: `1px solid ${P}35`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}>
+              <ShowChartOutlined sx={{ fontSize: 18, color: P }} />
+            </div>
+            <div style={{ display: "flex", flexDirection: "column" }}>
+              <span style={{ fontFamily: FONT, fontSize: 14, fontWeight: 800, color: "#0F172A" }}>
+                Data Visualization
+              </span>
+              <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>
+                Load CSV and JSON files below to explore tables and charts.
+              </span>
+            </div>
+          </div>
+        </div>
+
         {/* Upload Section */}
         <div style={{
           display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16,
-          marginTop: 28, marginBottom: 32,
+          marginTop: 0,
+          marginBottom: 32,
         }}>
           <UploadZone
             label="PV Data (CSV)"
-            icon={<SolarPowerOutlined sx={{ fontSize: 24, color: P }} />}
+            icon={<SolarPowerOutlined sx={{ fontSize: 24, color: O }} />}
             accept=".csv"
-            color={P}
+            color={O}
             file={pvFile}
             onFileUpload={async (file) => {
               try {
@@ -1169,6 +2074,7 @@ export default function QualityCheckPage() {
                 }
                 setPvFile(file.name);
                 setPvData(data);
+                saveCache(CACHE_PV, { fileName: file.name, data });
                 const msg = data.resampled
                   ? `PV data loaded — ${data.resampledRows} hourly rows (from ${data.originalRows} original)`
                   : `PV data loaded — ${data.rows.length} rows, ${data.headers.length} columns`;
@@ -1177,7 +2083,10 @@ export default function QualityCheckPage() {
                 showToast(`Failed to process "${file.name}": ${err.message}`, "error");
               }
             }}
-            onClear={() => { setPvFile(null); setPvData(null); setPvDateFrom(null); setPvDateTo(null); }}
+            onClear={() => {
+              setPvFile(null); setPvData(null); setPvDateFrom(null); setPvDateTo(null);
+              saveCache(CACHE_PV, null);
+            }}
             onError={(msg) => showToast(msg, "error")}
           />
           <UploadZone
@@ -1207,6 +2116,7 @@ export default function QualityCheckPage() {
                 }
                 setWeatherFile(file.name);
                 setWeatherData(data);
+                saveCache(CACHE_WEATHER, { fileName: file.name, data });
                 const msg = data.resampled
                   ? `Weather data loaded — ${data.resampledRows} hourly rows (from ${data.originalRows} original)`
                   : `Weather data loaded — ${data.rows.length} rows, ${data.headers.length} columns`;
@@ -1215,7 +2125,10 @@ export default function QualityCheckPage() {
                 showToast(`Failed to process "${file.name}": ${err.message}`, "error");
               }
             }}
-            onClear={() => { setWeatherFile(null); setWeatherData(null); setWeatherDateFrom(null); setWeatherDateTo(null); }}
+            onClear={() => {
+              setWeatherFile(null); setWeatherData(null); setWeatherDateFrom(null); setWeatherDateTo(null);
+              saveCache(CACHE_WEATHER, null);
+            }}
             onError={(msg) => showToast(msg, "error")}
           />
           <UploadZone
@@ -1235,9 +2148,13 @@ export default function QualityCheckPage() {
                 return;
               }
               setSysFile(name); setSysData(parsed);
+              saveCache(CACHE_SYS, { fileName: name, data: parsed });
               showToast(`System info loaded — ${Object.keys(parsed).length} fields`);
             }}
-            onClear={() => { setSysFile(null); setSysData(null); }}
+            onClear={() => {
+              setSysFile(null); setSysData(null);
+              saveCache(CACHE_SYS, null);
+            }}
             onError={(msg) => showToast(msg, "error")}
           />
         </div>
@@ -1255,8 +2172,42 @@ export default function QualityCheckPage() {
         )}
 
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+          {sysData && (
+            <JSONList data={sysData} />
+          )}
           {pvData && (
-            <>
+            <div style={{
+              background: "#ffffff",
+              borderRadius: 16,
+              border: "1px solid #E2E8F0",
+              boxShadow: "0 18px 45px rgba(15, 23, 42, 0.10)",
+              padding: "16px 18px 20px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 14,
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 2 }}>
+                <div style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 10,
+                  background: `${O}12`,
+                  border: `1px solid ${O}35`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}>
+                  <SolarPowerOutlined sx={{ fontSize: 18, color: O }} />
+                </div>
+                <div style={{ display: "flex", flexDirection: "column" }}>
+                  <span style={{ fontFamily: FONT, fontSize: 14, fontWeight: 800, color: "#0F172A" }}>
+                    PV Data Analysis
+                  </span>
+                  <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>
+                    Explore, filter, and visualize PV performance data.
+                  </span>
+                </div>
+              </div>
               <DateFilterBar
                 dateFrom={pvDateFrom}
                 dateTo={pvDateTo}
@@ -1264,12 +2215,13 @@ export default function QualityCheckPage() {
                 onDateToChange={setPvDateTo}
                 onClear={() => { setPvDateFrom(null); setPvDateTo(null); }}
                 totalRows={pvData?.rows?.length ?? 0}
-                  filteredRows={pvFilteredRows.length}
+                filteredRows={pvFilteredRows.length}
+                accentColor={O}
               />
               <CSVTable
                 title="PV Data"
-                icon={<SolarPowerOutlined sx={{ fontSize: 20, color: P }} />}
-                color={P}
+                icon={<SolarPowerOutlined sx={{ fontSize: 20, color: O }} />}
+                color={O}
                 headers={pvData.headers}
                 rows={pvFilteredRows}
                 resampled={pvData.resampled}
@@ -1277,14 +2229,45 @@ export default function QualityCheckPage() {
               />
               <CSVChart
                 title="PV Data"
-                color={P}
+                color={O}
                 headers={pvData.headers}
                 rows={pvFilteredRows}
               />
-            </>
+            </div>
           )}
           {weatherData && (
-            <>
+            <div style={{
+              background: "#ffffff",
+              borderRadius: 16,
+              border: "1px solid #E2E8F0",
+              boxShadow: "0 18px 45px rgba(15, 23, 42, 0.10)",
+              padding: "16px 18px 20px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 14,
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 2 }}>
+                <div style={{
+                  width: 30,
+                  height: 30,
+                  borderRadius: 10,
+                  background: `${B}12`,
+                  border: `1px solid ${B}35`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}>
+                  <WbSunnyOutlined sx={{ fontSize: 18, color: B }} />
+                </div>
+                <div style={{ display: "flex", flexDirection: "column" }}>
+                  <span style={{ fontFamily: FONT, fontSize: 14, fontWeight: 800, color: "#0F172A" }}>
+                    Weather Data Analysis
+                  </span>
+                  <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>
+                    Correlate irradiance and climate with plant output.
+                  </span>
+                </div>
+              </div>
               <DateFilterBar
                 dateFrom={weatherDateFrom}
                 dateTo={weatherDateTo}
@@ -1292,7 +2275,8 @@ export default function QualityCheckPage() {
                 onDateToChange={setWeatherDateTo}
                 onClear={() => { setWeatherDateFrom(null); setWeatherDateTo(null); }}
                 totalRows={weatherData?.rows?.length ?? 0}
-                  filteredRows={weatherFilteredRows.length}
+                filteredRows={weatherFilteredRows.length}
+                accentColor={B}
               />
               <CSVTable
                 title="Weather Data"
@@ -1309,10 +2293,425 @@ export default function QualityCheckPage() {
                 headers={weatherData.headers}
                 rows={weatherFilteredRows}
               />
-            </>
+            </div>
           )}
-          {sysData && (
-            <JSONList data={sysData} />
+
+          {/* Data Synchronization section */}
+          <div style={{
+            background: "#ffffff",
+            borderRadius: 16,
+            border: "1px solid #E2E8F0",
+            boxShadow: "0 18px 45px rgba(15, 23, 42, 0.10)",
+            padding: "16px 18px 20px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 14,
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 2 }}>
+              <div style={{
+                width: 30,
+                height: 30,
+                borderRadius: 10,
+                background: `${P}12`,
+                border: `1px solid ${P}35`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+              }}>
+                <SyncAltOutlined sx={{ fontSize: 18, color: P }} />
+              </div>
+              <div style={{ display: "flex", flexDirection: "column" }}>
+                <span style={{ fontFamily: FONT, fontSize: 14, fontWeight: 800, color: "#0F172A" }}>
+                  Data Synchronization
+                </span>
+                <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>
+                  Align PV and weather time series for combined analysis.
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Dual-axis chart: P_DC (PV) + GHI (Weather) */}
+          {pvData && weatherData && (
+            <>
+              <SyncChart
+                pvHeaders={pvData.headers}
+                pvRows={pvFilteredRows}
+                weatherHeaders={weatherData.headers}
+                weatherRows={weatherFilteredRows}
+              />
+              <CorrelationChart
+                pvHeaders={pvData.headers}
+                pvRows={pvFilteredRows}
+                weatherHeaders={weatherData.headers}
+                weatherRows={weatherFilteredRows}
+              />
+              {/* Editable sync rules (start, end, shift minutes) */}
+              <div style={{
+                marginTop: 12,
+                padding: "10px 12px",
+                borderRadius: 12,
+                border: "1px dashed #E2E8F0",
+                background: "#F8FAFC",
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontFamily: FONT, fontSize: 12, fontWeight: 600, color: "#475569" }}>
+                    Time sync rules (editable)
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const last = syncRules[syncRules.length - 1];
+                      const nextId = (last?.id ?? 0) + 1;
+                      setSyncRules([
+                        ...syncRules,
+                        {
+                          id: nextId,
+                          start: last?.start ?? "2025-01-01 00:00",
+                          end: last?.end ?? "2025-12-31 23:59",
+                          shiftMinutes: last?.shiftMinutes ?? 0,
+                        },
+                      ]);
+                    }}
+                    style={{
+                      borderRadius: 999,
+                      border: "1px solid #CBD5F5",
+                      background: "#EEF2FF",
+                      padding: "2px 10px",
+                      fontFamily: FONT,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: "#4F46E5",
+                      cursor: "pointer",
+                    }}
+                  >
+                    + Add rule
+                  </button>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 180, overflowY: "auto" }}>
+                  {syncRules.map((rule, idx) => (
+                    <div
+                      key={rule.id}
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "minmax(0, 1.6fr) 80px 26px",
+                        gap: 6,
+                        alignItems: "center",
+                      }}
+                    >
+                      <SyncRuleRangeEditor
+                        rule={rule}
+                        onChange={(updated) => {
+                          const next = [...syncRules];
+                          next[idx] = updated;
+                          setSyncRules(next);
+                        }}
+                      />
+                      <input
+                        type="number"
+                        value={rule.shiftMinutes}
+                        onChange={(e) => {
+                          const next = [...syncRules];
+                          const minutes = Number(e.target.value);
+                          next[idx] = { ...next[idx], shiftMinutes: Number.isNaN(minutes) ? 0 : minutes };
+                          setSyncRules(next);
+                        }}
+                        placeholder="+/- minutes"
+                        style={{
+                          fontFamily: MONO,
+                          fontSize: 11,
+                          padding: "6px 8px",
+                          borderRadius: 8,
+                          border: "1px solid #CBD5F5",
+                          background: "#F9FAFB",
+                          color: "#0F172A",
+                          outline: "none",
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (syncRules.length === 1) return;
+                          setSyncRules(syncRules.filter((r) => r.id !== rule.id));
+                        }}
+                        style={{
+                          border: "none",
+                          background: "transparent",
+                          cursor: syncRules.length === 1 ? "not-allowed" : "pointer",
+                          color: syncRules.length === 1 ? "#CBD5E1" : "#94a3b8",
+                          fontSize: 14,
+                        }}
+                        aria-label="Remove rule"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* Synced data section: apply rules, merge, and visualize */}
+              {(() => {
+                try {
+                  const pvH = Array.isArray(pvData.headers) ? pvData.headers : [];
+                  const whH = Array.isArray(weatherData.headers) ? weatherData.headers : [];
+                  const timeColPvIdx = pvH.length > 0 ? 0 : -1;
+                  const timeColWhIdx = whH.length > 0 ? 0 : -1;
+                  const pdcIdx = findColIndex(pvH, "P_DC", "P DC", "PDC");
+                  const ghiIdx = findColIndex(whH, "GHI", "Ghi");
+                  if (timeColPvIdx < 0 || timeColWhIdx < 0 || pdcIdx < 0 || ghiIdx < 0) return null;
+
+                  const pvTimes = pvFilteredRows.map((r) => (Array.isArray(r) ? r[timeColPvIdx] : ""));
+                  const whTimesShifted = applySyncRulesToTimes(
+                    weatherFilteredRows.map((r) => (Array.isArray(r) ? r[timeColWhIdx] : "")),
+                    syncRules,
+                  );
+
+                  const whMap = new Map();
+                  whTimesShifted.forEach((t, i) => {
+                    const row = weatherFilteredRows[i];
+                    if (!Array.isArray(row) || !t) return;
+                    whMap.set(t, row);
+                  });
+
+                  const merged = [];
+                  pvTimes.forEach((t, i) => {
+                    const pvRow = pvFilteredRows[i];
+                    if (!Array.isArray(pvRow) || !t) return;
+                    const pdcRaw = pvRow[pdcIdx];
+                    const pdcVal = parseFloat(pdcRaw);
+                    if (Number.isNaN(pdcVal) || !Number.isFinite(pdcVal)) return;
+                    const whRow = whMap.get(t);
+                    if (!Array.isArray(whRow)) return;
+                    const ghiRaw = whRow[ghiIdx];
+                    const ghiVal = parseFloat(ghiRaw);
+                    if (Number.isNaN(ghiVal) || !Number.isFinite(ghiVal)) return;
+                    merged.push({ time: t, pdc: pdcVal, ghi: ghiVal, pvRow, whRow });
+                  });
+
+                  if (merged.length === 0) return null;
+
+                  const xs = merged.map((d) => d.ghi);
+                  const ys = merged.map((d) => d.pdc);
+                  const stats = xs.length >= 2 ? linearRegression(xs, ys) : { r2: 0 };
+                  const r2Display = Number.isFinite(stats.r2) ? stats.r2.toFixed(3) : "0.000";
+                  // Correlation before syncing (raw alignment by exact timestamp)
+                  const rawTimeToGhi = new Map();
+                  weatherFilteredRows.forEach((row) => {
+                    if (!Array.isArray(row)) return;
+                    const t = String(row[timeColWhIdx] ?? "").trim();
+                    const gRaw = row[ghiIdx];
+                    const gVal = parseFloat(gRaw);
+                    if (!t || Number.isNaN(gVal) || !Number.isFinite(gVal)) return;
+                    rawTimeToGhi.set(t, gVal);
+                  });
+                  const baseXs = [];
+                  const baseYs = [];
+                  pvFilteredRows.forEach((row) => {
+                    if (!Array.isArray(row)) return;
+                    const t = String(row[timeColPvIdx] ?? "").trim();
+                    const pRaw = row[pdcIdx];
+                    const pVal = parseFloat(pRaw);
+                    if (!t || Number.isNaN(pVal) || !Number.isFinite(pVal)) return;
+                    const gVal = rawTimeToGhi.get(t);
+                    if (gVal == null) return;
+                    baseXs.push(gVal);
+                    baseYs.push(pVal);
+                  });
+                  const baseStats = baseXs.length >= 2 ? linearRegression(baseXs, baseYs) : { r2: 0 };
+                  const r2Before = Number.isFinite(baseStats.r2) ? baseStats.r2.toFixed(3) : "0.000";
+
+                  const times = merged.map((d) => d.time);
+                  const windowLabel = times.length
+                    ? `${times[0]} → ${times[times.length - 1]}`
+                    : "n/a";
+
+                  return (
+                    <>
+                      <SyncedLineChart merged={merged} />
+                      <SyncedCorrelationChart merged={merged} />
+                      <div style={{
+                        marginTop: 12,
+                        background: "#ffffff",
+                        borderRadius: 16,
+                        border: "1px solid #E2E8F0",
+                        boxShadow: "0 18px 45px rgba(15, 23, 42, 0.10)",
+                        padding: "14px 18px 16px",
+                        display: "flex",
+                        flexDirection: "row",
+                        alignItems: "stretch",
+                        gap: 16,
+                      }}>
+                        <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 12 }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                            <div style={{
+                              width: 26,
+                              height: 26,
+                              borderRadius: 9,
+                              background: `${P}10`,
+                              border: `1px solid ${P}26`,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                            }}>
+                              <SyncAltOutlined sx={{ fontSize: 16, color: P }} />
+                            </div>
+                            <span style={{ fontFamily: FONT, fontSize: 13, fontWeight: 700, color: "#0F172A" }}>
+                              Synced Data Summary
+                            </span>
+                            <span style={{ fontFamily: FONT, fontSize: 11, color: "#64748B" }}>
+                              {merged.length} matched points
+                            </span>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "stretch", gap: 16 }}>
+                            <div style={{
+                              background: "#fff",
+                              borderRadius: 12,
+                              border: "1px solid #E2E8F0",
+                              overflow: "hidden",
+                              flex: "0 0 auto",
+                              width: 260,
+                            }}>
+                              <div style={{
+                                display: "grid",
+                                gridTemplateColumns: "1fr auto",
+                                borderBottom: "1px solid #E2E8F0",
+                              }}>
+                                <div style={{ padding: "10px 14px", fontFamily: FONT, fontSize: 12, color: "#64748B", display: "flex", alignItems: "center", gap: 6 }}>
+                                  <span>Correlation before</span>
+                                </div>
+                                <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+                                  <span style={{
+                                    fontFamily: FONT,
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    color: "#7f1d1d",
+                                    background: "#F0BFC2",
+                                    padding: "4px 12px",
+                                    borderRadius: 999,
+                                  }}>
+                                    {(Number(r2Before) * 100).toFixed(1)}%
+                                  </span>
+                                </div>
+                              </div>
+                              <div style={{
+                                display: "grid",
+                                gridTemplateColumns: "1fr auto",
+                              }}>
+                                <div style={{ padding: "10px 14px", fontFamily: FONT, fontSize: 12, color: "#64748B", display: "flex", alignItems: "center", gap: 6 }}>
+                                  <span>Correlation after</span>
+                                </div>
+                                <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+                                  <span style={{
+                                    fontFamily: FONT,
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    color: "#166534",
+                                    background: "#E0FDC7",
+                                    padding: "4px 12px",
+                                    borderRadius: 999,
+                                  }}>
+                                    {(Number(r2Display) * 100).toFixed(1)}%
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+                              <span style={{ fontFamily: FONT, fontSize: 12, fontWeight: 700, color: "#0F172A", display: "block", marginBottom: 6 }}>
+                                Data windows shifted
+                              </span>
+                              <div style={{
+                                flex: 1,
+                                background: "#fff",
+                                borderRadius: 12,
+                                border: "1px solid #E2E8F0",
+                                padding: "10px 14px",
+                                fontFamily: MONO,
+                                fontSize: 10,
+                                color: "#64748B",
+                                lineHeight: 1.6,
+                                overflowX: "auto",
+                                minWidth: 0,
+                              }}>
+                                <div style={{ whiteSpace: "nowrap" }}>Data window: {windowLabel}</div>
+                                {syncRules.length === 0 ? (
+                                  <div>No sync rules applied.</div>
+                                ) : (
+                                  syncRules.map((r) => (
+                                    <div key={r.id} style={{ whiteSpace: "nowrap" }}>
+                                      {r.start || "…"} → {r.end || "…"} · shift {r.shiftMinutes || 0} min
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{
+                          flex: 1,
+                          display: "flex",
+                          justifyContent: "flex-end",
+                          alignItems: "center",
+                          minHeight: 0,
+                        }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const pvHeader = pvH;
+                              const whNonTime = whH
+                                .map((name, idx) => ({ name, idx }))
+                                .filter(({ idx }) => idx !== timeColWhIdx);
+                              const header = pvHeader.concat(
+                                whNonTime.map(({ name }) => `weather_${name}`),
+                              );
+                              const lines = [header.join(",")].concat(
+                                merged.map((row) => {
+                                  const pvVals = pvHeader.map((_, idx) =>
+                                    Array.isArray(row.pvRow) ? (row.pvRow[idx] ?? "") : "",
+                                  );
+                                  const whVals = whNonTime.map(({ idx }) =>
+                                    Array.isArray(row.whRow) ? (row.whRow[idx] ?? "") : "",
+                                  );
+                                  return pvVals.concat(whVals).join(",");
+                                }),
+                              );
+                              const csv = lines.join("\n");
+                              const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+                              const url = URL.createObjectURL(blob);
+                              const a = document.createElement("a");
+                              a.href = url;
+                              a.download = "synced_merged_data.csv";
+                              document.body.appendChild(a);
+                              a.click();
+                              document.body.removeChild(a);
+                              URL.revokeObjectURL(url);
+                            }}
+                            style={{
+                              padding: "6px 14px",
+                              borderRadius: 999,
+                              border: "1px solid #CBD5F5",
+                              background: "#EEF2FF",
+                              fontFamily: FONT,
+                              fontSize: 11,
+                              fontWeight: 600,
+                              color: "#4F46E5",
+                              cursor: "pointer",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            Download synced CSV
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  );
+                } catch {
+                  return null;
+                }
+              })()}
+            </>
           )}
         </div>
       </div>

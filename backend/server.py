@@ -6,6 +6,8 @@ Runs on port 5001. Accepts PDF uploads and CSV processing requests.
 import os
 import io
 import tempfile
+from datetime import datetime, timedelta
+
 import pandas as pd
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -13,6 +15,53 @@ from pvsyst_parser import parse_pvsyst_pdf
 
 app = Flask(__name__)
 CORS(app)
+
+
+# ── Time synchronization utility (PV / Weather alignment) ───────────────────────
+#
+# NOTE:
+# The concrete date ranges and shifts are now managed on the frontend UI.
+# Here we keep a placeholder list so the helper can still be used if needed.
+
+SYNC_RULES = [
+    # (start_datetime, end_datetime, timedelta_shift)
+    # Example:
+    # (datetime(2018, 3, 25), datetime(2018, 5, 16, 23, 59), timedelta(hours=1)),
+]
+
+
+def apply_time_sync(df: pd.DataFrame, time_col: str = "time",
+                    rules=SYNC_RULES) -> pd.DataFrame:
+    """
+    Apply pre-defined time shift rules to a DataFrame.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Input DataFrame containing a time column.
+    time_col : str, default 'time'
+        Name of the time column to adjust.
+    rules : sequence of (start_dt, end_dt, timedelta)
+        Rules describing how much to shift timestamps within a given window.
+    """
+
+    if time_col not in df.columns:
+        return df
+
+    # Ensure datetime dtype
+    times = pd.to_datetime(df[time_col], errors="coerce")
+
+    def sync_time(ts: pd.Timestamp):
+        if pd.isna(ts):
+            return ts
+        for start, end, shift in rules:
+            if start <= ts.to_pydatetime() <= end:
+                return ts + shift
+        return ts
+
+    df = df.copy()
+    df[time_col] = times.apply(sync_time)
+    return df
 
 @app.route("/api/parse-pvsyst", methods=["POST"])
 def parse_pvsyst():
