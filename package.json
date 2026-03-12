@@ -1,0 +1,30 @@
+{
+  "name": "pvcopilot",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "backend": "cd backend && python3 server.py"
+  },
+  "dependencies": {
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/icons-material": "^7.3.9",
+    "@mui/material": "^7.3.9",
+    "apexcharts": "^5.10.3",
+    "plotly.js-dist-min": "^3.4.0",
+    "react": "^19.1.0",
+    "react-apexcharts": "^2.1.0",
+    "react-dom": "^19.1.0",
+    "react-plotly.js": "^2.6.0",
+    "react-router-dom": "^7.5.0",
+    "react-tsparticles": "^2.12.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.5.2",
+    "vite": "^6.3.5"
+  }
+}

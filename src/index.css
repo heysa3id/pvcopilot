@@ -1,0 +1,110 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{font-size:14px}
+body{background:#FFFFFF;font-family:'Inter',system-ui,sans-serif}
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-track{background:#F8FAFC}
+::-webkit-scrollbar-thumb{background:#CBD5E1;border-radius:3px}
+
+@keyframes fadeUp{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:translateY(0)}}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+@keyframes heroOrbFloat{
+  0%{transform:translate3d(0,0,0) scale(1);opacity:.85}
+  50%{transform:translate3d(0,-14px,0) scale(1.04);opacity:1}
+  100%{transform:translate3d(0,0,0) scale(1);opacity:.85}
+}
+@keyframes heroGridDrift{
+  0%{background-position:0 0,0 0}
+  100%{background-position:60px 60px,60px 60px}
+}
+@keyframes heroShapeDrift{
+  0%{transform:translate3d(0,0,0) rotate(12deg);}
+  50%{transform:translate3d(10px,-8px,0) rotate(18deg);}
+  100%{transform:translate3d(0,0,0) rotate(12deg);}
+}
+@keyframes solarSweep{
+  0%  { transform: translateX(-120%) skewX(-18deg); opacity: 0; }
+  8%  { opacity: 1; }
+  92% { opacity: 1; }
+  100%{ transform: translateX(220%) skewX(-18deg); opacity: 0; }
+}
+@keyframes solarGlow{
+  0%,100%{ opacity: 0; }
+  10%,90%{ opacity: .18; }
+  50%    { opacity: .32; }
+}
+.hero-solar-sweep{
+  position:absolute; inset:0; pointer-events:none; overflow:hidden; z-index:0;
+}
+.hero-solar-sweep::before{
+  content:"";
+  position:absolute; top:-20%; left:0;
+  width:18%; height:140%;
+  background: linear-gradient(
+    105deg,
+    transparent 0%,
+    rgba(255,184,0,.04) 30%,
+    rgba(255,220,100,.22) 50%,
+    rgba(255,184,0,.04) 70%,
+    transparent 100%
+  );
+  filter: blur(8px);
+  animation: solarSweep 6s cubic-bezier(.45,0,.55,1) infinite;
+  animation-delay: 1.2s;
+}
+.hero-solar-sweep::after{
+  content:"";
+  position:absolute; inset:0;
+  background: radial-gradient(ellipse 60% 40% at 50% 50%, rgba(255,184,0,.07) 0%, transparent 70%);
+  animation: solarGlow 6s ease-in-out infinite;
+  animation-delay: 1.2s;
+}
+.fu{animation:fadeUp .45s ease both}
+.fu1{animation-delay:.08s}.fu2{animation-delay:.16s}.fu3{animation-delay:.24s}
+
+input[type=number]{background:#FFFFFF;border:1.5px solid #E2E8F0;color:#0F172A;
+  border-radius:8px;padding:7px 10px;font-family:'JetBrains Mono',monospace;
+  font-size:12px;width:100%;outline:none;transition:border-color .2s;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+input[type=number]:focus{border-color:#FFB800;box-shadow:0 0 0 3px rgba(232,160,32,.12)}
+input[type=number]::-webkit-inner-spin-button{opacity:.3}
+
+input[type=range]{-webkit-appearance:none;width:100%;height:3px;
+  background:#E2E8F0;border-radius:2px;outline:none}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:16px;height:16px;
+  border-radius:50%;background:#FFB800;cursor:pointer;box-shadow:0 2px 6px rgba(255,184,0,.4);border:2px solid #fff}
+
+select{background:#FFFFFF;border:1.5px solid #E2E8F0;color:#0F172A;
+  border-radius:8px;padding:7px 10px;font-family:'JetBrains Mono',monospace;
+  font-size:12px;width:100%;outline:none;cursor:pointer;transition:border-color .2s;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+select:focus{border-color:#FFB800}
+
+.tab{padding:8px 16px;border:none;cursor:pointer;background:transparent;color:#64748B;
+  font-family:'Inter',system-ui,sans-serif;font-size:11px;font-weight:700;letter-spacing:.08em;
+  text-transform:uppercase;border-radius:8px;transition:all .2s}
+.tab.active{background:#FFB800;color:#FFFFFF;box-shadow:0 2px 8px rgba(255,184,0,.3)}
+.tab:hover:not(.active){color:#0F172A;background:#FFF8E1}
+
+.left-panel{
+  width:360px;
+  flex-shrink:0;
+  position:sticky;
+  top:20px;
+  max-height:calc(100vh - 40px);
+  overflow-y:auto;
+  scrollbar-width:thin;
+}
+
+.kpi-grid{
+  display:grid;
+  grid-template-columns:1.5fr 1fr 1fr 1fr 1fr;
+  gap:12px;
+  align-items:stretch;
+}
+
+.team-card{display:flex;flex-direction:row;align-items:stretch}
+.team-card-image{width:min(38%,320px);min-height:200px}
+@media (max-width:640px){
+  .team-card{flex-direction:column}
+  .team-card-image{width:100%;min-height:200px}
+}
