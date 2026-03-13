@@ -249,9 +249,26 @@ function Spinner({ color, size = 20 }) {
 }
 
 // ── Backend CSV Processing ───────────────────────────────────────────────────
-const API_BASE = "http://localhost:5001";
+const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5001";
+
+/** True when app is served from a non-local host (e.g. GitHub Pages). */
+function isOnlineDemo() {
+  if (typeof window === "undefined") return false;
+  const h = window.location?.hostname || "";
+  return h !== "localhost" && h !== "127.0.0.1";
+}
+
+/** Use backend for CSV only when we have a non-local API or are on localhost. */
+function shouldUseBackendForCsv() {
+  const hasRemoteApi = API_BASE && !API_BASE.includes("localhost");
+  return hasRemoteApi || !isOnlineDemo();
+}
 
 async function processCSVFile(file) {
+  if (!shouldUseBackendForCsv()) {
+    const text = await readFileAsText(file);
+    return processCSVFileClientSide(text);
+  }
   let res;
   const formData = new FormData();
   formData.append("file", file);

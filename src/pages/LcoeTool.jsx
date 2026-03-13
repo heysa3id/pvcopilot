@@ -176,7 +176,16 @@ const PARSER_URL = import.meta.env.VITE_PARSER_URL || "http://localhost:5001/api
 const PARSER_UNAVAILABLE_MSG =
   "Load PVsyst Report is not available in the online demo (parser backend is not running). Run the app locally (see README) or enter values manually.";
 
+function isOnlineDemo() {
+  if (typeof window === "undefined") return false;
+  const h = window.location?.hostname || "";
+  return h !== "localhost" && h !== "127.0.0.1";
+}
+
 async function parsePVsystPDF(file) {
+  if (isOnlineDemo() && PARSER_URL.includes("localhost")) {
+    throw new Error(PARSER_UNAVAILABLE_MSG);
+  }
   const formData = new FormData();
   formData.append("file", file);
   let response;
