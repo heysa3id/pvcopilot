@@ -1350,7 +1350,7 @@ function ColumnMultiSelect({ options, selected, onChange }) {
   );
 }
 
-function CSVChart({ title, color, headers, rows }) {
+function CSVChart({ title, color, headers, rows, defaultYHeader }) {
   const [expanded, setExpanded] = useState(true);
   const safeHeaders = Array.isArray(headers) ? headers : [];
   const safeRows = Array.isArray(rows) ? rows : [];
@@ -1372,11 +1372,18 @@ function CSVChart({ title, color, headers, rows }) {
   }, [safeHeaders, safeRows]);
 
   const [selectedIndices, setSelectedIndices] = useState(() => {
-    // Prefer second column (index 1) as default y-series if available,
-    // otherwise fall back to the first plottable column.
-    if (safeHeaders.length > 1) {
-      return [1];
+    // If a preferred default header is provided (e.g. "P_DC" for PV data),
+    // and it exists beyond the time column, select it.
+    if (defaultYHeader && safeHeaders.length > 1) {
+      const target = String(defaultYHeader).trim().toLowerCase();
+      const idx = safeHeaders.findIndex(
+        (h, i) => i > 0 && String(h ?? "").trim().toLowerCase() === target,
+      );
+      if (idx > 0) return [idx];
     }
+    // Otherwise prefer second column (index 1) as default y-series if available,
+    // or fall back to the first plottable numeric column.
+    if (safeHeaders.length > 1) return [1];
     return plottableCols.length > 0 ? [plottableCols[0].index] : [];
   });
 
@@ -2015,7 +2022,7 @@ function NestedObject({ obj }) {
   );
 }
 
-// ── Default time-sync rules (empty dates; user chooses) ───────────────────────
+// ── Default time-sync rules (will be auto-filled from merged data window) ────
 const DEFAULT_SYNC_RULES = [
   { id: 1, start: "", end: "", shiftMinutes: 0 },
 ];
@@ -2420,6 +2427,7 @@ export default function QualityCheckPage() {
                 color={O}
                 headers={pvData.headers}
                 rows={pvFilteredRows}
+                defaultYHeader="P_DC"
               />
             </div>
           )}
@@ -2535,20 +2543,75 @@ export default function QualityCheckPage() {
                 weatherRows={weatherFilteredRows}
               />
               {/* Editable sync rules (start, end, shift minutes) */}
-              <div style={{
-                marginTop: 12,
-                padding: "10px 12px",
-                borderRadius: 12,
-                border: "1px dashed #E2E8F0",
-                background: "#F8FAFC",
-                display: "flex",
-                flexDirection: "column",
-                gap: 8,
-              }}>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <span style={{ fontFamily: FONT, fontSize: 12, fontWeight: 600, color: "#475569" }}>
-                    Time sync rules (editable)
-                  </span>
+              <div
+                style={{
+                  marginTop: 16,
+                  padding: "12px 14px",
+                  borderRadius: 12,
+                  border: "1px solid #E2E8F0",
+                  background: "#FFFFFF",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 10,
+                  boxShadow:
+                    "0 0 0 1px rgba(148, 163, 184, 0.18), 0 8px 18px rgba(15, 23, 42, 0.06)",
+                }}
+              >
+                <div
+                  style={{
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 10,
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div
+                      style={{
+                        width: 26,
+                        height: 26,
+                        borderRadius: 999,
+                        background: "#EEF2FF",
+                        border: "1px solid #C7D2FE",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        boxShadow: "0 0 0 1px rgba(129, 140, 248, 0.25)",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontFamily: MONO,
+                          fontSize: 13,
+                          color: "#4F46E5",
+                        }}
+                      >
+                        Δt
+                      </span>
+                    </div>
+                    <div>
+                      <div
+                        style={{
+                          fontFamily: FONT,
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: "#1F2937",
+                        }}
+                      >
+                        Time sync rules
+                      </div>
+                      <div
+                        style={{
+                          fontFamily: FONT,
+                          fontSize: 10,
+                          color: "#94a3b8",
+                          marginTop: 2,
+                        }}
+                      >
+                        Align weather timestamps to PV using editable rules
+                      </div>
+                    </div>
+                  </div>
                   <button
                     type="button"
                     onClick={() => {
@@ -2567,13 +2630,16 @@ export default function QualityCheckPage() {
                     style={{
                       borderRadius: 999,
                       border: "1px solid #CBD5F5",
-                      background: "#EEF2FF",
-                      padding: "2px 10px",
+                      background:
+                        "linear-gradient(135deg, #EEF2FF 0%, #E0F2FE 100%)",
+                      padding: "3px 12px",
                       fontFamily: FONT,
                       fontSize: 11,
                       fontWeight: 600,
-                      color: "#4F46E5",
+                      color: "#1D4ED8",
                       cursor: "pointer",
+                      boxShadow:
+                        "0 0 0 1px rgba(191, 219, 254, 0.8), 0 3px 8px rgba(15, 23, 42, 0.12)",
                     }}
                   >
                     + Add rule
@@ -2715,6 +2781,20 @@ export default function QualityCheckPage() {
                   const windowLabel = times.length
                     ? `${times[0]} → ${times[times.length - 1]}`
                     : "n/a";
+
+                  // Auto-fill the first sync rule with the merged data window if empty
+                  if (times.length && syncRules.length === 1) {
+                    const onlyRule = syncRules[0];
+                    if (!onlyRule.start && !onlyRule.end) {
+                      const next = [...syncRules];
+                      next[0] = {
+                        ...onlyRule,
+                        start: times[0],
+                        end: times[times.length - 1],
+                      };
+                      setSyncRules(next);
+                    }
+                  }
 
                   return (
                     <>

@@ -1,71 +1,25 @@
 """
 PVCopilot Backend — PVSyst PDF Parser & CSV Processing API
 Runs on port 5001. Accepts PDF uploads and CSV processing requests.
+Route handlers import logic from: lcoe_pdf, quality_check_csv, time_sync.
 """
 
 import os
-import io
 import tempfile
-from datetime import datetime, timedelta
 
-import pandas as pd
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from pvsyst_parser import parse_pvsyst_pdf
+
+from lcoe_pdf import parse_pvsyst_pdf
+from quality_check_csv import process_quality_check_csv
 
 app = Flask(__name__)
 CORS(app)
 
 
-# ── Time synchronization utility (PV / Weather alignment) ───────────────────────
-#
-# NOTE:
-# The concrete date ranges and shifts are now managed on the frontend UI.
-# Here we keep a placeholder list so the helper can still be used if needed.
-
-SYNC_RULES = [
-    # (start_datetime, end_datetime, timedelta_shift)
-    # Example:
-    # (datetime(2018, 3, 25), datetime(2018, 5, 16, 23, 59), timedelta(hours=1)),
-]
-
-
-def apply_time_sync(df: pd.DataFrame, time_col: str = "time",
-                    rules=SYNC_RULES) -> pd.DataFrame:
-    """
-    Apply pre-defined time shift rules to a DataFrame.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Input DataFrame containing a time column.
-    time_col : str, default 'time'
-        Name of the time column to adjust.
-    rules : sequence of (start_dt, end_dt, timedelta)
-        Rules describing how much to shift timestamps within a given window.
-    """
-
-    if time_col not in df.columns:
-        return df
-
-    # Ensure datetime dtype
-    times = pd.to_datetime(df[time_col], errors="coerce")
-
-    def sync_time(ts: pd.Timestamp):
-        if pd.isna(ts):
-            return ts
-        for start, end, shift in rules:
-            if start <= ts.to_pydatetime() <= end:
-                return ts + shift
-        return ts
-
-    df = df.copy()
-    df[time_col] = times.apply(sync_time)
-    return df
-
 @app.route("/api/parse-pvsyst", methods=["POST"])
 def parse_pvsyst():
-    """Accept a PVSyst PDF upload and return parsed JSON."""
+    """Accept a PVSyst PDF upload and return parsed JSON (uses lcoe_pdf module)."""
     if "file" not in request.files:
         return jsonify({"error": "No file uploaded. Send a PDF file with key 'file'."}), 400
 
@@ -73,26 +27,26 @@ def parse_pvsyst():
     if not file.filename or not file.filename.lower().endswith(".pdf"):
         return jsonify({"error": "Please upload a PDF file."}), 400
 
-    # Save to temp file, parse, clean up
+    tmp_path = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             file.save(tmp.name)
             tmp_path = tmp.name
-
         result = parse_pvsyst_pdf(tmp_path)
         return jsonify(result)
-
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
     finally:
-        if 'tmp_path' in locals() and os.path.exists(tmp_path):
-            os.unlink(tmp_path)
+        if tmp_path is not None and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
 
 
 @app.route("/api/process-csv", methods=["POST"])
 def process_csv():
-    """Accept a CSV upload, resample time-series to every 10 min, return JSON."""
+    """Accept a CSV upload, resample to 10 min (uses quality_check_csv module)."""
     if "file" not in request.files:
         return jsonify({"error": "No file uploaded. Send a CSV file with key 'file'."}), 400
 
@@ -102,108 +56,10 @@ def process_csv():
 
     try:
         raw = file.read().decode("utf-8", errors="replace")
-        # Auto-detect delimiter (comma, semicolon, tab) and tolerate bad lines
-        try:
-            df = pd.read_csv(
-                io.StringIO(raw),
-                sep=None,
-                engine="python",
-                on_bad_lines="skip",
-            )
-        except TypeError:
-            # pandas < 1.3
-            df = pd.read_csv(
-                io.StringIO(raw),
-                sep=None,
-                engine="python",
-                error_bad_lines=False,
-                warn_bad_lines=False,
-            )
-
-        if df.empty or len(df.columns) == 0:
-            return jsonify({"error": "CSV file is empty or has no columns."}), 400
-
-        # Auto-detect timestamp column
-        ts_col = None
-        for col in df.columns:
-            if any(kw in col.lower() for kw in ["time", "date", "timestamp"]):
-                ts_col = col
-                break
-        # Fallback: try the first column
-        if ts_col is None:
-            try:
-                pd.to_datetime(df.iloc[:, 0].head(5))
-                ts_col = df.columns[0]
-            except Exception:
-                pass
-
-        original_rows = len(df)
-
-        if ts_col is not None:
-            df[ts_col] = pd.to_datetime(df[ts_col], errors="coerce")
-            valid = df[ts_col].notna().sum()
-            if valid < len(df) * 0.5:
-                return jsonify({"error": f"Column '{ts_col}' could not be parsed as timestamps ({valid}/{len(df)} valid)."}), 400
-
-            df = df.dropna(subset=[ts_col])
-            df = df.set_index(ts_col).sort_index()
-
-            # Resample to 10-minute grid: mean for numeric, first for non-numeric
-            numeric_cols = df.select_dtypes(include="number").columns.tolist()
-            non_numeric_cols = [c for c in df.columns if c not in numeric_cols]
-
-            resampled_parts = []
-            if numeric_cols:
-                resampled_parts.append(df[numeric_cols].resample("10min").mean())
-            if non_numeric_cols:
-                resampled_parts.append(df[non_numeric_cols].resample("10min").first())
-
-            if resampled_parts:
-                df_resampled = pd.concat(resampled_parts, axis=1)
-            else:
-                df_resampled = df.resample("10min").mean()
-
-            # Build full 10-min time grid so we keep one row every 10 min (don't drop empty bins)
-            t_min, t_max = df_resampled.index.min(), df_resampled.index.max()
-            full_index = pd.date_range(start=t_min, end=t_max, freq="10min")
-            df_resampled = df_resampled.reindex(full_index)
-            # For numeric columns, interpolate on time so curves become smooth (avoid step-wise ffill)
-            if numeric_cols:
-                df_resampled[numeric_cols] = (
-                    df_resampled[numeric_cols]
-                    .interpolate(method="time", limit_direction="both")
-                )
-            if non_numeric_cols:
-                df_resampled[non_numeric_cols] = df_resampled[non_numeric_cols].ffill()
-            df_resampled = df_resampled.reset_index()
-            if "index" in df_resampled.columns and df_resampled.columns[0] == "index":
-                df_resampled = df_resampled.rename(columns={"index": ts_col})
-            df_resampled[ts_col] = df_resampled[ts_col].dt.strftime("%Y-%m-%d %H:%M")
-
-            # Round numeric columns
-            for col in df_resampled.select_dtypes(include="number").columns:
-                df_resampled[col] = df_resampled[col].round(3)
-
-            headers = df_resampled.columns.tolist()
-            rows = df_resampled.fillna("").astype(str).values.tolist()
-        else:
-            # No timestamp found — return as-is
-            headers = df.columns.tolist()
-            for col in df.select_dtypes(include="number").columns:
-                df[col] = df[col].round(3)
-            rows = df.fillna("").astype(str).values.tolist()
-
-        return jsonify({
-            "headers": headers,
-            "rows": rows,
-            "originalRows": original_rows,
-            "resampledRows": len(rows),
-            "timestampCol": ts_col,
-            "resampled": ts_col is not None,
-        })
-
-    except pd.errors.ParserError as e:
-        return jsonify({"error": f"Failed to parse CSV: {str(e)}"}), 400
+        result = process_quality_check_csv(raw)
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": f"Processing error: {str(e)}"}), 500
 

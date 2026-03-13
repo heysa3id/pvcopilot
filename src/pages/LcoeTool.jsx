@@ -13,6 +13,7 @@ import AttachMoneyOutlinedIcon from "@mui/icons-material/AttachMoneyOutlined";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import LocationOnOutlinedIcon from "@mui/icons-material/LocationOnOutlined";
+import { parsePvsystPdfClient } from "../utils/parsePvsystPdfClient";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const G = "#FFB800", B = "#1d9bf0", O = "#ff7a45", Y = "#16a34a", P = "#8b5cf6";
@@ -173,32 +174,23 @@ function sensitivity(base, R) {
 // ── PVsyst PDF Parser (Python backend; set VITE_PARSER_URL for production) ──
 const PARSER_URL = import.meta.env.VITE_PARSER_URL || "http://localhost:5001/api/parse-pvsyst";
 
-const PARSER_UNAVAILABLE_MSG =
-  "Load PVsyst Report is not available in the online demo (parser backend is not running). Run the app locally (see README) or enter values manually.";
-
-function isOnlineDemo() {
-  if (typeof window === "undefined") return false;
-  const h = window.location?.hostname || "";
-  return h !== "localhost" && h !== "127.0.0.1";
-}
-
 async function parsePVsystPDF(file) {
-  if (isOnlineDemo() && PARSER_URL.includes("localhost")) {
-    throw new Error(PARSER_UNAVAILABLE_MSG);
-  }
   const formData = new FormData();
   formData.append("file", file);
-  let response;
   try {
-    response = await fetch(PARSER_URL, { method: "POST", body: formData });
+    const response = await fetch(PARSER_URL, { method: "POST", body: formData });
+    const data = await response.json().catch(() => ({}));
+    if (response.ok) return data;
+    throw new Error(data.error || `Parser error ${response.status}`);
   } catch (e) {
     const msg = e?.message || "";
-    const isNetwork = /failed to fetch|network|load failed|cors/i.test(msg) || msg === "Load failed";
-    throw new Error(isNetwork ? PARSER_UNAVAILABLE_MSG : msg || PARSER_UNAVAILABLE_MSG);
+    const backendUnavailable =
+      /failed to fetch|network|load failed|cors|refused/i.test(msg) || msg === "Load failed";
+    if (backendUnavailable) {
+      return parsePvsystPdfClient(file);
+    }
+    throw e;
   }
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data.error || `Parser error ${response.status}`);
-  return data;
 }
 
 // ── UI Helpers ────────────────────────────────────────────────────────────────
@@ -465,10 +457,7 @@ export default function LcoeTool() {
                 </div>
                 <div>
                   <div style={{ fontSize:12, fontWeight:700, color:"#475569" }}>Load PVsyst Report</div>
-                  <div style={{ fontSize:10, color:"#94a3b8", marginTop:2 }}>Drop PDF here or click to browse · auto-fills system parameters</div>
-                  {typeof window !== "undefined" && window.location?.hostname !== "localhost" && PARSER_URL.includes("localhost") && (
-                    <div style={{ fontSize:10, color: O, marginTop:6 }}>Not available in online demo — run locally to use</div>
-                  )}
+                  <div style={{ fontSize:10, color:"#94a3b8", marginTop:2 }}>Drop PDF here or click to browse · auto-fills system parameters (works online)</div>
                 </div>
               </div>
             )}

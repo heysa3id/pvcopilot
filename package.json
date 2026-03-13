@@ -15,6 +15,7 @@
     "@mui/icons-material": "^7.3.9",
     "@mui/material": "^7.3.9",
     "apexcharts": "^5.10.3",
+    "pdfjs-dist": "^5.5.207",
     "plotly.js-dist-min": "^3.4.0",
     "react": "^19.1.0",
     "react-apexcharts": "^2.1.0",
