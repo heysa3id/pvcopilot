@@ -4,14 +4,23 @@
  * Same JSON shape as /api/parse-pvsyst for LCOE tool.
  */
 
-// NOTE:
-// In some bundler setups, importing "pdfjs-dist" as a namespace object (`* as pdfjsLib`)
-// means that `pdfjsLib.getDocument` is undefined (the function lives on the default export).
-// That manifests in production as "undefined is not a function" when calling getDocument.
-// Instead, import the named helpers directly so getDocument is always defined.
+// Safari/WebKit compatibility:
+// - pdfjs-dist v5 may rely on Promise.withResolvers (missing in some Safari versions)
+// - use the legacy build + tiny polyfill fallback to avoid "undefined is not a function"
+import { getDocument, GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
+import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 
-import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
-import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+if (typeof Promise.withResolvers !== "function") {
+  Promise.withResolvers = function withResolversPolyfill() {
+    let resolve;
+    let reject;
+    const promise = new Promise((res, rej) => {
+      resolve = res;
+      reject = rej;
+    });
+    return { promise, resolve, reject };
+  };
+}
 
 if (typeof window !== "undefined" && !GlobalWorkerOptions.workerSrc) {
   GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
