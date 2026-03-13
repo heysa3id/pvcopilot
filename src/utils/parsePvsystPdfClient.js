@@ -119,7 +119,10 @@ export async function parsePvsystPdfClient(file) {
   if (!v) v = _find(fullText, /PVsyst\s+V(\d+\.\d+\.\d+)/, 1);
   result.pvSystVersion = v;
 
-  result.projectName = _find(p1, /Project:\s*(.+)/, 1);
+  // pdfplumber: "Project: APEE\n", pdfjs: "Project: Lydex Rabat  Variant:..."
+  let projName = _find(p1, /Project:\s*(.+?)(?:\s{2,}|\s+Variant|\n)/, 1);
+  if (!projName) projName = _find(p1, /Project:\s*(.+)/, 1);
+  result.projectName = projName;
 
   const cover_power_wp = _num(_find(p1, /System\s+power:\s*([\d.,]+)\s*Wp/, 1));
   const cover_power_kwp = _num(_find(p1, /System\s+power:\s*([\d.,]+)\s*kWp/, 1));
@@ -139,39 +142,63 @@ export async function parsePvsystPdfClient(file) {
     }
   }
 
-  let geoLoc = _find(p2, /Geographical\s+Site[^\n]*\n([\w_]+)/, 1);
-  const geoCountry = _find(p2, /Geographical\s+Site[^\n]*\n[\w_]+\n(\w+)/, 1);
-  if (geoLoc && !result.location) result.location = geoLoc.replace(/_/g, " ");
-  if (geoCountry && !result.country) result.country = geoCountry;
-
-  if (!result.location) {
-    const loc = _find(p2, /(?:Benguerir|Geographical\s+Site\s+Situation[^\n]*\n)(\S+)/, 1);
-    if (loc) result.location = loc.replace(/_/g, " ");
+  // pdfjs text: "Geographical Site  Lydex Rabat  Maroc  Situation  Latitude..."
+  // pdfplumber: "Geographical Site\nLydex Rabat\nMaroc"
+  {
+    const geoMatch = p2.match(/Geographical\s+Site\s+(?:Situation\s+)?(.+?)(?:\s+Situation|\s+Latitude)/);
+    if (geoMatch && !result.location) {
+      // Split by country name to separate location and country
+      const raw = geoMatch[1].trim();
+      const countryMatch = raw.match(/\s+(Maroc|Morocco|France|Spain|Germany|Italy|Algeria|Tunisia|Egypt|USA|India|China|UK)\b/i);
+      if (countryMatch) {
+        result.location = raw.substring(0, countryMatch.index).trim().replace(/_/g, " ");
+        if (!result.country) result.country = countryMatch[1];
+      } else {
+        result.location = raw.replace(/_/g, " ");
+      }
+    }
   }
+
   if (!result.country) {
     const country = p2.match(/(?:Maroc|Morocco|France|Spain|Germany|Italy)/);
     if (country) result.country = country[0];
   }
 
-  const latStr = _find(p2, /Latitude\s+([\d.]+)\s*°?\s*([NS])/, 0);
-  if (latStr) {
-    let latVal = _num(latStr);
-    if (latVal != null && /S/i.test(latStr)) latVal = -latVal;
-    result.latitude = latVal;
-  }
-  const lonStr = _find(p2, /Longitude\s+([-\d.]+)\s*°?\s*([EW]?)/, 0);
-  if (lonStr) {
-    let lonVal = _num(lonStr);
-    if (lonVal != null) {
-      if (/W/i.test(lonStr) && lonVal > 0) lonVal = -lonVal;
-      result.longitude = lonVal;
+  // pdfplumber: "Latitude 33.99°N" / "Longitude -6.71°W"
+  // pdfjs: "Latitude Longitude Altitude Time zone 33.99 -6.71 138 UTC °N °W m"
+  {
+    let latStr = _find(p2, /Latitude\s+([\d.]+)\s*°?\s*([NS])/, 0);
+    if (latStr) {
+      let latVal = _num(latStr);
+      if (latVal != null && /S/i.test(latStr)) latVal = -latVal;
+      result.latitude = latVal;
+    }
+    let lonStr = _find(p2, /Longitude\s+([-\d.]+)\s*°?\s*([EW]?)/, 0);
+    if (lonStr) {
+      let lonVal = _num(lonStr);
+      if (lonVal != null) {
+        if (/W/i.test(lonStr) && lonVal > 0) lonVal = -lonVal;
+        result.longitude = lonVal;
+      }
+    }
+    // pdfjs fallback: "Latitude Longitude ... 33.99 -6.71 ... °N °W"
+    if (result.latitude == null) {
+      const m = p2.match(/Latitude\s+Longitude[\s\S]*?([\d.]+)\s+([-\d.]+)\s+[\s\S]*?(°[NS])\s+(°[EW])/);
+      if (m) {
+        let latVal = parseFloat(m[1]);
+        if (m[3] === "°S") latVal = -latVal;
+        result.latitude = latVal;
+        let lonVal = parseFloat(m[2]);
+        if (m[4] === "°W" && lonVal > 0) lonVal = -lonVal;
+        result.longitude = lonVal;
+      }
     }
   }
 
-  const tiltAz = _find(p2, /Tilt\/Azimuth\s+([\d.]+)\s*\/\s*([\d.]+)/, 0);
+  const tiltAz = _find(p2, /Tilt\/Azimuth\s+(-?[\d.]+)\s*\/\s*(-?[\d.]+)/, 0);
   if (tiltAz) {
-    const t = tiltAz.match(/([\d.]+)\s*\//);
-    const a = tiltAz.match(/\/\s*([\d.]+)/);
+    const t = tiltAz.match(/(-?[\d.]+)\s*\//);
+    const a = tiltAz.match(/\/\s*(-?[\d.]+)/);
     if (t) result.tilt = _num(t[1]);
     if (a) result.azimuth = _num(a[1]);
   }
@@ -182,27 +209,68 @@ export async function parsePvsystPdfClient(file) {
 
   const pnom_kwp = _num(_find(p2, /Pnom\s+total\s+([\d.,]+)\s*kWp/, 1));
   const pnom_wp = _num(_find(p2, /Pnom\s+total\s+([\d.,]+)\s*Wp/, 1));
-  if (pnom_kwp) result.systemCapacity = pnom_kwp;
-  else if (pnom_wp) result.systemCapacity = pnom_wp / 1000;
-  else if (cover_power_kwp) result.systemCapacity = cover_power_kwp;
-  else if (cover_power_wp) result.systemCapacity = cover_power_wp / 1000;
+  let _capSourceIsKwp = false;
+  if (pnom_kwp) { result.systemCapacity = pnom_kwp; _capSourceIsKwp = true; }
+  else if (pnom_wp) { result.systemCapacity = pnom_wp / 1000; _capSourceIsKwp = true; }
+  else if (cover_power_kwp) { result.systemCapacity = cover_power_kwp; _capSourceIsKwp = true; }
+  else if (cover_power_wp) { result.systemCapacity = cover_power_wp / 1000; _capSourceIsKwp = true; }
 
-  const nbModules = _num(_find(p2, /Nb\.\s*of\s+modules\s+([\d]+)/, 1));
+  // pdfjs: "Nb. of modules Pnom total 3128 1814 units kWp" — first number is modules
+  let nbModules = _num(_find(p2, /Nb\.\s*of\s+modules\s+([\d]+)/, 1));
+  if (nbModules == null) {
+    const m = p2.match(/Nb\.\s*of\s+modules\s+(?:Pnom\s+total\s+)?([\d]+)/);
+    if (m) nbModules = _num(m[1]);
+  }
   result.numModules = nbModules != null ? Math.floor(nbModules) : null;
 
-  result.dcAcRatio = _num(_find(p2, /Pnom\s+ratio\s+([\d.,]+)/, 1));
+  // DC/AC ratio: look for a decimal number (contains ".") near "Pnom ratio"
+  // pdfjs p2: "Pnom total Pnom ratio 9 1575 1.152 units kWac" — ratio is "1.152"
+  // pdfplumber: "Pnom ratio 1.152"
+  {
+    let ratio = _num(_find(p2, /Pnom\s+ratio\s+([\d]+\.[\d]+)/, 1));
+    if (!ratio) {
+      // pdfjs: find first decimal number after "Pnom ratio"
+      const m = p2.match(/Pnom\s+ratio[\s\S]*?([\d]+\.[\d]+)/);
+      if (m) ratio = _num(m[1]);
+    }
+    result.dcAcRatio = ratio;
+  }
 
-  const produced = _num(_find(p2, /Produced\s+Energy\s+([\d.,]+)\s*kWh\/year/, 1));
-  const specProd = _num(_find(p2, /Specific\s+production\s+([\d.,]+)\s*kWh\/kWp\/year/, 1));
-  const pr = _num(_find(p2, /Perf\.\s*Ratio\s+PR\s+([\d.,]+)\s*%/, 1));
+  // pdfplumber: "Produced Energy 2947380kWh/year"
+  // pdfjs: "Produced Energy Used Energy 2947380 3329109 kWh/year"
+  let produced = _num(_find(p2, /Produced\s+Energy\s+([\d.,]+)\s*kWh\/year/, 1));
+  if (!produced) {
+    const m = p2.match(/Produced\s+Energy\s+(?:Used\s+Energy\s+)?([\d.,]+)/);
+    if (m) produced = _num(m[1]);
+  }
+  // pdfjs: "Specific production Perf. Ratio PR 1625 79.62 kWh/kWp/year %"
+  let specProd = _num(_find(p2, /Specific\s+production\s+([\d.,]+)\s*kWh\/kWp\/year/, 1));
+  if (!specProd) {
+    const m = p2.match(/Specific\s+production\s+(?:Perf\.\s*Ratio\s+PR\s+)?([\d.,]+)/);
+    if (m) specProd = _num(m[1]);
+  }
+  // pdfjs: "Perf. Ratio PR Solar Fraction SF 79.62 36.92 % %" — first number is PR
+  let pr = _num(_find(p2, /Perf\.\s*Ratio\s+PR\s+([\d.,]+)\s*%/, 1));
+  if (!pr) {
+    const m = p2.match(/Perf\.\s*Ratio\s+PR\s+(?:[A-Za-z\s.]+?)?([\d.,]+)\s*%?/);
+    if (m) pr = _num(m[1]);
+  }
   result.specificYield = specProd;
   result.performanceRatio = pr;
 
-  const hasBattery = /Battery\s+pack|Storage\s+strategy|Self.?consumption|Solar\s+Fraction\s+SF/i.test(p2);
+  // System type: first check cover page header for explicit declaration
+  const coverType = _find(p1, /Simulation\s+report\s*[\n\r]*(.*?System)/i, 1);
+  const hasBattery = /Battery\s+pack|Battery\s+Storage|Storage\s+strategy:\s*Self.?consumption/i.test(p2);
   const hasGrid = /E_Grid|EFrGrid|Grid.Connected/i.test(fullText);
-  if (hasBattery && hasGrid) result.systemType = "grid-connected-battery";
-  else if (hasBattery) result.systemType = "battery";
-  else result.systemType = "grid-connected";
+  if (coverType && /grid.connected\s+system/i.test(coverType) && !hasBattery) {
+    result.systemType = "grid-connected";
+  } else if (hasBattery && hasGrid) {
+    result.systemType = "grid-connected-battery";
+  } else if (hasBattery) {
+    result.systemType = "battery";
+  } else {
+    result.systemType = "grid-connected";
+  }
 
   if (produced) result.annualEnergy = produced;
 
@@ -228,6 +296,20 @@ export async function parsePvsystPdfClient(file) {
     if (m) result.moduleManufacturer = m[1].trim();
   }
 
+  // pdfjs fallback: "Manufacturer Model <Name> <Model> (Original PVsyst database)"
+  // First occurrence = PV module, second = inverter
+  if (!result.moduleManufacturer || !result.inverterManufacturer) {
+    const mfrMatches = [...p3.matchAll(/Manufacturer\s+Model\s+(.+?)\s+(\S+)\s+\(Original/g)];
+    if (mfrMatches.length >= 1 && !result.moduleManufacturer) {
+      result.moduleManufacturer = mfrMatches[0][1].trim();
+      result.moduleModel = mfrMatches[0][2].trim();
+    }
+    if (mfrMatches.length >= 2 && !result.inverterManufacturer) {
+      result.inverterManufacturer = mfrMatches[1][1].trim();
+      result.inverterModel = mfrMatches[1][2].trim();
+    }
+  }
+
   const modelLines = p3.split("\n").filter((l) => /^Model\s/.test(l.trim()) && !l.includes("Models used") && !l.includes("Model Generic"));
   for (const mline of modelLines) {
     const parts = mline.trim().split(/\s{2,}/).map((p) => p.trim()).filter((p) => p && p !== "Model");
@@ -245,39 +327,85 @@ export async function parsePvsystPdfClient(file) {
   }
 
   result.modulePower = _num(_find(p3, /Unit\s+Nom\.\s+Power\s+([\d.,]+)\s*Wp/, 1));
-  const invPower = _num(_find(p3, /Unit\s+Nom\.\s+Power\s+([\d.,]+)\s*kWac/, 1));
-  if (invPower) result.ratedPowerAC = invPower;
   if (!result.numModules) {
     const nm = _num(_find(p3, /Number\s+of\s+PV\s+modules\s+([\d]+)/, 1));
     result.numModules = nm != null ? Math.floor(nm) : null;
   }
-  const totalInv = _num(_find(p3, /Total\s+(?:inverter\s+)?power\s+([\d.,]+)\s*kWac/, 1));
-  if (totalInv && !result.ratedPowerAC) result.ratedPowerAC = totalInv;
+  // Inverter total power from p2/p3
+  // pdfplumber: "Total power 1575kWac" or "Pnom total 1575kWac"
+  // pdfjs: "Pnom total Pnom ratio 9 1575 1.152 units kWac" or "... 1 4000 1.110 unit W"
+  {
+    let invAC = null;
+    // pdfplumber-style: "Total power NNNkWac"
+    invAC = _num(_find(p3, /Total\s+(?:inverter\s+)?power\s+([\d.,]+)\s*kWac/, 1));
+
+    // pdfjs-style: inverter section has "Pnom total Pnom ratio <units> <power> <ratio> unit(s) kWac|W"
+    if (!invAC) {
+      const m = p2.match(/Inverters.*?Pnom\s+total\s+Pnom\s+ratio\s+(\d+)\s+([\d.,]+)\s+[\d.,]+\s+units?\s+(kWac|W)\b/);
+      if (m) {
+        invAC = _num(m[2]);
+        if (m[3] === "W" && invAC != null) invAC = invAC / 1000;
+      }
+    }
+
+    // Fallback: unit nominal power from p3
+    if (!invAC) invAC = _num(_find(p3, /Unit\s+Nom\.\s+Power\s+([\d.,]+)\s*kWac/, 1));
+    if (invAC) result.ratedPowerAC = invAC;
+  }
   if (!result.dcAcRatio) result.dcAcRatio = _num(_find(p3, /Pnom\s+ratio\s+(?:\(DC:AC\)\s+)?([\d.,]+)/, 1));
   const nominalStcKwp = _num(_find(p3, /Nominal\s+\(STC\)\s+([\d.,]+)\s*kWp/, 1));
-  if (nominalStcKwp && !result.systemCapacity) result.systemCapacity = nominalStcKwp;
+  if (nominalStcKwp && !result.systemCapacity) { result.systemCapacity = nominalStcKwp; _capSourceIsKwp = true; }
 
-  const deg = _num(_find(p4, /Loss\s+factor\s+([\d.,]+)\s*%\/year/, 1));
-  result.degradationRate = deg ?? _num(_find(fullText, /(?:degradation|Loss\s+factor)\s+([\d.,]+)\s*%\/year/, 1));
+  // pdfplumber: "Loss factor 0.4%/year"
+  // pdfjs: "degradation  Year no Loss factor 10 0.4 %/year"
+  let deg = _num(_find(p4, /Loss\s+factor\s+([\d.,]+)\s*%\/year/, 1));
+  if (deg == null) {
+    const m = fullText.match(/([\d.,]+)\s*%\/year/);
+    if (m) deg = _num(m[1]);
+  }
+  result.degradationRate = deg;
 
   const simYear = _num(_find(fullText, /(?:Simulation\s+for\s+year\s+no|Year\s+no)\s+(\d+)/, 1));
   result.simulationYear = simYear != null ? Math.floor(simYear) : null;
 
-  const yearMatch = p6.match(/Year\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/);
-  if (yearMatch) {
-    result.ghi = parseFloat(yearMatch[1]);
-    result.gti = parseFloat(yearMatch[4]);
-    result.annualEnergy = parseFloat(yearMatch[8]);
+  // Search pages with energy balance table (containing GlobHor legend) for Year summary row
+  for (const pg of pagesText) {
+    if (!/GlobHor/i.test(pg)) continue;
+    const yearMatch = pg.match(/Year\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)/);
+    if (yearMatch) {
+      result.ghi = parseFloat(yearMatch[1]);
+      result.gti = parseFloat(yearMatch[4]);
+      break;
+    }
   }
-  const prodP6 = _num(_find(p6, /Produced\s+Energy\s+([\d.,]+)\s*kWh\/year/, 1));
-  const specP6 = _num(_find(p6, /Specific\s+production\s+([\d.,]+)\s*kWh\/kWp\/year/, 1));
-  const prP6 = _num(_find(p6, /Perf\.\s*Ratio\s+PR\s+([\d.,]+)\s*%/, 1));
-  if (prodP6) result.annualEnergy = prodP6;
-  if (specP6) result.specificYield = specP6;
-  if (prP6) result.performanceRatio = prP6;
+  for (const pg of pagesText) {
+    // pdfplumber: "Produced Energy 2947380kWh/year"
+    // pdfjs:      "Produced Energy Used Energy 2947380 3329109 kWh/year"
+    let prodPg = _num(_find(pg, /Produced\s+Energy\s+([\d.,]+)\s*kWh\/year/, 1));
+    if (!prodPg) {
+      const m = pg.match(/Produced\s+Energy\s+(?:Used\s+Energy\s+)?([\d.,]+)/);
+      if (m) prodPg = _num(m[1]);
+    }
+    let specPg = _num(_find(pg, /Specific\s+production\s+([\d.,]+)\s*kWh\/kWp\/year/, 1));
+    if (!specPg) {
+      const m = pg.match(/Specific\s+production\s+(?:Perf\.\s*Ratio\s+PR\s+)?([\d.,]+)/);
+      if (m) specPg = _num(m[1]);
+    }
+    let prPg = _num(_find(pg, /Perf\.\s*Ratio\s+PR\s+([\d.,]+)\s*%/, 1));
+    if (!prPg) {
+      const m = pg.match(/Perf\.\s*Ratio\s+PR\s+([\d.,]+)/);
+      if (m) prPg = _num(m[1]);
+    }
+    if (prodPg) result.annualEnergy = prodPg;
+    if (specPg) result.specificYield = specPg;
+    if (prPg) result.performanceRatio = prPg;
+    if (prodPg || specPg || prPg) break;
+  }
 
-  if (result.systemCapacity != null && result.systemCapacity > 1000) result.systemCapacity /= 1000;
-  if (result.ratedPowerAC != null && result.ratedPowerAC > 100) result.ratedPowerAC /= 1000;
+  // Only convert if capacity was NOT already parsed from a kWp source
+  // (e.g. Nominal STC from page 3 might be in Wp if very large)
+  if (result.systemCapacity != null && result.systemCapacity > 100000 && !_capSourceIsKwp) result.systemCapacity /= 1000;
+  // ratedPowerAC is parsed from kWac fields, no unit conversion needed
   if (!result.ratedPowerAC) {
     const invWVal = _num(_find(p2, /(?:Inverters.*?Pnom\s+total\s+)([\d.,]+)\s*W/, 1));
     if (invWVal != null) result.ratedPowerAC = invWVal > 100 ? invWVal / 1000 : invWVal;

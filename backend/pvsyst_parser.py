@@ -101,8 +101,8 @@ def parse_pvsyst_pdf(pdf_path):
     p2 = pages_text[1] if len(pages_text) > 1 else ""
 
     # Location & country from geographical site
-    geo_loc = _find(p2, r'Geographical\s+Site.*?\n([\w_]+)', 1)
-    geo_country = _find(p2, r'Geographical\s+Site.*?\n[\w_]+\n(\w+)', 1)
+    geo_loc = _find(p2, r'Geographical\s+Site.*?\n([\w_ ]+?)(?:\s+Latitude|\n)', 1)
+    geo_country = _find(p2, r'Geographical\s+Site.*?\n[\w_ ]+?\n(\w+)', 1)
     if geo_loc and not result["location"]:
         result["location"] = geo_loc.replace('_', ' ')
     if geo_country and not result["country"]:
@@ -136,10 +136,10 @@ def parse_pvsyst_pdf(pdf_path):
             result["longitude"] = lon_val
 
     # Tilt / Azimuth
-    tilt_az = _find(p2, r'Tilt/Azimuth\s+([\d.]+)\s*/\s*([\d.]+)', 0)
+    tilt_az = _find(p2, r'Tilt/Azimuth\s+(-?[\d.]+)\s*/\s*(-?[\d.]+)', 0)
     if tilt_az:
-        result["tilt"] = _num(re.search(r'([\d.]+)\s*/', tilt_az).group(1))
-        result["azimuth"] = _num(re.search(r'/\s*([\d.]+)', tilt_az).group(1))
+        result["tilt"] = _num(re.search(r'(-?[\d.]+)\s*/', tilt_az).group(1))
+        result["azimuth"] = _num(re.search(r'/\s*(-?[\d.]+)', tilt_az).group(1))
 
     # System config (orientation)
     if 'Fixed plane' in p2 or 'Fixed plane' in full_text:
@@ -151,16 +151,17 @@ def parse_pvsyst_pdf(pdf_path):
 
     # PV Array - Pnom total (DC capacity)
     # Try kWp first, then Wp
+    _cap_source_is_kwp = False
     pnom_kwp = _num(_find(p2, r'Pnom\s+total\s+([\d.,]+)\s*kWp', 1))
     pnom_wp = _num(_find(p2, r'Pnom\s+total\s+([\d.,]+)\s*Wp', 1))
     if pnom_kwp:
-        result["systemCapacity"] = pnom_kwp
+        result["systemCapacity"] = pnom_kwp; _cap_source_is_kwp = True
     elif pnom_wp:
-        result["systemCapacity"] = pnom_wp / 1000
+        result["systemCapacity"] = pnom_wp / 1000; _cap_source_is_kwp = True
     elif cover_power_kwp:
-        result["systemCapacity"] = cover_power_kwp
+        result["systemCapacity"] = cover_power_kwp; _cap_source_is_kwp = True
     elif cover_power_wp:
-        result["systemCapacity"] = cover_power_wp / 1000
+        result["systemCapacity"] = cover_power_wp / 1000; _cap_source_is_kwp = True
 
     # Number of modules
     nb_modules = _num(_find(p2, r'Nb\.\s*of\s+modules\s+([\d]+)', 1))
@@ -184,12 +185,15 @@ def parse_pvsyst_pdf(pdf_path):
     result["specificYield"] = spec_prod
     result["performanceRatio"] = pr
 
-    # System type detection
-    has_battery = bool(re.search(r'Battery\s+pack|Storage\s+strategy|Self.?consumption|Solar\s+Fraction\s+SF', p2, re.IGNORECASE))
+    # System type detection: check cover page header first
+    cover_type = _find(p1, r'Simulation\s+report\s*\n*(.*?System)', 1, flags=re.IGNORECASE)
+    has_battery = bool(re.search(r'Battery\s+pack|Battery\s+Storage|Storage\s+strategy:\s*Self.?consumption', p2, re.IGNORECASE))
     has_grid = bool(re.search(r'E_Grid|EFrGrid|Grid.Connected', full_text, re.IGNORECASE))
     has_e_solar = bool(re.search(r'E_Solar', full_text))
 
-    if has_battery and has_grid:
+    if cover_type and re.search(r'grid.connected\s+system', cover_type, re.IGNORECASE) and not has_battery:
+        result["systemType"] = "grid-connected"
+    elif has_battery and has_grid:
         result["systemType"] = "grid-connected-battery"
     elif has_battery:
         result["systemType"] = "battery"
@@ -280,20 +284,18 @@ def parse_pvsyst_pdf(pdf_path):
     mod_power = _num(_find(p3, r'Unit\s+Nom\.\s+Power\s+([\d.,]+)\s*Wp', 1))
     result["modulePower"] = mod_power
 
-    # Unit nominal power - inverter (kWac)
-    inv_power = _num(_find(p3, r'Unit\s+Nom\.\s+Power\s+([\d.,]+)\s*kWac', 1))
-    if inv_power:
-        result["ratedPowerAC"] = inv_power
-
     # Number of modules (if not found in p2)
     if not result["numModules"]:
         nm = _num(_find(p3, r'Number\s+of\s+PV\s+modules\s+([\d]+)', 1))
         result["numModules"] = int(nm) if nm else None
 
-    # Total inverter power
+    # Prefer total inverter power over unit power (kWac fields are already in kW)
     total_inv = _num(_find(p3, r'Total\s+(?:inverter\s+)?power\s+([\d.,]+)\s*kWac', 1))
-    if total_inv and not result["ratedPowerAC"]:
+    inv_unit_power = _num(_find(p3, r'Unit\s+Nom\.\s+Power\s+([\d.,]+)\s*kWac', 1))
+    if total_inv:
         result["ratedPowerAC"] = total_inv
+    elif inv_unit_power:
+        result["ratedPowerAC"] = inv_unit_power
 
     # Pnom ratio from page 3
     if not result["dcAcRatio"]:
@@ -303,7 +305,7 @@ def parse_pvsyst_pdf(pdf_path):
     # Nominal STC from page 3
     nominal_stc_kwp = _num(_find(p3, r'Nominal\s+\(STC\)\s+([\d.,]+)\s*kWp', 1))
     if nominal_stc_kwp and not result["systemCapacity"]:
-        result["systemCapacity"] = nominal_stc_kwp
+        result["systemCapacity"] = nominal_stc_kwp; _cap_source_is_kwp = True
 
     # ── PAGE 4: Array losses — degradation ──────────────────────────────
     p4 = pages_text[3] if len(pages_text) > 3 else ""
@@ -317,60 +319,37 @@ def parse_pvsyst_pdf(pdf_path):
     sim_year = _num(_find(full_text, r'(?:Simulation\s+for\s+year\s+no|Year\s+no)\s+(\d+)', 1))
     result["simulationYear"] = int(sim_year) if sim_year else None
 
-    # ── PAGE 6: Main results — annual totals ────────────────────────────
-    p6 = pages_text[5] if len(pages_text) > 5 else ""
+    # ── Search all pages for Year summary row and results ──────────────
+    for pg in pages_text:
+        # Match Year row at start of line (not "Year" at end of a header row)
+        year_match = re.search(
+            r'^Year\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)',
+            pg, re.MULTILINE
+        )
+        if year_match:
+            result["ghi"] = float(year_match.group(1))
+            result["gti"] = float(year_match.group(4))
+            break
 
-    # GHI and GTI from Year row
-    year_row = _find(p6, r'Year\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)', 0)
-    if year_row:
-        nums = re.findall(r'[\d.]+', year_row)
-        if len(nums) >= 4:
-            result["ghi"] = float(nums[0])
-            result["gti"] = float(nums[3])
-
-    # E_Solar from Year row (for battery systems)
-    # Columns: GlobHor DiffHor T_Amb GlobInc GlobEff EArray E_User E_Solar EUnused EFrGrid
-    year_match = re.search(
-        r'Year\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)',
-        p6
-    )
-    if year_match:
-        result["ghi"] = float(year_match.group(1))
-        result["gti"] = float(year_match.group(4))
-        e_array = float(year_match.group(6))
-        e_user = float(year_match.group(7))
-        e_solar = float(year_match.group(8))
-        e_unused = float(year_match.group(9))
-        e_frgrid = float(year_match.group(10))
-
-        # For battery systems, use E_Solar (Produced Energy)
-        # For grid systems, check if there's an E_Grid column
-        if result["systemType"] in ("battery", "grid-connected-battery"):
-            result["annualEnergy"] = e_solar
-        else:
-            # For grid-connected, E_Solar might actually be E_Grid
-            result["annualEnergy"] = e_solar
-
-    # Also check Produced Energy from Main results section on page 6
-    prod_p6 = _num(_find(p6, r'Produced\s+Energy\s+([\d.,]+)\s*kWh/year', 1))
-    spec_p6 = _num(_find(p6, r'Specific\s+production\s+([\d.,]+)\s*kWh/kWp/year', 1))
-    pr_p6 = _num(_find(p6, r'Perf\.\s*Ratio\s+PR\s+([\d.,]+)\s*%', 1))
-
-    if prod_p6:
-        result["annualEnergy"] = prod_p6
-    if spec_p6:
-        result["specificYield"] = spec_p6
-    if pr_p6:
-        result["performanceRatio"] = pr_p6
+    for pg in pages_text:
+        prod_pg = _num(_find(pg, r'Produced\s+Energy\s+([\d.,]+)\s*kWh/year', 1))
+        spec_pg = _num(_find(pg, r'Specific\s+production\s+([\d.,]+)\s*kWh/kWp/year', 1))
+        pr_pg = _num(_find(pg, r'Perf\.\s*Ratio\s+PR\s+([\d.,]+)\s*%', 1))
+        if prod_pg:
+            result["annualEnergy"] = prod_pg
+        if spec_pg:
+            result["specificYield"] = spec_pg
+        if pr_pg:
+            result["performanceRatio"] = pr_pg
+        if prod_pg or spec_pg or pr_pg:
+            break
 
     # ── Final fixups ────────────────────────────────────────────────────
-    # If systemCapacity is in Wp, convert to kWp
-    if result["systemCapacity"] and result["systemCapacity"] > 1000:
+    # Only convert if capacity was NOT already parsed from a kWp source
+    if result["systemCapacity"] and result["systemCapacity"] > 100000 and not _cap_source_is_kwp:
         result["systemCapacity"] = result["systemCapacity"] / 1000
 
-    # If ratedPowerAC came in W, convert to kW
-    if result["ratedPowerAC"] and result["ratedPowerAC"] > 100:
-        result["ratedPowerAC"] = result["ratedPowerAC"] / 1000
+    # ratedPowerAC is parsed from kWac fields, no unit conversion needed
 
     # Inverter AC from p2 if not found in p3
     if not result["ratedPowerAC"]:
