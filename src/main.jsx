@@ -1,6 +1,6 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { HashRouter, Routes, Route } from 'react-router-dom'
+import { BrowserRouter, Routes, Route } from 'react-router-dom'
 import './index.css'
 import Navbar from './components/Navbar'
 import LandingPage from './pages/LandingPage'
@@ -42,7 +42,7 @@ function PowerPredictionPage() {
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <HashRouter>
+    <BrowserRouter>
       <Navbar />
       <div style={{ paddingTop: 56 }}>
         <Routes>
@@ -54,6 +54,6 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           <Route path="/lcoe-tool" element={<LcoeTool />} />
         </Routes>
       </div>
-    </HashRouter>
+    </BrowserRouter>
   </React.StrictMode>,
 )

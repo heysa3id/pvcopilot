@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PVCopilot</title>
+    <script type="text/javascript">
+      ;(function () {
+        const l = window.location
+        l.replace(
+          l.protocol +
+            '//' +
+            l.hostname +
+            (l.port ? ':' + l.port : '') +
+            '/?/' +
+            l.pathname
+              .slice(1)
+              .split('/')
+              .join('/')
+              .replace(/&/g, '~and~') +
+            (l.search ? '&' + l.search.slice(1).replace(/&/g, '~and~') : '') +
+            l.hash,
+        )
+      })()
+    </script>
+  </head>
+  <body></body>
+</html>
