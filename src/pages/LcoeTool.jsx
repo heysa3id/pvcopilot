@@ -303,6 +303,58 @@ export default function LcoeTool() {
   const setCapex = useCallback((id, val) =>
     setP(prev=>({...prev, capex:{...prev.capex,[id]:val}})), []);
 
+  const handleSaveTemplate = useCallback(() => {
+    const grouped = {};
+    for (const cat of CAPEX_CATS) {
+      grouped[cat.label] = Object.fromEntries(
+        cat.items.map(i => [i.id, p.capex[i.id] ?? i.def])
+      );
+    }
+    const blob = new Blob([JSON.stringify(grouped, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = "capex_template.json";
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [p.capex]);
+
+  const handleLoadTemplate = useCallback(() => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+    input.onchange = (e) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        try {
+          const data = JSON.parse(ev.target.result);
+          if (typeof data === "object" && data !== null && !Array.isArray(data)) {
+            const flat = {};
+            for (const val of Object.values(data)) {
+              if (typeof val === "object" && val !== null && !Array.isArray(val)) {
+                Object.assign(flat, val);
+              } else if (typeof val === "number") {
+                // support flat format too — key is already at top level
+              }
+            }
+            // If top-level keys match item ids directly (flat format), use as-is
+            const allItemIds = new Set(CAPEX_CATS.flatMap(c => c.items.map(i => i.id)));
+            const hasDirectIds = Object.keys(data).some(k => allItemIds.has(k));
+            if (hasDirectIds) {
+              setP(prev => ({ ...prev, capex: { ...prev.capex, ...data } }));
+            } else {
+              setP(prev => ({ ...prev, capex: { ...prev.capex, ...flat } }));
+            }
+          }
+        } catch { /* ignore invalid JSON */ }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  }, []);
+
   const handlePDF = useCallback(async (file) => {
     if (!file || file.type !== "application/pdf") {
       setPdfState({ status: "error", filename: file?.name || "", extracted: null, error: "Please upload a PDF file." });
@@ -791,6 +843,28 @@ export default function LcoeTool() {
                     <span style={{ fontFamily:"'JetBrains Mono'", fontSize:12, color:hi?G:"#0F172A" }}>{v}</span>
                   </div>
                 ))}
+              </div>
+              <div style={{ display:"flex", gap:10, marginTop:12 }}>
+                <button onClick={handleLoadTemplate} style={{
+                  flex:1, padding:"8px 0", fontSize:11, fontWeight:600, border:"1.5px solid #E2E8F0",
+                  borderRadius:7, background:"#fff", color:"#475569", cursor:"pointer",
+                  transition:"all 0.15s", display:"flex", alignItems:"center", justifyContent:"center", gap:5
+                }}
+                  onMouseEnter={e=>{e.currentTarget.style.borderColor="#FFB800";e.currentTarget.style.color="#B8860B"}}
+                  onMouseLeave={e=>{e.currentTarget.style.borderColor="#E2E8F0";e.currentTarget.style.color="#475569"}}
+                >
+                  <span style={{ fontSize:14 }}>&#8593;</span> Load Template
+                </button>
+                <button onClick={handleSaveTemplate} style={{
+                  flex:1, padding:"8px 0", fontSize:11, fontWeight:600, border:"none",
+                  borderRadius:7, background:"#FFB800", color:"#fff", cursor:"pointer",
+                  transition:"all 0.15s", display:"flex", alignItems:"center", justifyContent:"center", gap:5
+                }}
+                  onMouseEnter={e=>e.currentTarget.style.background="#E5A600"}
+                  onMouseLeave={e=>e.currentTarget.style.background="#FFB800"}
+                >
+                  <span style={{ fontSize:14 }}>&#8595;</span> Save Template
+                </button>
               </div>
             </Card>
           )}
