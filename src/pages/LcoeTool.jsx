@@ -49,7 +49,7 @@ const CAPEX_CATS = [
 
 const INIT_CAPEX = Object.fromEntries(CAPEX_CATS.flatMap(c => c.items.map(i => [i.id, i.def])));
 const DEFAULTS = {
-  systemCapacity:    998,
+  systemCapacity:    1000,
   ratedPowerAC:      875.4,
   dcAcRatio:         1.14,
   modulePower:       605,
