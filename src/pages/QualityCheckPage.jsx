@@ -24,6 +24,8 @@ const Plot = createPlotlyComponent(Plotly);
 const G = "#FFB800", B = "#1d9bf0", P = "#8b5cf6", Y = "#16a34a", O = "#ff7a45";
 const FONT = "'Inter', system-ui, sans-serif";
 const MONO = "'JetBrains Mono', monospace";
+/** Shown in table badge when data is resampled (must be 10 min, not hourly). */
+const RESAMPLE_LABEL = "10 min resampled";
 
 function parseCSV(text) {
   const lines = text.trim().split("\n").filter(l => l.trim());
@@ -67,6 +69,115 @@ function parseDateCell(val) {
   const s = String(val).trim();
   const d = new Date(s);
   return isNaN(d.getTime()) ? NaN : d.getTime();
+}
+
+/** Format ms as YYYY-MM-DD HH:MM (match backend). */
+function formatTimeCell(ms) {
+  const d = new Date(ms);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  const h = String(d.getHours()).padStart(2, "0");
+  const min = String(d.getMinutes()).padStart(2, "0");
+  return `${y}-${m}-${day} ${h}:${min}`;
+}
+
+const TEN_MIN_MS = 10 * 60 * 1000;
+
+/** Resample rows to a 10-minute grid.
+ * - Numeric columns: linear interpolation over time (smooth ramps, no steps)
+ * - Non-numeric columns: forward-fill
+ */
+function resampleRowsTo10Min(headers, rows) {
+  if (!headers?.length || !rows?.length) return { headers: headers || [], rows: rows || [], originalRows: rows?.length ?? 0, resampledRows: rows?.length ?? 0, resampled: false };
+  const timeColIdx = getDateColumnIndex(headers);
+  if (timeColIdx < 0) return { headers, rows, originalRows: rows.length, resampledRows: rows.length, resampled: false };
+
+  const safeRows = rows.filter((r) => Array.isArray(r));
+  const withMs = safeRows.map((row) => {
+    const ms = parseDateCell(row[timeColIdx]);
+    return { row, ms };
+  }).filter((x) => !Number.isNaN(x.ms));
+  if (withMs.length === 0) return { headers, rows, originalRows: rows.length, resampledRows: rows.length, resampled: false };
+
+  withMs.sort((a, b) => a.ms - b.ms);
+  const tMin = withMs[0].ms;
+  const tMax = withMs[withMs.length - 1].ms;
+  const tStart = Math.floor(tMin / TEN_MIN_MS) * TEN_MIN_MS;
+  const tEnd = Math.ceil(tMax / TEN_MIN_MS) * TEN_MIN_MS;
+
+  const gridTimes = [];
+  for (let t = tStart; t <= tEnd; t += TEN_MIN_MS) gridTimes.push(t);
+
+  // Detect numeric columns from a sample (exclude time column)
+  const sample = withMs.slice(0, Math.min(200, withMs.length)).map((x) => x.row);
+  const numericCols = new Set();
+  for (let c = 0; c < headers.length; c++) {
+    if (c === timeColIdx) continue;
+    let seen = 0;
+    let numeric = 0;
+    for (const row of sample) {
+      const raw = (row[c] ?? "").toString().trim();
+      if (!raw) continue;
+      seen++;
+      const n = Number(raw);
+      if (!Number.isNaN(n) && Number.isFinite(n)) numeric++;
+      if (seen >= 30) break;
+    }
+    if (seen > 0 && numeric / seen >= 0.6) numericCols.add(c);
+  }
+
+  // Helper: find prev/next value for interpolation
+  function getNumericAt(idx, col) {
+    const raw = (withMs[idx]?.row?.[col] ?? "").toString().trim();
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  let lastIdx = 0;
+  const resampledRows = gridTimes.map((t) => {
+    while (lastIdx + 1 < withMs.length && withMs[lastIdx + 1].ms <= t) lastIdx++;
+
+    // Find next index (for interpolation)
+    let nextIdx = lastIdx;
+    while (nextIdx < withMs.length && withMs[nextIdx].ms < t) nextIdx++;
+    if (nextIdx < lastIdx) nextIdx = lastIdx;
+
+    const baseRow = withMs[lastIdx]?.row ?? [];
+    const newRow = [...baseRow];
+    newRow[timeColIdx] = formatTimeCell(t);
+
+    // Numeric columns: linear interpolation between nearest known points
+    for (const col of numericCols) {
+      const t0 = withMs[lastIdx]?.ms ?? t;
+      const t1 = withMs[nextIdx]?.ms ?? t0;
+      const v0 = getNumericAt(lastIdx, col);
+      const v1 = getNumericAt(nextIdx, col);
+      if (v0 == null && v1 == null) continue;
+      if (t1 === t0 || v1 == null) {
+        newRow[col] = v0 != null ? String(v0) : "";
+        continue;
+      }
+      if (v0 == null) {
+        newRow[col] = String(v1);
+        continue;
+      }
+      const alpha = Math.min(1, Math.max(0, (t - t0) / (t1 - t0)));
+      const v = v0 + (v1 - v0) * alpha;
+      newRow[col] = String(Math.round(v * 1000) / 1000);
+    }
+
+    // Non-numeric columns: forward-fill from last known row (baseRow already provides that)
+    return newRow;
+  });
+
+  return {
+    headers,
+    rows: resampledRows,
+    originalRows: rows.length,
+    resampledRows: resampledRows.length,
+    resampled: true,
+  };
 }
 
 /** Filter rows by optional date range (inclusive). Uses first column or detected date column. */
@@ -171,19 +282,13 @@ async function processCSVFile(file) {
   return data;
 }
 
-/** Client-side CSV parse for when backend is unavailable. Returns same shape as process-csv API. */
+/** Client-side CSV parse for when backend is unavailable. Resamples to 10 min, same shape as process-csv API. */
 function processCSVFileClientSide(text) {
   const { headers, rows } = parseCSV(text);
   if (headers.length === 0 || rows.length === 0) {
     throw new Error("CSV file is empty or has no data rows.");
   }
-  return {
-    headers,
-    rows,
-    originalRows: rows.length,
-    resampledRows: rows.length,
-    resampled: false,
-  };
+  return resampleRowsTo10Min(headers, rows);
 }
 
 async function readFileAsText(file) {
@@ -382,7 +487,7 @@ function CSVTable({ title, icon, color, headers, rows, resampled, originalRows }
               fontSize: 11, fontWeight: 600, color: Y, background: `${Y}14`,
               padding: "2px 10px", borderRadius: 20, fontFamily: MONO,
             }}>
-              hourly resampled{originalRows ? ` (from ${originalRows})` : ""}
+              {RESAMPLE_LABEL}{originalRows ? ` (from ${originalRows})` : ""}
             </span>
           )}
         </div>
@@ -472,20 +577,20 @@ function SyncChart({ pvHeaders, pvRows, weatherHeaders, weatherRows }) {
     const tracePdc = {
       x: pvTimes,
       y: pvPdc,
-      type: "scattergl",
+      type: "scatter",
       mode: "lines",
       name: safePvH[pdcCol] ?? "P_DC",
-      line: { color: O, width: 1.5 },
+      line: { color: O, width: 1.5, shape: "spline", smoothing: 1.2 },
       yaxis: "y",
       hovertemplate: "<b>P_DC</b>: %{y}<extra></extra>",
     };
     const traceGhi = {
       x: weatherTimes,
       y: weatherGhi,
-      type: "scattergl",
+      type: "scatter",
       mode: "lines",
       name: safeWh[ghiCol] ?? "GHI",
-      line: { color: B, width: 1.5 },
+      line: { color: B, width: 1.5, shape: "spline", smoothing: 1.2 },
       yaxis: "y2",
       hovertemplate: "<b>GHI</b>: %{y}<extra></extra>",
     };
@@ -864,20 +969,20 @@ function SyncedLineChart({ merged }) {
     {
       x,
       y: pdc,
-      type: "scattergl",
+      type: "scatter",
       mode: "lines",
       name: "P_DC (synced)",
-      line: { color: O, width: 1.6 },
+      line: { color: O, width: 1.6, shape: "spline", smoothing: 1.2 },
       yaxis: "y",
       hovertemplate: "<b>P_DC</b>: %{y:.2f}<extra></extra>",
     },
     {
       x,
       y: ghi,
-      type: "scattergl",
+      type: "scatter",
       mode: "lines",
       name: "GHI (synced)",
-      line: { color: B, width: 1.6 },
+      line: { color: B, width: 1.6, shape: "spline", smoothing: 1.2 },
       yaxis: "y2",
       hovertemplate: "<b>GHI</b>: %{y:.2f}<extra></extra>",
     },
@@ -1276,10 +1381,10 @@ function CSVChart({ title, color, headers, rows }) {
       return {
         x: xValues,
         y: yValues,
-        type: "scattergl",
+        type: "scatter",
         mode: "lines",
         name: safeHeaders[colIndex] ?? `Col ${colIndex}`,
-        line: { color: CHART_COLORS[i % CHART_COLORS.length], width: 1.5 },
+        line: { color: CHART_COLORS[i % CHART_COLORS.length], width: 1.5, shape: "spline", smoothing: 1.2 },
         hovertemplate: `<b>%{fullData.name}</b>: %{y}<extra></extra>`,
       };
     });
@@ -1902,11 +2007,19 @@ const DEFAULT_SYNC_RULES = [
 const CACHE_PV = "pvcopilot_quality_pv";
 const CACHE_WEATHER = "pvcopilot_quality_weather";
 const CACHE_SYS = "pvcopilot_quality_sys";
+/** Cache version: bump to invalidate old PV/weather cache when resample interval changes (e.g. 1h → 10min). */
+const CACHE_RESAMPLE_VERSION = "10min";
 
-function loadCached(key) {
+function loadCached(key, options = {}) {
   try {
     const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : null;
+    const data = raw ? JSON.parse(raw) : null;
+    if (!data) return null;
+    // PV and weather caches must have been saved with current resample interval
+    if (options.requireResampleVersion && data?.data?.resampled && data?.resampleVersion !== CACHE_RESAMPLE_VERSION) {
+      return null;
+    }
+    return data;
   } catch {
     return null;
   }
@@ -1915,7 +2028,10 @@ function loadCached(key) {
 function saveCache(key, value) {
   try {
     if (value == null) localStorage.removeItem(key);
-    else localStorage.setItem(key, JSON.stringify(value));
+    else {
+      const payload = { ...value, resampleVersion: CACHE_RESAMPLE_VERSION };
+      localStorage.setItem(key, JSON.stringify(payload));
+    }
   } catch (e) {
     if (e.name === "QuotaExceededError") {
       try { localStorage.removeItem(key); } catch (_) {}
@@ -1939,15 +2055,54 @@ export default function QualityCheckPage() {
   const [syncRules, setSyncRules] = useState(DEFAULT_SYNC_RULES);
 
   useEffect(() => {
-    const pv = loadCached(CACHE_PV);
+    // Only use cache that has current 10min resample version; re-apply 10min resample when restoring so hourly cache never shows
+    const pv = loadCached(CACHE_PV, { requireResampleVersion: true });
     if (pv?.fileName && pv?.data) {
+      const d = pv.data;
+      const resampled = resampleRowsTo10Min(d.headers, d.rows);
+      const out = {
+        headers: resampled.headers,
+        rows: resampled.rows,
+        originalRows: d.originalRows ?? d.rows?.length ?? 0,
+        resampledRows: resampled.resampledRows,
+        resampled: resampled.resampled,
+      };
       setPvFile(pv.fileName);
-      setPvData(pv.data);
+      setPvData(out);
+    } else {
+      try {
+        const raw = localStorage.getItem(CACHE_PV);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed?.data?.resampled && parsed?.resampleVersion !== CACHE_RESAMPLE_VERSION) {
+            localStorage.removeItem(CACHE_PV);
+          }
+        }
+      } catch (_) {}
     }
-    const weather = loadCached(CACHE_WEATHER);
+    const weather = loadCached(CACHE_WEATHER, { requireResampleVersion: true });
     if (weather?.fileName && weather?.data) {
+      const d = weather.data;
+      const resampled = resampleRowsTo10Min(d.headers, d.rows);
+      const out = {
+        headers: resampled.headers,
+        rows: resampled.rows,
+        originalRows: d.originalRows ?? d.rows?.length ?? 0,
+        resampledRows: resampled.resampledRows,
+        resampled: resampled.resampled,
+      };
       setWeatherFile(weather.fileName);
-      setWeatherData(weather.data);
+      setWeatherData(out);
+    } else {
+      try {
+        const raw = localStorage.getItem(CACHE_WEATHER);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed?.data?.resampled && parsed?.resampleVersion !== CACHE_RESAMPLE_VERSION) {
+            localStorage.removeItem(CACHE_WEATHER);
+          }
+        }
+      } catch (_) {}
     }
     const sys = loadCached(CACHE_SYS);
     if (sys?.fileName && sys?.data) {
@@ -2063,7 +2218,7 @@ export default function QualityCheckPage() {
                   if (isOffline) {
                     const text = await readFileAsText(file);
                     data = processCSVFileClientSide(text);
-                    showToast("Backend offline — data loaded in browser (no hourly resampling).", "success");
+                    showToast("Backend offline — data loaded and resampled to 10 min in browser.", "success");
                   } else {
                     throw err;
                   }
@@ -2072,12 +2227,20 @@ export default function QualityCheckPage() {
                   showToast(`"${file.name}" appears empty or has no data rows.`, "error");
                   return;
                 }
+                const resampled = resampleRowsTo10Min(data.headers, data.rows);
+                const out = {
+                  headers: resampled.headers,
+                  rows: resampled.rows,
+                  originalRows: data.originalRows ?? data.rows?.length ?? 0,
+                  resampledRows: resampled.resampledRows,
+                  resampled: resampled.resampled,
+                };
                 setPvFile(file.name);
-                setPvData(data);
-                saveCache(CACHE_PV, { fileName: file.name, data });
-                const msg = data.resampled
-                  ? `PV data loaded — ${data.resampledRows} hourly rows (from ${data.originalRows} original)`
-                  : `PV data loaded — ${data.rows.length} rows, ${data.headers.length} columns`;
+                setPvData(out);
+                saveCache(CACHE_PV, { fileName: file.name, data: out });
+                const msg = out.resampled
+                  ? `PV data loaded — ${out.resampledRows} 10 min rows (from ${out.originalRows} original)`
+                  : `PV data loaded — ${out.rows.length} rows, ${out.headers.length} columns`;
                 showToast(msg);
               } catch (err) {
                 showToast(`Failed to process "${file.name}": ${err.message}`, "error");
@@ -2105,7 +2268,7 @@ export default function QualityCheckPage() {
                   if (isOffline) {
                     const text = await readFileAsText(file);
                     data = processCSVFileClientSide(text);
-                    showToast("Backend offline — data loaded in browser (no hourly resampling).", "success");
+                    showToast("Backend offline — data loaded and resampled to 10 min in browser.", "success");
                   } else {
                     throw err;
                   }
@@ -2114,12 +2277,20 @@ export default function QualityCheckPage() {
                   showToast(`"${file.name}" appears empty or has no data rows.`, "error");
                   return;
                 }
+                const resampled = resampleRowsTo10Min(data.headers, data.rows);
+                const out = {
+                  headers: resampled.headers,
+                  rows: resampled.rows,
+                  originalRows: data.originalRows ?? data.rows?.length ?? 0,
+                  resampledRows: resampled.resampledRows,
+                  resampled: resampled.resampled,
+                };
                 setWeatherFile(file.name);
-                setWeatherData(data);
-                saveCache(CACHE_WEATHER, { fileName: file.name, data });
-                const msg = data.resampled
-                  ? `Weather data loaded — ${data.resampledRows} hourly rows (from ${data.originalRows} original)`
-                  : `Weather data loaded — ${data.rows.length} rows, ${data.headers.length} columns`;
+                setWeatherData(out);
+                saveCache(CACHE_WEATHER, { fileName: file.name, data: out });
+                const msg = out.resampled
+                  ? `Weather data loaded — ${out.resampledRows} 10 min rows (from ${out.originalRows} original)`
+                  : `Weather data loaded — ${out.rows.length} rows, ${out.headers.length} columns`;
                 showToast(msg);
               } catch (err) {
                 showToast(`Failed to process "${file.name}": ${err.message}`, "error");

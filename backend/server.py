@@ -92,7 +92,7 @@ def parse_pvsyst():
 
 @app.route("/api/process-csv", methods=["POST"])
 def process_csv():
-    """Accept a CSV upload, resample time-series to hourly, return JSON."""
+    """Accept a CSV upload, resample time-series to every 10 min, return JSON."""
     if "file" not in request.files:
         return jsonify({"error": "No file uploaded. Send a CSV file with key 'file'."}), 400
 
@@ -148,23 +148,36 @@ def process_csv():
             df = df.dropna(subset=[ts_col])
             df = df.set_index(ts_col).sort_index()
 
-            # Resample: mean for numeric, first for non-numeric
+            # Resample to 10-minute grid: mean for numeric, first for non-numeric
             numeric_cols = df.select_dtypes(include="number").columns.tolist()
             non_numeric_cols = [c for c in df.columns if c not in numeric_cols]
 
             resampled_parts = []
             if numeric_cols:
-                resampled_parts.append(df[numeric_cols].resample("1h").mean())
+                resampled_parts.append(df[numeric_cols].resample("10min").mean())
             if non_numeric_cols:
-                resampled_parts.append(df[non_numeric_cols].resample("1h").first())
+                resampled_parts.append(df[non_numeric_cols].resample("10min").first())
 
             if resampled_parts:
                 df_resampled = pd.concat(resampled_parts, axis=1)
             else:
-                df_resampled = df.resample("1h").mean()
+                df_resampled = df.resample("10min").mean()
 
-            df_resampled = df_resampled.dropna(how="all")
+            # Build full 10-min time grid so we keep one row every 10 min (don't drop empty bins)
+            t_min, t_max = df_resampled.index.min(), df_resampled.index.max()
+            full_index = pd.date_range(start=t_min, end=t_max, freq="10min")
+            df_resampled = df_resampled.reindex(full_index)
+            # For numeric columns, interpolate on time so curves become smooth (avoid step-wise ffill)
+            if numeric_cols:
+                df_resampled[numeric_cols] = (
+                    df_resampled[numeric_cols]
+                    .interpolate(method="time", limit_direction="both")
+                )
+            if non_numeric_cols:
+                df_resampled[non_numeric_cols] = df_resampled[non_numeric_cols].ffill()
             df_resampled = df_resampled.reset_index()
+            if "index" in df_resampled.columns and df_resampled.columns[0] == "index":
+                df_resampled = df_resampled.rename(columns={"index": ts_col})
             df_resampled[ts_col] = df_resampled[ts_col].dt.strftime("%Y-%m-%d %H:%M")
 
             # Round numeric columns
