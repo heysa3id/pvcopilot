@@ -4,23 +4,11 @@
  * Same JSON shape as /api/parse-pvsyst for LCOE tool.
  */
 
-// Safari/WebKit compatibility:
-// - pdfjs-dist v5 may rely on Promise.withResolvers (missing in some Safari versions)
-// - use the legacy build + tiny polyfill fallback to avoid "undefined is not a function"
+// Must run before pdfjs: Safari/WebKit lack Promise.withResolvers; pdfjs uses it at load time.
+import "./promiseWithResolversPolyfill.js";
+
 import { getDocument, GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
 import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
-
-if (typeof Promise.withResolvers !== "function") {
-  Promise.withResolvers = function withResolversPolyfill() {
-    let resolve;
-    let reject;
-    const promise = new Promise((res, rej) => {
-      resolve = res;
-      reject = rej;
-    });
-    return { promise, resolve, reject };
-  };
-}
 
 if (typeof window !== "undefined" && !GlobalWorkerOptions.workerSrc) {
   GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
