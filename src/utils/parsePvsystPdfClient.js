@@ -4,11 +4,17 @@
  * Same JSON shape as /api/parse-pvsyst for LCOE tool.
  */
 
-import * as pdfjsLib from "pdfjs-dist";
+// NOTE:
+// In some bundler setups, importing "pdfjs-dist" as a namespace object (`* as pdfjsLib`)
+// means that `pdfjsLib.getDocument` is undefined (the function lives on the default export).
+// That manifests in production as "undefined is not a function" when calling getDocument.
+// Instead, import the named helpers directly so getDocument is always defined.
+
+import { getDocument, GlobalWorkerOptions } from "pdfjs-dist";
 import pdfWorkerUrl from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 
-if (typeof window !== "undefined" && !pdfjsLib.GlobalWorkerOptions.workerSrc) {
-  pdfjsLib.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+if (typeof window !== "undefined" && !GlobalWorkerOptions.workerSrc) {
+  GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
 }
 
 function _num(text, defaultVal = null) {
@@ -30,8 +36,22 @@ function _find(text, pattern, group = 1, defaultVal = null, flags = "") {
  * Extract text from a PDF File in the browser. Returns { pagesText, fullText }.
  */
 async function extractPdfText(file) {
+  if (!file || typeof file.arrayBuffer !== "function") {
+    throw new Error("Invalid file object for PDF parsing.");
+  }
+
   const arrayBuffer = await file.arrayBuffer();
-  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer, useSystemFonts: true }).promise;
+
+  let pdf;
+  try {
+    pdf = await getDocument({ data: arrayBuffer, useSystemFonts: true }).promise;
+  } catch (e) {
+    // Surface a clear error instead of a low-level "undefined is not a function"
+    throw new Error(
+      "Client-side PDF engine failed to load. Please refresh the page or use a standard PVsyst PDF report."
+    );
+  }
+
   const numPages = pdf.numPages;
   const pagesText = [];
   let fullText = "";
@@ -39,7 +59,7 @@ async function extractPdfText(file) {
   for (let i = 1; i <= numPages; i++) {
     const page = await pdf.getPage(i);
     const content = await page.getTextContent();
-    const text = content.items.map((item) => item.str).join(" ");
+    const text = (content.items || []).map((item) => item.str || "").join(" ");
     pagesText.push(text);
     fullText += text + "\n";
   }
