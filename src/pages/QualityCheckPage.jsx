@@ -24,9 +24,6 @@ const Plot = createPlotlyComponent(Plotly);
 const G = "#FFB800", B = "#1d9bf0", P = "#8b5cf6", Y = "#16a34a", O = "#ff7a45";
 const FONT = "'Inter', system-ui, sans-serif";
 const MONO = "'JetBrains Mono', monospace";
-/** Shown in table badge when data is resampled (must be 10 min, not hourly). */
-const RESAMPLE_LABEL = "10 min resampled";
-
 function parseCSV(text) {
   const lines = text.trim().split("\n").filter(l => l.trim());
   if (lines.length === 0) return { headers: [], rows: [] };
@@ -84,11 +81,12 @@ function formatTimeCell(ms) {
 
 const TEN_MIN_MS = 10 * 60 * 1000;
 
-/** Resample rows to a 10-minute grid.
+/** Resample rows to a regular time grid (stepMinutes).
  * - Numeric columns: linear interpolation over time (smooth ramps, no steps)
  * - Non-numeric columns: forward-fill
  */
-function resampleRowsTo10Min(headers, rows) {
+function resampleRowsToStep(headers, rows, stepMinutes) {
+  const stepMs = Math.max(1, Math.min(1440, Number(stepMinutes) || 10)) * 60 * 1000;
   if (!headers?.length || !rows?.length) return { headers: headers || [], rows: rows || [], originalRows: rows?.length ?? 0, resampledRows: rows?.length ?? 0, resampled: false };
   const timeColIdx = getDateColumnIndex(headers);
   if (timeColIdx < 0) return { headers, rows, originalRows: rows.length, resampledRows: rows.length, resampled: false };
@@ -103,11 +101,11 @@ function resampleRowsTo10Min(headers, rows) {
   withMs.sort((a, b) => a.ms - b.ms);
   const tMin = withMs[0].ms;
   const tMax = withMs[withMs.length - 1].ms;
-  const tStart = Math.floor(tMin / TEN_MIN_MS) * TEN_MIN_MS;
-  const tEnd = Math.ceil(tMax / TEN_MIN_MS) * TEN_MIN_MS;
+  const tStart = Math.floor(tMin / stepMs) * stepMs;
+  const tEnd = Math.ceil(tMax / stepMs) * stepMs;
 
   const gridTimes = [];
-  for (let t = tStart; t <= tEnd; t += TEN_MIN_MS) gridTimes.push(t);
+  for (let t = tStart; t <= tEnd; t += stepMs) gridTimes.push(t);
 
   // Detect numeric columns from a sample (exclude time column)
   const sample = withMs.slice(0, Math.min(200, withMs.length)).map((x) => x.row);
@@ -178,6 +176,10 @@ function resampleRowsTo10Min(headers, rows) {
     resampledRows: resampledRows.length,
     resampled: true,
   };
+}
+
+function resampleRowsTo10Min(headers, rows) {
+  return resampleRowsToStep(headers, rows, 10);
 }
 
 /** Filter rows by optional date range (inclusive). Uses first column or detected date column. */
@@ -299,13 +301,13 @@ async function processCSVFile(file) {
   return data;
 }
 
-/** Client-side CSV parse for when backend is unavailable. Resamples to 10 min, same shape as process-csv API. */
+/** Client-side CSV parse for when backend is unavailable. Returns raw { headers, rows } for resampling in UI. */
 function processCSVFileClientSide(text) {
   const { headers, rows } = parseCSV(text);
   if (headers.length === 0 || rows.length === 0) {
     throw new Error("CSV file is empty or has no data rows.");
   }
-  return resampleRowsTo10Min(headers, rows);
+  return { headers, rows };
 }
 
 async function readFileAsText(file) {
@@ -340,10 +342,34 @@ async function readFileAsText(file) {
 }
 
 // ── Upload Zone ──────────────────────────────────────────────────────────────
-function UploadZone({ label, icon, accept, color, file, onLoad, onFileUpload, onClear, onError }) {
+function UploadZone({ label, icon, accept, color, file, onLoad, onFileUpload, onClear, onError, templateFile }) {
   const [drag, setDrag] = useState(false);
   const [loading, setLoading] = useState(false);
   const inputId = useRef(`upload-${Math.random().toString(36).slice(2)}`).current;
+
+  const loadTemplate = useCallback(async (e) => {
+    if (e) e.preventDefault();
+    if (!templateFile) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/data_template/${templateFile}`);
+      if (!res.ok) {
+        throw new Error(`Template not found: ${templateFile} (${res.status})`);
+      }
+      if (onFileUpload) {
+        const blob = await res.blob();
+        const f = new File([blob], templateFile, { type: res.headers.get("content-type") || (templateFile.endsWith(".csv") ? "text/csv" : "application/json") });
+        await onFileUpload(f);
+      } else {
+        const text = await res.text();
+        onLoad(templateFile, text);
+      }
+    } catch (err) {
+      onError(err.message || "Failed to load template");
+    } finally {
+      setLoading(false);
+    }
+  }, [templateFile, onFileUpload, onLoad, onError]);
 
   const processFile = useCallback((f) => {
     if (!f) return;
@@ -463,6 +489,21 @@ function UploadZone({ label, icon, accept, color, file, onLoad, onFileUpload, on
           </div>
           <div style={{ fontSize: 12, color: "#94a3b8", fontFamily: FONT }}>
             Drag & drop or <span style={{ color, fontWeight: 600, textDecoration: "underline" }}>browse</span>
+            {templateFile && (
+              <>
+                {" or "}
+                <button
+                  type="button"
+                  onClick={loadTemplate}
+                  style={{
+                    background: "none", border: "none", padding: 0, cursor: "pointer",
+                    color, fontWeight: 600, textDecoration: "underline", fontFamily: FONT, fontSize: 12,
+                  }}
+                >
+                  load_template
+                </button>
+              </>
+            )}
           </div>
         </label>
       )}
@@ -471,8 +512,8 @@ function UploadZone({ label, icon, accept, color, file, onLoad, onFileUpload, on
 }
 
 // ── CSV Table (scrollable, 10 visible rows) ─────────────────────────────────
-function CSVTable({ title, icon, color, headers, rows, resampled, originalRows }) {
-  const [expanded, setExpanded] = useState(true);
+function CSVTable({ title, icon, color, headers, rows, resampled, originalRows, resampledStepMinutes = 10 }) {
+  const [expanded, setExpanded] = useState(false);
   const safeHeaders = Array.isArray(headers) ? headers : [];
   const safeRows = Array.isArray(rows) ? rows : [];
 
@@ -504,7 +545,7 @@ function CSVTable({ title, icon, color, headers, rows, resampled, originalRows }
               fontSize: 11, fontWeight: 600, color: Y, background: `${Y}14`,
               padding: "2px 10px", borderRadius: 20, fontFamily: MONO,
             }}>
-              {RESAMPLE_LABEL}{originalRows ? ` (from ${originalRows})` : ""}
+              {resampledStepMinutes} min resampled{originalRows ? ` (from ${originalRows})` : ""}
             </span>
           )}
         </div>
@@ -1800,16 +1841,25 @@ function parseRangeTextBar(text) {
 }
 
 // ── Date filter bar: calendar only when icon clicked; editable text range ──────
-function DateFilterBar({ dateFrom, dateTo, onDateFromChange, onDateToChange, onClear, totalRows, filteredRows, accentColor = CALENDAR_PURPLE }) {
+function DateFilterBar({ dateFrom, dateTo, onDateFromChange, onDateToChange, onClear, totalRows, filteredRows, accentColor = CALENDAR_PURPLE, resamplingStepMinutes = 10, onResamplingStepChange }) {
   const hasFilter = dateFrom || dateTo;
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [rangeText, setRangeText] = useState(() => (dateFrom && dateTo) ? `${dateFrom} → ${dateTo}` : "");
   const triggerRef = useRef(null);
   const popoverRef = useRef(null);
+  const [stepPopoverOpen, setStepPopoverOpen] = useState(false);
+  const [stepDraftValue, setStepDraftValue] = useState(String(resamplingStepMinutes));
+  const [resamplingInProgress, setResamplingInProgress] = useState(false);
+  const stepPopoverRef = useRef(null);
+  const stepTriggerRef = useRef(null);
 
   useEffect(() => {
     setRangeText((dateFrom && dateTo) ? `${dateFrom} → ${dateTo}` : "");
   }, [dateFrom, dateTo]);
+
+  useEffect(() => {
+    if (stepPopoverOpen) setStepDraftValue(String(resamplingStepMinutes));
+  }, [stepPopoverOpen, resamplingStepMinutes]);
 
   useEffect(() => {
     if (!calendarOpen) return;
@@ -1821,6 +1871,34 @@ function DateFilterBar({ dateFrom, dateTo, onDateFromChange, onDateToChange, onC
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [calendarOpen]);
+
+  useEffect(() => {
+    if (!stepPopoverOpen) return;
+    const handleClick = (e) => {
+      if (stepTriggerRef.current && stepTriggerRef.current.contains(e.target)) return;
+      if (stepPopoverRef.current && stepPopoverRef.current.contains(e.target)) return;
+      if (resamplingInProgress) return;
+      setStepPopoverOpen(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [stepPopoverOpen, resamplingInProgress]);
+
+  const handleValidateStep = () => {
+    const v = parseInt(stepDraftValue, 10);
+    if (Number.isNaN(v) || v < 1 || v > 1440) return;
+    setResamplingInProgress(true);
+    onResamplingStepChange(v);
+    setTimeout(() => {
+      setResamplingInProgress(false);
+      setStepPopoverOpen(false);
+    }, 500);
+  };
+
+  const handleResetStep = () => {
+    setStepDraftValue(String(resamplingStepMinutes));
+    setStepPopoverOpen(false);
+  };
 
   const applyRangeText = () => {
     const parsed = parseRangeTextBar(rangeText);
@@ -1875,6 +1953,122 @@ function DateFilterBar({ dateFrom, dateTo, onDateFromChange, onDateToChange, onC
             </>
           )}
         </div>
+        {onResamplingStepChange != null && (
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 8, position: "relative" }}>
+            <span style={{ fontSize: 12, color: "#64748B", fontFamily: FONT, whiteSpace: "nowrap" }}>Resampling step (min)</span>
+            <div
+              ref={stepTriggerRef}
+              role="button"
+              tabIndex={0}
+              onClick={() => setStepPopoverOpen(true)}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setStepPopoverOpen(true); }}
+              style={{
+                minWidth: 56,
+                padding: "6px 10px",
+                borderRadius: 8,
+                border: "1.5px solid #E2E8F0",
+                fontFamily: MONO,
+                fontSize: 13,
+                color: "#0F172A",
+                background: "#fff",
+                cursor: "pointer",
+                outline: "none",
+              }}
+            >
+              {resamplingStepMinutes}
+            </div>
+            {stepPopoverOpen && (
+              <div
+                ref={stepPopoverRef}
+                style={{
+                  position: "absolute",
+                  top: "100%",
+                  right: 0,
+                  marginTop: 8,
+                  zIndex: 1001,
+                  background: "#fff",
+                  borderRadius: 12,
+                  border: "1px solid #E2E8F0",
+                  boxShadow: "0 10px 40px rgba(0,0,0,0.12)",
+                  padding: 16,
+                  minWidth: 220,
+                }}
+              >
+                {resamplingInProgress ? (
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 12, padding: "20px 16px" }}>
+                    <Spinner color={accentColor} size={28} />
+                    <span style={{ fontSize: 13, fontWeight: 600, color: "#64748B", fontFamily: FONT }}>Resampling data...</span>
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A", marginBottom: 10, fontFamily: FONT }}>Resampling step (minutes)</div>
+                    <input
+                      type="text"
+                      value={stepDraftValue}
+                      onChange={(e) => setStepDraftValue(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") handleValidateStep(); }}
+                      placeholder="e.g. 10"
+                      autoFocus
+                      style={{
+                        width: "100%",
+                        padding: "8px 10px",
+                        borderRadius: 8,
+                        border: "1.5px solid #E2E8F0",
+                        fontFamily: MONO,
+                        fontSize: 13,
+                        color: "#0F172A",
+                        background: "#fff",
+                        outline: "none",
+                        marginBottom: 12,
+                        boxSizing: "border-box",
+                      }}
+                    />
+                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                      <button
+                        type="button"
+                        onClick={handleResetStep}
+                        style={{
+                          padding: "6px 14px",
+                          borderRadius: 8,
+                          border: "1.5px solid #E2E8F0",
+                          background: "#fff",
+                          fontFamily: FONT,
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: "#64748B",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Reset
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleValidateStep}
+                        disabled={(() => {
+                          const v = parseInt(stepDraftValue, 10);
+                          return Number.isNaN(v) || v < 1 || v > 1440;
+                        })()}
+                        style={{
+                          padding: "6px 14px",
+                          borderRadius: 8,
+                          border: "none",
+                          background: accentColor,
+                          fontFamily: FONT,
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: "#fff",
+                          cursor: "pointer",
+                        }}
+                      >
+                        Validate
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {calendarOpen && (
@@ -2066,33 +2260,49 @@ function saveCache(key, value) {
 // ── Main Page ────────────────────────────────────────────────────────────────
 export default function QualityCheckPage() {
   const [pvFile, setPvFile] = useState(null);
-  const [pvData, setPvData] = useState(null);
+  const [pvRawData, setPvRawData] = useState(null);
   const [weatherFile, setWeatherFile] = useState(null);
-  const [weatherData, setWeatherData] = useState(null);
+  const [weatherRawData, setWeatherRawData] = useState(null);
   const [sysFile, setSysFile] = useState(null);
   const [sysData, setSysData] = useState(null);
   const [toast, setToast] = useState(null);
-  const [pvDateFrom, setPvDateFrom] = useState(null);
-  const [pvDateTo, setPvDateTo] = useState(null);
-  const [weatherDateFrom, setWeatherDateFrom] = useState(null);
-  const [weatherDateTo, setWeatherDateTo] = useState(null);
+  const [dateFrom, setDateFrom] = useState(null);
+  const [dateTo, setDateTo] = useState(null);
+  const [resamplingStepMinutes, setResamplingStepMinutes] = useState(10);
   const [syncRules, setSyncRules] = useState(DEFAULT_SYNC_RULES);
 
+  const pvData = useMemo(() => {
+    if (!pvRawData?.headers?.length || !pvRawData?.rows?.length) return null;
+    const r = resampleRowsToStep(pvRawData.headers, pvRawData.rows, resamplingStepMinutes);
+    return {
+      headers: r.headers,
+      rows: r.rows,
+      originalRows: pvRawData.rows.length,
+      resampledRows: r.rows.length,
+      resampled: r.resampled,
+      resampledStepMinutes: resamplingStepMinutes,
+    };
+  }, [pvRawData, resamplingStepMinutes]);
+
+  const weatherData = useMemo(() => {
+    if (!weatherRawData?.headers?.length || !weatherRawData?.rows?.length) return null;
+    const r = resampleRowsToStep(weatherRawData.headers, weatherRawData.rows, resamplingStepMinutes);
+    return {
+      headers: r.headers,
+      rows: r.rows,
+      originalRows: weatherRawData.rows.length,
+      resampledRows: r.rows.length,
+      resampled: r.resampled,
+      resampledStepMinutes: resamplingStepMinutes,
+    };
+  }, [weatherRawData, resamplingStepMinutes]);
+
   useEffect(() => {
-    // Only use cache that has current 10min resample version; re-apply 10min resample when restoring so hourly cache never shows
     const pv = loadCached(CACHE_PV, { requireResampleVersion: true });
     if (pv?.fileName && pv?.data) {
       const d = pv.data;
-      const resampled = resampleRowsTo10Min(d.headers, d.rows);
-      const out = {
-        headers: resampled.headers,
-        rows: resampled.rows,
-        originalRows: d.originalRows ?? d.rows?.length ?? 0,
-        resampledRows: resampled.resampledRows,
-        resampled: resampled.resampled,
-      };
       setPvFile(pv.fileName);
-      setPvData(out);
+      setPvRawData({ headers: d.headers, rows: d.rows });
     } else {
       try {
         const raw = localStorage.getItem(CACHE_PV);
@@ -2107,16 +2317,8 @@ export default function QualityCheckPage() {
     const weather = loadCached(CACHE_WEATHER, { requireResampleVersion: true });
     if (weather?.fileName && weather?.data) {
       const d = weather.data;
-      const resampled = resampleRowsTo10Min(d.headers, d.rows);
-      const out = {
-        headers: resampled.headers,
-        rows: resampled.rows,
-        originalRows: d.originalRows ?? d.rows?.length ?? 0,
-        resampledRows: resampled.resampledRows,
-        resampled: resampled.resampled,
-      };
       setWeatherFile(weather.fileName);
-      setWeatherData(out);
+      setWeatherRawData({ headers: d.headers, rows: d.rows });
     } else {
       try {
         const raw = localStorage.getItem(CACHE_WEATHER);
@@ -2140,12 +2342,12 @@ export default function QualityCheckPage() {
   }, []);
 
   const pvFilteredRows = useMemo(
-    () => pvData ? filterRowsByDateRange(pvData.headers, pvData.rows, pvDateFrom, pvDateTo) : [],
-    [pvData, pvDateFrom, pvDateTo]
+    () => pvData ? filterRowsByDateRange(pvData.headers, pvData.rows, dateFrom, dateTo) : [],
+    [pvData, dateFrom, dateTo]
   );
   const weatherFilteredRows = useMemo(
-    () => weatherData ? filterRowsByDateRange(weatherData.headers, weatherData.rows, weatherDateFrom, weatherDateTo) : [],
-    [weatherData, weatherDateFrom, weatherDateTo]
+    () => weatherData ? filterRowsByDateRange(weatherData.headers, weatherData.rows, dateFrom, dateTo) : [],
+    [weatherData, dateFrom, dateTo]
   );
 
   return (
@@ -2232,6 +2434,7 @@ export default function QualityCheckPage() {
             accept=".csv"
             color={O}
             file={pvFile}
+            templateFile="data_pv.csv"
             onFileUpload={async (file) => {
               try {
                 let data;
@@ -2251,27 +2454,18 @@ export default function QualityCheckPage() {
                   showToast(`"${file.name}" appears empty or has no data rows.`, "error");
                   return;
                 }
-                const resampled = resampleRowsTo10Min(data.headers, data.rows);
-                const out = {
-                  headers: resampled.headers,
-                  rows: resampled.rows,
-                  originalRows: data.originalRows ?? data.rows?.length ?? 0,
-                  resampledRows: resampled.resampledRows,
-                  resampled: resampled.resampled,
-                };
+                const raw = { headers: data.headers, rows: data.rows };
                 setPvFile(file.name);
-                setPvData(out);
-                saveCache(CACHE_PV, { fileName: file.name, data: out });
-                const msg = out.resampled
-                  ? `PV data loaded — ${out.resampledRows} 10 min rows (from ${out.originalRows} original)`
-                  : `PV data loaded — ${out.rows.length} rows, ${out.headers.length} columns`;
+                setPvRawData(raw);
+                saveCache(CACHE_PV, { fileName: file.name, data: raw });
+                const msg = `PV data loaded — ${data.rows.length} rows, ${data.headers.length} columns (resampled to ${resamplingStepMinutes} min)`;
                 showToast(msg);
               } catch (err) {
                 showToast(`Failed to process "${file.name}": ${err.message}`, "error");
               }
             }}
             onClear={() => {
-              setPvFile(null); setPvData(null); setPvDateFrom(null); setPvDateTo(null);
+              setPvFile(null); setPvRawData(null);
               saveCache(CACHE_PV, null);
             }}
             onError={(msg) => showToast(msg, "error")}
@@ -2282,6 +2476,7 @@ export default function QualityCheckPage() {
             accept=".csv"
             color={B}
             file={weatherFile}
+            templateFile="data_meteo.csv"
             onFileUpload={async (file) => {
               try {
                 let data;
@@ -2301,27 +2496,18 @@ export default function QualityCheckPage() {
                   showToast(`"${file.name}" appears empty or has no data rows.`, "error");
                   return;
                 }
-                const resampled = resampleRowsTo10Min(data.headers, data.rows);
-                const out = {
-                  headers: resampled.headers,
-                  rows: resampled.rows,
-                  originalRows: data.originalRows ?? data.rows?.length ?? 0,
-                  resampledRows: resampled.resampledRows,
-                  resampled: resampled.resampled,
-                };
+                const raw = { headers: data.headers, rows: data.rows };
                 setWeatherFile(file.name);
-                setWeatherData(out);
-                saveCache(CACHE_WEATHER, { fileName: file.name, data: out });
-                const msg = out.resampled
-                  ? `Weather data loaded — ${out.resampledRows} 10 min rows (from ${out.originalRows} original)`
-                  : `Weather data loaded — ${out.rows.length} rows, ${out.headers.length} columns`;
+                setWeatherRawData(raw);
+                saveCache(CACHE_WEATHER, { fileName: file.name, data: raw });
+                const msg = `Weather data loaded — ${data.rows.length} rows, ${data.headers.length} columns (resampled to ${resamplingStepMinutes} min)`;
                 showToast(msg);
               } catch (err) {
                 showToast(`Failed to process "${file.name}": ${err.message}`, "error");
               }
             }}
             onClear={() => {
-              setWeatherFile(null); setWeatherData(null); setWeatherDateFrom(null); setWeatherDateTo(null);
+              setWeatherFile(null); setWeatherRawData(null);
               saveCache(CACHE_WEATHER, null);
             }}
             onError={(msg) => showToast(msg, "error")}
@@ -2332,6 +2518,7 @@ export default function QualityCheckPage() {
             accept=".json"
             color={O}
             file={sysFile}
+            templateFile="system_info.json"
             onLoad={(name, text) => {
               const parsed = parseJSON(text);
               if (!parsed) {
@@ -2370,6 +2557,20 @@ export default function QualityCheckPage() {
           {sysData && (
             <JSONList data={sysData} />
           )}
+          {(pvData || weatherData) && (
+            <DateFilterBar
+              dateFrom={dateFrom}
+              dateTo={dateTo}
+              onDateFromChange={setDateFrom}
+              onDateToChange={setDateTo}
+              onClear={() => { setDateFrom(null); setDateTo(null); }}
+              totalRows={(pvData?.rows?.length ?? 0) + (weatherData?.rows?.length ?? 0)}
+              filteredRows={pvFilteredRows.length + weatherFilteredRows.length}
+              accentColor={P}
+              resamplingStepMinutes={resamplingStepMinutes}
+              onResamplingStepChange={setResamplingStepMinutes}
+            />
+          )}
           {pvData && (
             <div style={{
               background: "#ffffff",
@@ -2403,16 +2604,6 @@ export default function QualityCheckPage() {
                   </span>
                 </div>
               </div>
-              <DateFilterBar
-                dateFrom={pvDateFrom}
-                dateTo={pvDateTo}
-                onDateFromChange={setPvDateFrom}
-                onDateToChange={setPvDateTo}
-                onClear={() => { setPvDateFrom(null); setPvDateTo(null); }}
-                totalRows={pvData?.rows?.length ?? 0}
-                filteredRows={pvFilteredRows.length}
-                accentColor={O}
-              />
               <CSVTable
                 title="PV Data"
                 icon={<SolarPowerOutlined sx={{ fontSize: 20, color: O }} />}
@@ -2421,6 +2612,7 @@ export default function QualityCheckPage() {
                 rows={pvFilteredRows}
                 resampled={pvData.resampled}
                 originalRows={pvData.originalRows}
+                resampledStepMinutes={pvData.resampledStepMinutes}
               />
               <CSVChart
                 title="PV Data"
@@ -2464,16 +2656,6 @@ export default function QualityCheckPage() {
                   </span>
                 </div>
               </div>
-              <DateFilterBar
-                dateFrom={weatherDateFrom}
-                dateTo={weatherDateTo}
-                onDateFromChange={setWeatherDateFrom}
-                onDateToChange={setWeatherDateTo}
-                onClear={() => { setWeatherDateFrom(null); setWeatherDateTo(null); }}
-                totalRows={weatherData?.rows?.length ?? 0}
-                filteredRows={weatherFilteredRows.length}
-                accentColor={B}
-              />
               <CSVTable
                 title="Weather Data"
                 icon={<WbSunnyOutlined sx={{ fontSize: 20, color: B }} />}
@@ -2482,6 +2664,7 @@ export default function QualityCheckPage() {
                 rows={weatherFilteredRows}
                 resampled={weatherData.resampled}
                 originalRows={weatherData.originalRows}
+                resampledStepMinutes={weatherData.resampledStepMinutes}
               />
               <CSVChart
                 title="Weather Data"
