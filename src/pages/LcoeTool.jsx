@@ -14,6 +14,8 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import LocationOnOutlinedIcon from "@mui/icons-material/LocationOnOutlined";
 import { parsePvsystPdfClient } from "../utils/parsePvsystPdfClient";
+import { generateLcoeReport } from "../utils/generateLcoeReport";
+import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const G = "#FFB800", B = "#1d9bf0", O = "#ff7a45", Y = "#16a34a", P = "#8b5cf6";
@@ -672,6 +674,20 @@ export default function LcoeTool() {
                 <NI label="Performance Ratio" sub="PR from PVsyst"
                   value={p.performanceRatio} unit="%" min={50} max={100} step={0.01} onChange={set("performanceRatio")} />
               </div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+                <NI label="DC/AC Ratio" sub="Inverter sizing ratio"
+                  value={p.dcAcRatio} unit="" min={1} max={2} step={0.01} onChange={set("dcAcRatio")} />
+                <div style={{ marginBottom:13 }}>
+                  <Lbl sub="DC capacity / DC·AC ratio">Installed Capacity AC</Lbl>
+                  <div style={{
+                    background:"#F8FAFC", border:"1.5px solid #E2E8F0", borderRadius:8,
+                    padding:"7px 10px", fontFamily:"'JetBrains Mono'", fontSize:13,
+                    color:G, fontWeight:600
+                  }}>
+                    {fmt(p.systemCapacity / p.dcAcRatio, 1)} <span style={{ fontSize:11, color:"#64748B", fontWeight:400 }}>kWac</span>
+                  </div>
+                </div>
+              </div>
               <div style={{ marginBottom:14 }}>
                 <div style={{ fontSize:10, fontWeight:700, color:"#64748B", letterSpacing:".07em", textTransform:"uppercase", marginBottom:6 }}>
                   Annual Energy Production
@@ -921,24 +937,45 @@ export default function LcoeTool() {
                   color:lcoeColor, lineHeight:1 }}>{fmt(R.lcoe,4)}</span>
                 <span style={{ fontSize:12, color:"#64748B" }}>USD/kWh</span>
               </div>
-              <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                <span style={{
-                  fontSize:10,
-                  fontWeight:700,
-                  letterSpacing:".08em",
-                  textTransform:"uppercase",
-                  padding:"3px 10px",
-                  borderRadius:9999,
-                  background:lcoeColor+"15",
-                  border:`1px solid ${lcoeColor}33`,
-                  color:lcoeColor,
-                  fontFamily:"'Inter', system-ui, sans-serif"
-                }}>
-                  {lcoeRating}
-                </span>
-                <span style={{ fontSize:10, color:"#94a3b8", fontFamily:"'JetBrains Mono'" }}>
-                  {fmt(R.lcoe*1000,2)} $/MWh
-                </span>
+              <div style={{ display:"flex", alignItems:"center", gap:8, justifyContent:"space-between" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <span style={{
+                    fontSize:10,
+                    fontWeight:700,
+                    letterSpacing:".08em",
+                    textTransform:"uppercase",
+                    padding:"3px 10px",
+                    borderRadius:9999,
+                    background:lcoeColor+"15",
+                    border:`1px solid ${lcoeColor}33`,
+                    color:lcoeColor,
+                    fontFamily:"'Inter', system-ui, sans-serif"
+                  }}>
+                    {lcoeRating}
+                  </span>
+                  <span style={{ fontSize:10, color:"#94a3b8", fontFamily:"'JetBrains Mono'" }}>
+                    {fmt(R.lcoe*1000,2)} $/MWh
+                  </span>
+                </div>
+                <button
+                  onClick={() => generateLcoeReport(p, R, sens, CAPEX_CATS).catch(err => console.error("PDF generation failed:", err))}
+                  style={{
+                    display:"flex", alignItems:"center", gap:5,
+                    padding:"5px 14px", borderRadius:8,
+                    background:"#1F2937", color:"#fff",
+                    border:"none", cursor:"pointer",
+                    fontSize:10, fontWeight:600,
+                    fontFamily:"'Inter', system-ui, sans-serif",
+                    letterSpacing:".03em",
+                    transition:"background .15s",
+                    zIndex:1,
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background="#374151"}
+                  onMouseLeave={e => e.currentTarget.style.background="#1F2937"}
+                >
+                  <FileDownloadOutlinedIcon style={{ fontSize:14 }} />
+                  Download Report
+                </button>
               </div>
             </Card>
           </div>
