@@ -376,7 +376,16 @@ function checkPage(doc, y, needed, margin, pageH, addFooter) {
 }
 
 // ── Main PDF generator ──────────────────────────────────────────────────────
-export async function generateLcoeReport(p, R, sens, CAPEX_CATS) {
+// jsPDF built-in Helvetica only supports basic Latin chars; map safe symbols
+const PDF_SAFE_SYMBOLS = new Set([..."$€£¥Fr"]);
+const safeSym = (sym) => PDF_SAFE_SYMBOLS.has(sym) ? sym : sym.replace(/[^\x20-\x7E€£¥]/g, "") || sym;
+
+export async function generateLcoeReport(p, R, sens, CAPEX_CATS, currOpts = {}) {
+  const { currency = "USD", exchangeRate = 1 } = currOpts;
+  // Use currency code as symbol in PDF if the symbol contains non-Latin chars
+  const rawSym = currOpts.currSym || "$";
+  const currSym = safeSym(rawSym) || currency;
+  const cx = v => v * exchangeRate;
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
   const pageH = doc.internal.pageSize.getHeight();
@@ -477,12 +486,12 @@ export async function generateLcoeReport(p, R, sens, CAPEX_CATS) {
   doc.setFont("helvetica", "bold");
   doc.setFontSize(28);
   doc.setTextColor(...lcoeColor);
-  doc.text(`${fmt(R.lcoe, 4)} USD/kWh`, margin + 8, y + 16);
+  doc.text(`${fmt(cx(R.lcoe), 4)} ${currency}/kWh`, margin + 8, y + 16);
 
   // Rating badge
   doc.setFontSize(10);
   doc.setTextColor(...lcoeColor);
-  doc.text(`${lcoeRating}  ·  ${fmt(lcoeMwh, 2)} $/MWh`, margin + 8, y + 25);
+  doc.text(`${lcoeRating}  ·  ${fmt(cx(lcoeMwh), 2)} ${currSym}/MWh`, margin + 8, y + 25);
 
   y += 38;
 
@@ -490,12 +499,12 @@ export async function generateLcoeReport(p, R, sens, CAPEX_CATS) {
   y = sectionHeader(doc, "Key Performance Indicators", y, margin);
 
   const kpiData = [
-    ["Total CAPEX", `$${fmtK(R.capexTotal)}`, `${fmt(R.capexTotal / p.systemCapacity, 0)} $/kWp`],
+    ["Total CAPEX", `${currSym}${fmtK(cx(R.capexTotal))}`, `${fmt(cx(R.capexTotal / p.systemCapacity), 0)} ${currSym}/kWp`],
     ["Capacity Factor", `${fmt(R.capacityFactor, 2)}%`, `${fmt(R.lifeEnMWh, 0)} MWh lifetime`],
-    ["Simple Payback", isFinite(R.simplePayback) ? `${fmt(R.simplePayback, 2)} yrs` : "—", `at ${fmt(p.tariffPrice, 3)} $/kWh`],
+    ["Simple Payback", isFinite(R.simplePayback) ? `${fmt(R.simplePayback, 2)} yrs` : "—", `at ${fmt(cx(p.tariffPrice), 3)} ${currSym}/kWh`],
     ["Discounted Payback", R.discountedPayback ? `${fmt(R.discountedPayback, 1)} yrs` : "—", `at ${fmt(p.discountRate, 2)}% WACC`],
-    ["IRR", R.irr ? `${fmt(R.irr, 2)}%` : "—", R.projectNpv >= 0 ? `NPV +$${fmtK(R.projectNpv)}` : `NPV -$${fmtK(Math.abs(R.projectNpv))}`],
-    ["LCOE (MWh)", `$${fmt(lcoeMwh, 2)}/MWh`, lcoeRating],
+    ["IRR", R.irr ? `${fmt(R.irr, 2)}%` : "—", R.projectNpv >= 0 ? `NPV +${currSym}${fmtK(cx(R.projectNpv))}` : `NPV -${currSym}${fmtK(cx(Math.abs(R.projectNpv)))}`],
+    ["LCOE (MWh)", `${currSym}${fmt(cx(lcoeMwh), 2)}/MWh`, lcoeRating],
   ];
 
   autoTable(doc, {
@@ -542,8 +551,8 @@ export async function generateLcoeReport(p, R, sens, CAPEX_CATS) {
     ["Linear Degradation", `${fmt(p.linearDeg * 100, 2)}%/yr`],
     ["Project Lifetime", `${p.projectLifetime} years`],
     ["Discount Rate (WACC)", `${fmt(p.discountRate, 2)}%`],
-    ["O&M Cost", `${fmt(p.omPerKwp, 1)} $/kWp/yr`],
-    ["Tariff / PPA Rate", `${fmt(p.tariffPrice, 3)} $/kWh`],
+    ["O&M Cost", `${fmt(cx(p.omPerKwp), 1)} ${currSym}/kWp/yr`],
+    ["Tariff / PPA Rate", `${fmt(cx(p.tariffPrice), 3)} ${currSym}/kWh`],
   ];
 
   autoTable(doc, {
@@ -594,7 +603,7 @@ export async function generateLcoeReport(p, R, sens, CAPEX_CATS) {
     doc.text(c.label, margin + contentW / 2 + 11, legY + 0.5);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(...GRAY);
-    doc.text(`$${fmtK(c.localTotal)}  (${fmt((c.localTotal / R.capexTotal) * 100, 1)}%)`, margin + contentW / 2 + 11, legY + 5);
+    doc.text(`${currSym}${fmtK(cx(c.localTotal))}  (${fmt((c.localTotal / R.capexTotal) * 100, 1)}%)`, margin + contentW / 2 + 11, legY + 5);
     legY += 12;
   });
   y += 60;
@@ -602,20 +611,20 @@ export async function generateLcoeReport(p, R, sens, CAPEX_CATS) {
   // Category summary
   const catSummary = R.catTotals.map((c) => [
     c.label,
-    `${fmt(c.usdKwp, 1)} $/kWp`,
-    `$${fmtK(c.localTotal)}`,
+    `${fmt(cx(c.usdKwp), 1)} ${currSym}/kWp`,
+    `${currSym}${fmtK(cx(c.localTotal))}`,
     `${fmt((c.localTotal / R.capexTotal) * 100, 1)}%`,
   ]);
   catSummary.push([
     "TOTAL",
-    `${fmt(R.capexTotal / p.systemCapacity, 1)} $/kWp`,
-    `$${fmtK(R.capexTotal)}`,
+    `${fmt(cx(R.capexTotal / p.systemCapacity), 1)} ${currSym}/kWp`,
+    `${currSym}${fmtK(cx(R.capexTotal))}`,
     "100.0%",
   ]);
 
   autoTable(doc, {
     startY: y,
-    head: [["Category", "$/kWp", "Total Cost", "Share"]],
+    head: [["Category", `${currSym}/kWp`, "Total Cost", "Share"]],
     body: catSummary,
     margin: { left: margin, right: margin },
     styles: {
@@ -658,12 +667,12 @@ export async function generateLcoeReport(p, R, sens, CAPEX_CATS) {
 
     const items = cat.items.map((item) => [
       item.label,
-      `${fmt(p.capex[item.id] || 0, 1)} $/kWp`,
-      `$${fmtK((p.capex[item.id] || 0) * p.systemCapacity)}`,
+      `${fmt(cx(p.capex[item.id] || 0), 1)} ${currSym}/kWp`,
+      `${currSym}${fmtK(cx((p.capex[item.id] || 0) * p.systemCapacity))}`,
     ]);
 
     const catTotal = cat.items.reduce((s, i) => s + (p.capex[i.id] || 0), 0);
-    items.push(["Subtotal", `${fmt(catTotal, 1)} $/kWp`, `$${fmtK(catTotal * p.systemCapacity)}`]);
+    items.push(["Subtotal", `${fmt(cx(catTotal), 1)} ${currSym}/kWp`, `${currSym}${fmtK(cx(catTotal * p.systemCapacity))}`]);
 
     autoTable(doc, {
       startY: y,
@@ -724,7 +733,7 @@ export async function generateLcoeReport(p, R, sens, CAPEX_CATS) {
     `Year ${r.year}`,
     `${fmt(r.energyMWh, 1)} MWh`,
     `${fmt(r.degF, 1)}%`,
-    `$${fmtK(r.discCost)}`,
+    `${currSym}${fmtK(cx(r.discCost))}`,
   ]);
 
   // Available space on page (subtract header area + bottom margin)
@@ -797,10 +806,10 @@ export async function generateLcoeReport(p, R, sens, CAPEX_CATS) {
   const cfRows = R.cashFlowRows;
   const cfShow = cfRows.map((r) => [
     `Year ${r.year}`,
-    `$${fmtK(r.discountedRevenue)}`,
-    `$${fmtK(Math.abs(r.discountedOpex))}`,
-    `$${fmtK(r.discountedNetCashFlow)}`,
-    `$${fmtK(r.cumulativeDiscountedCashFlow)}`,
+    `${currSym}${fmtK(cx(r.discountedRevenue))}`,
+    `${currSym}${fmtK(cx(Math.abs(r.discountedOpex)))}`,
+    `${currSym}${fmtK(cx(r.discountedNetCashFlow))}`,
+    `${currSym}${fmtK(cx(r.cumulativeDiscountedCashFlow))}`,
   ]);
 
   // Adapt font size and padding to fit all rows on one page
@@ -903,12 +912,12 @@ export async function generateLcoeReport(p, R, sens, CAPEX_CATS) {
     `  E_t = E_0 x (${fmt(p.firstYearFactor, 3)} - ${fmt(p.linearDeg, 4)} x t), for t >= 1`,
     "",
     "Cost Model:",
-    `  Cost_0 = CAPEX = $${fmtK(R.capexTotal)}`,
-    `  Cost_t = O&M = $${fmtK(R.omAnnual)}/yr (constant)`,
+    `  Cost_0 = CAPEX = ${currSym}${fmtK(cx(R.capexTotal))}`,
+    `  Cost_t = O&M = ${currSym}${fmtK(cx(R.omAnnual))}/yr (constant)`,
     "",
     "Discounting:",
     `  r = WACC = ${fmt(p.discountRate, 2)}%`,
-    `  NPV of all costs = $${fmtK(R.totalDiscC)}`,
+    `  NPV of all costs = ${currSym}${fmtK(cx(R.totalDiscC))}`,
     `  Discounted energy = ${fmtK(R.totalDiscE)} kWh`,
   ];
 

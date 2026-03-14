@@ -16,6 +16,59 @@ import LocationOnOutlinedIcon from "@mui/icons-material/LocationOnOutlined";
 import { parsePvsystPdfClient } from "../utils/parsePvsystPdfClient";
 import { generateLcoeReport } from "../utils/generateLcoeReport";
 import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
+import CurrencyExchangeOutlinedIcon from "@mui/icons-material/CurrencyExchangeOutlined";
+
+// ── Currency data ─────────────────────────────────────────────────────────────
+const CURRENCIES = [
+  { code:"USD", symbol:"$",  name:"US Dollar" },
+  { code:"EUR", symbol:"€",  name:"Euro" },
+  { code:"GBP", symbol:"£",  name:"British Pound" },
+  { code:"AED", symbol:"د.إ", name:"UAE Dirham" },
+  { code:"SAR", symbol:"﷼",  name:"Saudi Riyal" },
+  { code:"MAD", symbol:"MAD", name:"Moroccan Dirham" },
+  { code:"JPY", symbol:"¥",  name:"Japanese Yen" },
+  { code:"CNY", symbol:"¥",  name:"Chinese Yuan" },
+  { code:"INR", symbol:"₹",  name:"Indian Rupee" },
+  { code:"BRL", symbol:"R$", name:"Brazilian Real" },
+  { code:"ZAR", symbol:"R",  name:"South African Rand" },
+  { code:"AUD", symbol:"A$", name:"Australian Dollar" },
+  { code:"CAD", symbol:"C$", name:"Canadian Dollar" },
+  { code:"CHF", symbol:"Fr", name:"Swiss Franc" },
+  { code:"SEK", symbol:"kr", name:"Swedish Krona" },
+  { code:"NOK", symbol:"kr", name:"Norwegian Krone" },
+  { code:"DKK", symbol:"kr", name:"Danish Krone" },
+  { code:"PLN", symbol:"zł", name:"Polish Zloty" },
+  { code:"CZK", symbol:"Kč", name:"Czech Koruna" },
+  { code:"HUF", symbol:"Ft", name:"Hungarian Forint" },
+  { code:"TRY", symbol:"₺",  name:"Turkish Lira" },
+  { code:"MXN", symbol:"$",  name:"Mexican Peso" },
+  { code:"ARS", symbol:"$",  name:"Argentine Peso" },
+  { code:"CLP", symbol:"$",  name:"Chilean Peso" },
+  { code:"COP", symbol:"$",  name:"Colombian Peso" },
+  { code:"PEN", symbol:"S/", name:"Peruvian Sol" },
+  { code:"EGP", symbol:"£",  name:"Egyptian Pound" },
+  { code:"NGN", symbol:"₦",  name:"Nigerian Naira" },
+  { code:"KES", symbol:"KSh",name:"Kenyan Shilling" },
+  { code:"GHS", symbol:"₵",  name:"Ghanaian Cedi" },
+  { code:"PKR", symbol:"₨",  name:"Pakistani Rupee" },
+  { code:"BDT", symbol:"৳",  name:"Bangladeshi Taka" },
+  { code:"IDR", symbol:"Rp", name:"Indonesian Rupiah" },
+  { code:"MYR", symbol:"RM", name:"Malaysian Ringgit" },
+  { code:"THB", symbol:"฿",  name:"Thai Baht" },
+  { code:"VND", symbol:"₫",  name:"Vietnamese Dong" },
+  { code:"PHP", symbol:"₱",  name:"Philippine Peso" },
+  { code:"KRW", symbol:"₩",  name:"South Korean Won" },
+  { code:"TWD", symbol:"NT$",name:"Taiwan Dollar" },
+  { code:"SGD", symbol:"S$", name:"Singapore Dollar" },
+  { code:"HKD", symbol:"HK$",name:"Hong Kong Dollar" },
+  { code:"NZD", symbol:"NZ$",name:"New Zealand Dollar" },
+  { code:"ILS", symbol:"₪",  name:"Israeli Shekel" },
+  { code:"QAR", symbol:"﷼",  name:"Qatari Riyal" },
+  { code:"KWD", symbol:"د.ك", name:"Kuwaiti Dinar" },
+  { code:"BHD", symbol:"BD", name:"Bahraini Dinar" },
+  { code:"OMR", symbol:"﷼",  name:"Omani Rial" },
+  { code:"JOD", symbol:"JD", name:"Jordanian Dinar" },
+];
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 const G = "#FFB800", B = "#1d9bf0", O = "#ff7a45", Y = "#16a34a", P = "#8b5cf6";
@@ -290,6 +343,15 @@ export default function LcoeTool() {
   const [pdfState, setPdfState] = useState({ status: "idle", filename: "", extracted: null, error: null });
   const [dragOver, setDragOver] = useState(false);
   const [overviewOpen, setOverviewOpen] = useState(false);
+  const [showCurrencyPopup, setShowCurrencyPopup] = useState(false);
+  const [currency, setCurrency] = useState("USD");
+  const [exchangeRate, setExchangeRate] = useState(1);
+  const [tempCurrency, setTempCurrency] = useState("USD");
+  const [tempRate, setTempRate] = useState(1);
+
+  const currObj = CURRENCIES.find(c => c.code === currency) || CURRENCIES[0];
+  const currSym = currObj.symbol;
+  const cx = useCallback(v => v * exchangeRate, [exchangeRate]);
 
   const set = useCallback(key => val => setP(prev => {
     const next = { ...prev, [key]: val };
@@ -472,9 +534,9 @@ export default function LcoeTool() {
                   Key results (current inputs)
                 </div>
                 <div style={{ fontSize:12, color:"#1F2933", lineHeight:1.6, fontFamily:"'JetBrains Mono'" }}>
-                  <div>LCOE = {fmt(R.lcoe,4)} USD/kWh</div>
-                  <div>CAPEX = ${fmtK(R.capexTotal)}</div>
-                  <div>NPV Costs = ${fmtK(R.totalDiscC)}</div>
+                  <div>LCOE = {fmt(cx(R.lcoe),4)} {currency}/kWh</div>
+                  <div>CAPEX = {currSym}{fmtK(cx(R.capexTotal))}</div>
+                  <div>NPV Costs = {currSym}{fmtK(cx(R.totalDiscC))}</div>
                   <div>Disc. Energy ≈ {fmt(R.totalDiscE/1000,2)} MWh</div>
                 </div>
                 <p style={{ fontSize:11, color:"#64748B", marginTop:8, lineHeight:1.6 }}>
@@ -807,7 +869,7 @@ export default function LcoeTool() {
                 <ConstructionOutlinedIcon sx={{ fontSize:20, color: ICON_COLOR }} />
                 <div>
                   <div style={{ fontWeight:700, fontSize:13, color:"#0F172A" }}>CAPEX Breakdown</div>
-                  <div style={{ fontSize:10, color:"#94a3b8" }}>USD/kWp per item · total converts to USD</div>
+                  <div style={{ fontSize:10, color:"#94a3b8" }}>{currency}/kWp per item · total converts to {currency}</div>
                 </div>
               </div>
               {CAPEX_CATS.map(cat => {
@@ -825,7 +887,7 @@ export default function LcoeTool() {
                           color:cat.color, letterSpacing:".05em", textTransform:"uppercase" }}>{cat.label}</span>
                       </div>
                       <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                        <span style={{ fontFamily:"'JetBrains Mono'", fontSize:11, color:"#475569" }}>{fmt(catSum,1)} USD/kWp</span>
+                        <span style={{ fontFamily:"'JetBrains Mono'", fontSize:11, color:"#475569" }}>{fmt(cx(catSum),1)} {currency}/kWp</span>
                         <span style={{ color:"#64748B", fontSize:11 }}>{isOpen?"▲":"▼"}</span>
                       </div>
                     </button>
@@ -835,11 +897,11 @@ export default function LcoeTool() {
                           <div key={item.id} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:7 }}>
                             <div style={{ fontSize:11, color:"#64748B", flex:1 }}>{item.label}</div>
                             <div style={{ width:110, position:"relative" }}>
-                              <input type="number" value={p.capex[item.id]} min={0} step={0.1}
-                                onChange={e=>setCapex(item.id, parseFloat(e.target.value)||0)}
+                              <input type="number" value={parseFloat(cx(p.capex[item.id]).toFixed(2))} min={0} step={0.1}
+                                onChange={e=>setCapex(item.id, (parseFloat(e.target.value)||0)/exchangeRate)}
                                 style={{ paddingRight:42 }} />
                               <span style={{ position:"absolute", right:7, top:"50%", transform:"translateY(-50%)",
-                                fontSize:9, color:"#64748B", fontFamily:"'JetBrains Mono'", pointerEvents:"none" }}>$/kWp</span>
+                                fontSize:9, color:"#64748B", fontFamily:"'JetBrains Mono'", pointerEvents:"none" }}>{currSym}/kWp</span>
                             </div>
                           </div>
                         ))}
@@ -850,9 +912,9 @@ export default function LcoeTool() {
               })}
               <div style={{ background:"#fffdf7", borderRadius:7, padding:"12px 14px", border:"1.5px solid #FFE082", marginTop:10 }}>
                 {[
-                  { label:"Total (USD/kWp)",      v:`${fmt(R.capexUsdKwp,1)} USD/kWp` },
-                  { label:"Total (USD)", v:`$${fmtK(R.capexTotal)}`, hi:true },
-                  { label:`Per kWp ($/kWp)`, v:`${fmt(R.capexTotal/p.systemCapacity,0)} $/kWp` },
+                  { label:`Total (${currency}/kWp)`,      v:`${fmt(cx(R.capexUsdKwp),1)} ${currency}/kWp` },
+                  { label:`Total (${currency})`, v:`${currSym}${fmtK(cx(R.capexTotal))}`, hi:true },
+                  { label:`Per kWp (${currSym}/kWp)`, v:`${fmt(cx(R.capexTotal/p.systemCapacity),0)} ${currSym}/kWp` },
                 ].map(({label,v,hi})=>(
                   <div key={label} style={{ display:"flex", justifyContent:"space-between", padding:"5px 0", borderBottom:"1px solid #E2E8F0" }}>
                     <span style={{ fontSize:11, color:"#64748B" }}>{label}</span>
@@ -895,22 +957,22 @@ export default function LcoeTool() {
                   <div style={{ fontSize:10, color:"#94a3b8" }}>WACC · O&M · tariff · project life</div>
                 </div>
               </div>
-              <NI label="O&M Cost" sub="$/kWp/yr · constant (no escalation)"
-                value={p.omPerKwp} unit="$/kWp" min={0} max={500} step={0.5} onChange={set("omPerKwp")} />
+              <NI label="O&M Cost" sub={`${currSym}/kWp/yr · constant (no escalation)`}
+                value={parseFloat(cx(p.omPerKwp).toFixed(2))} unit={`${currSym}/kWp`} min={0} max={cx(500)} step={0.5} onChange={v => set("omPerKwp")(v/exchangeRate)} />
               <Sl label="Discount Rate (WACC)" value={p.discountRate}
                 min={1} max={20} step={0.25} unit="%" onChange={set("discountRate")} />
               <Sl label="Project Lifetime" value={p.projectLifetime}
                 min={10} max={40} step={1} unit=" yrs" onChange={set("projectLifetime")} dp={0} />
               <Div label="Revenue (for IRR & Payback)" />
               <NI label="PPA / Feed-in Tariff" sub="used for IRR and payback only — not for LCOE"
-                value={p.tariffPrice} unit="$/kWh" min={0} max={0.5} step={0.001} onChange={set("tariffPrice")} />
+                value={parseFloat(cx(p.tariffPrice).toFixed(4))} unit={`${currSym}/kWh`} min={0} max={cx(0.5)} step={0.001} onChange={v => set("tariffPrice")(v/exchangeRate)} />
               <Div label="Financial Summary" />
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
                 {[
-                  { label:"Annual O&M",     v:`$${fmtK(R.omAnnual)}` },
-                  { label:"O&M NPV",        v:`$${fmtK(R.opexNpv)}` },
-                  { label:"Annual Revenue (yr 1)", v:`$${fmtK(p.annualEnergy*p.firstYearFactor*p.tariffPrice)}` },
-                  { label:"Net yr-1 Cashflow", v:`$${fmtK(p.annualEnergy*p.firstYearFactor*p.tariffPrice-R.omAnnual)}` },
+                  { label:"Annual O&M",     v:`${currSym}${fmtK(cx(R.omAnnual))}` },
+                  { label:"O&M NPV",        v:`${currSym}${fmtK(cx(R.opexNpv))}` },
+                  { label:"Annual Revenue (yr 1)", v:`${currSym}${fmtK(cx(p.annualEnergy*p.firstYearFactor*p.tariffPrice))}` },
+                  { label:"Net yr-1 Cashflow", v:`${currSym}${fmtK(cx(p.annualEnergy*p.firstYearFactor*p.tariffPrice-R.omAnnual))}` },
                 ].map(({label,v})=>(
                   <div key={label} style={{ background:"#fffdf7", borderRadius:6, padding:"8px 10px", border:"1px solid #E2E8F0" }}>
                     <div style={{ fontSize:9, color:"#94a3b8", marginBottom:3, fontWeight:700, letterSpacing:".07em", textTransform:"uppercase" }}>{label}</div>
@@ -930,12 +992,35 @@ export default function LcoeTool() {
             <Card className="kpi-lcoe" glow={lcoeColor} style={{ background:"#FFFFFF", boxShadow:"0 2px 20px rgba(232,160,32,.08)", position:"relative", overflow:"hidden" }}>
               <div style={{ position:"absolute", top:-20, right:-20, width:100, height:100,
                 borderRadius:"50%", background:`radial-gradient(circle,${lcoeColor}22,transparent 70%)` }} />
+              {/* ── Currency badge top-right ── */}
+              <div style={{ position:"absolute", top:12, right:14, zIndex:2 }}>
+                <button
+                  onClick={() => { setTempCurrency(currency); setTempRate(exchangeRate); setShowCurrencyPopup(true); }}
+                  style={{
+                    display:"flex", alignItems:"center", gap:4,
+                    padding:"4px 10px", borderRadius:8,
+                    background:"#F1F5F9", color:"#334155",
+                    border:"1.5px solid #E2E8F0", cursor:"pointer",
+                    fontSize:10, fontWeight:700,
+                    fontFamily:"'JetBrains Mono', monospace",
+                    letterSpacing:".04em",
+                    transition:"all .15s",
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background="#E2E8F0"; e.currentTarget.style.borderColor="#CBD5E1"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background="#F1F5F9"; e.currentTarget.style.borderColor="#E2E8F0"; }}
+                >
+                  <CurrencyExchangeOutlinedIcon style={{ fontSize:13 }} />
+                  {currency}
+                  {exchangeRate !== 1 && <span style={{ fontSize:8, color:"#94a3b8", fontWeight:400 }}>×{fmt(exchangeRate,2)}</span>}
+                </button>
+              </div>
+              {/* ── Currency popup (rendered via portal-like fixed positioning) ── */}
               <div style={{ fontSize:9, color:"#94a3b8", fontWeight:700, letterSpacing:".08em",
                 textTransform:"uppercase", marginBottom:8, whiteSpace:"nowrap" }}>Levelized Cost of Energy</div>
               <div style={{ display:"flex", alignItems:"baseline", gap:6, marginBottom:8 }}>
                 <span style={{ fontFamily:"'JetBrains Mono'", fontSize:"clamp(28px,4vw,42px)", fontWeight:700,
-                  color:lcoeColor, lineHeight:1 }}>{fmt(R.lcoe,4)}</span>
-                <span style={{ fontSize:12, color:"#64748B" }}>USD/kWh</span>
+                  color:lcoeColor, lineHeight:1 }}>{fmt(cx(R.lcoe),4)}</span>
+                <span style={{ fontSize:12, color:"#64748B" }}>{currency}/kWh</span>
               </div>
               <div style={{ display:"flex", alignItems:"center", gap:8, justifyContent:"space-between" }}>
                 <div style={{ display:"flex", alignItems:"center", gap:8 }}>
@@ -954,11 +1039,11 @@ export default function LcoeTool() {
                     {lcoeRating}
                   </span>
                   <span style={{ fontSize:10, color:"#94a3b8", fontFamily:"'JetBrains Mono'" }}>
-                    {fmt(R.lcoe*1000,2)} $/MWh
+                    {fmt(cx(R.lcoe*1000),2)} {currSym}/MWh
                   </span>
                 </div>
                 <button
-                  onClick={() => generateLcoeReport(p, R, sens, CAPEX_CATS).catch(err => console.error("PDF generation failed:", err))}
+                  onClick={() => generateLcoeReport(p, R, sens, CAPEX_CATS, { currency, exchangeRate, currSym }).catch(err => console.error("PDF generation failed:", err))}
                   style={{
                     display:"flex", alignItems:"center", gap:5,
                     padding:"5px 14px", borderRadius:8,
@@ -982,15 +1067,15 @@ export default function LcoeTool() {
           {/* ── Row 2: 4 metric cards ── */}
           <div className="fu fu1" style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:12, marginBottom:4 }}>
             {[
-              { label:"Total CAPEX", value:`$${fmtK(R.capexTotal)}`,
-                sub:`${fmt(R.capexTotal/p.systemCapacity,0)} $/kWp`, color:B },
+              { label:"Total CAPEX", value:`${currSym}${fmtK(cx(R.capexTotal))}`,
+                sub:`${fmt(cx(R.capexTotal/p.systemCapacity),0)} ${currSym}/kWp`, color:B },
               { label:"Capacity Factor", value:`${fmt(R.capacityFactor,2)}%`,
                 sub:`${fmt(R.lifeEnMWh,0)} MWh lifetime`, color:P },
               { label:"Payback (TRI)",
                 value:isFinite(R.simplePayback)?`${fmt(R.simplePayback,2)} yrs`:"—",
-                sub:`at ${fmt(p.tariffPrice,3)} $/kWh`, color:Y },
+                sub:`at ${fmt(cx(p.tariffPrice),3)} ${currSym}/kWh`, color:Y },
               { label:"IRR", value:R.irr?`${fmt(R.irr,2)}%`:"—",
-                sub:R.projectNpv>=0?`NPV +$${fmtK(R.projectNpv)}`:`NPV -$${fmtK(Math.abs(R.projectNpv))}`,
+                sub:R.projectNpv>=0?`NPV +${currSym}${fmtK(cx(R.projectNpv))}`:`NPV -${currSym}${fmtK(cx(Math.abs(R.projectNpv)))}`,
                 color:R.irr&&R.irr>p.discountRate?G:O },
             ].map(({label,value,sub,color})=>(
               <Card key={label} style={{ border:`1px solid ${color}1e` }}>
@@ -1021,7 +1106,7 @@ export default function LcoeTool() {
                 </div>
                 <Chart key={`energy-${p.projectLifetime}`} type="area" height={300} series={[
                     { name: "Energy (MWh)", data: R.rows.map(r => r.energyMWh) },
-                    { name: "Disc. O&M ($)", data: R.rows.map(r => r.discCost) },
+                    { name: `Disc. O&M (${currSym})`, data: R.rows.map(r => cx(r.discCost)) },
                   ]} options={{
                     ...APEX_BASE,
                     chart: { ...APEX_BASE.chart, type: "area" },
@@ -1056,13 +1141,13 @@ export default function LcoeTool() {
                     const vis = (name, data) => hiddenCfSeries[name] ? data.map(() => null) : data;
                     const visVals = (name, vals) => hiddenCfSeries[name] ? [] : vals;
                     const leftVals  = [
-                      ...visVals("Discounted revenue",  R.cashFlowRows.map(r => r.discountedRevenue)),
-                      ...visVals("Discounted OPEX (−)", R.cashFlowRows.map(r => r.discountedOpex)),
+                      ...visVals("Discounted revenue",  R.cashFlowRows.map(r => cx(r.discountedRevenue))),
+                      ...visVals("Discounted OPEX (−)", R.cashFlowRows.map(r => cx(r.discountedOpex))),
                     ];
                     const rightVals = [
-                      ...visVals("Discounted CAPEX (−)",       R.cashFlowRows.map(r => r.discountedCapex)),
-                      ...visVals("Discounted net cash flow",   R.cashFlowRows.map(r => r.discountedNetCashFlow)),
-                      ...visVals("Cumulative disc. cash flow", R.cashFlowRows.map(r => r.cumulativeDiscountedCashFlow)),
+                      ...visVals("Discounted CAPEX (−)",       R.cashFlowRows.map(r => cx(r.discountedCapex))),
+                      ...visVals("Discounted net cash flow",   R.cashFlowRows.map(r => cx(r.discountedNetCashFlow))),
+                      ...visVals("Cumulative disc. cash flow", R.cashFlowRows.map(r => cx(r.cumulativeDiscountedCashFlow))),
                     ];
                     // Compute natural pos/neg extents per axis, then align zeros
                     const posL = (Math.max(...leftVals.filter(v => v >= 0),  0) || 1) * 1.15;
@@ -1077,11 +1162,11 @@ export default function LcoeTool() {
                     const [minR, maxR] = [-totalR * zeroRatio, totalR * (1 - zeroRatio)];
                     return (
                       <Chart key={`cashflow-${p.projectLifetime}`} type="line" height={340} series={[
-                          { name: "Discounted revenue",        type: "column", data: vis("Discounted revenue",        R.cashFlowRows.map(r => r.discountedRevenue)) },
-                          { name: "Discounted OPEX (−)",       type: "column", data: vis("Discounted OPEX (−)",        R.cashFlowRows.map(r => r.discountedOpex)) },
-                          { name: "Discounted CAPEX (−)",      type: "column", data: vis("Discounted CAPEX (−)",       R.cashFlowRows.map(r => r.discountedCapex)) },
-                          { name: "Discounted net cash flow",  type: "line",   data: vis("Discounted net cash flow",   R.cashFlowRows.map(r => r.discountedNetCashFlow)) },
-                          { name: "Cumulative disc. cash flow",type: "line",   data: vis("Cumulative disc. cash flow", R.cashFlowRows.map(r => r.cumulativeDiscountedCashFlow)) },
+                          { name: "Discounted revenue",        type: "column", data: vis("Discounted revenue",        R.cashFlowRows.map(r => cx(r.discountedRevenue))) },
+                          { name: "Discounted OPEX (−)",       type: "column", data: vis("Discounted OPEX (−)",        R.cashFlowRows.map(r => cx(r.discountedOpex))) },
+                          { name: "Discounted CAPEX (−)",      type: "column", data: vis("Discounted CAPEX (−)",       R.cashFlowRows.map(r => cx(r.discountedCapex))) },
+                          { name: "Discounted net cash flow",  type: "line",   data: vis("Discounted net cash flow",   R.cashFlowRows.map(r => cx(r.discountedNetCashFlow))) },
+                          { name: "Cumulative disc. cash flow",type: "line",   data: vis("Cumulative disc. cash flow", R.cashFlowRows.map(r => cx(r.cumulativeDiscountedCashFlow))) },
                         ]} options={{
                           ...APEX_BASE,
                           chart: { ...APEX_BASE.chart, type: "line", stacked: false },
@@ -1093,14 +1178,14 @@ export default function LcoeTool() {
                           plotOptions: { bar: { columnWidth: "55%", borderRadius: 2 } },
                           xaxis: { ...APEX_BASE.xaxis, categories: R.cashFlowRows.map(r => r.year), tickAmount: Math.min(p.projectLifetime, 20), title: { text: "Year", style: { color: "#94a3b8", fontSize: "10px" } }, labels: { ...APEX_BASE.xaxis.labels, rotate: p.projectLifetime > 25 ? -45 : 0, rotateAlways: p.projectLifetime > 25 } },
                           yaxis: [
-                            { ...APEX_BASE.yaxis, min: minL, max: maxL, seriesName: "Discounted revenue",   labels: { ...APEX_BASE.yaxis.labels, formatter: v => fmtK(v) }, title: { text: "Revenue & OPEX ($)", style: { color: "#94a3b8", fontSize: "10px" } } },
+                            { ...APEX_BASE.yaxis, min: minL, max: maxL, seriesName: "Discounted revenue",   labels: { ...APEX_BASE.yaxis.labels, formatter: v => fmtK(v) }, title: { text: `Revenue & OPEX (${currSym})`, style: { color: "#94a3b8", fontSize: "10px" } } },
                             { ...APEX_BASE.yaxis, min: minL, max: maxL, seriesName: "Discounted revenue",   show: false },
-                            { ...APEX_BASE.yaxis, min: minR, max: maxR, seriesName: "Discounted CAPEX (−)", opposite: true, labels: { ...APEX_BASE.yaxis.labels, formatter: v => fmtK(v) }, title: { text: "CAPEX · Net CF · Cumulative ($)", style: { color: "#1f2937", fontSize: "10px" } } },
+                            { ...APEX_BASE.yaxis, min: minR, max: maxR, seriesName: "Discounted CAPEX (−)", opposite: true, labels: { ...APEX_BASE.yaxis.labels, formatter: v => fmtK(v) }, title: { text: `CAPEX · Net CF · Cumulative (${currSym})`, style: { color: "#1f2937", fontSize: "10px" } } },
                             { ...APEX_BASE.yaxis, min: minR, max: maxR, seriesName: "Discounted CAPEX (−)", show: false },
                             { ...APEX_BASE.yaxis, min: minR, max: maxR, seriesName: "Discounted CAPEX (−)", show: false },
                           ],
                           annotations: { yaxis: [{ y: 0, borderColor: "#CBD5E1", strokeDashArray: 4 }] },
-                          tooltip: { ...APEX_BASE.tooltip, y: { formatter: v => `$${fmtK(Math.abs(v))} ${v < 0 ? "(−)" : ""}` } },
+                          tooltip: { ...APEX_BASE.tooltip, y: { formatter: v => `${currSym}${fmtK(Math.abs(v))} ${v < 0 ? "(−)" : ""}` } },
                         }} />
                     );
                   })()}
@@ -1136,7 +1221,7 @@ export default function LcoeTool() {
                     { label:"Disc. Payback (TRI)", v: R.discountedPayback ? `${fmt(R.discountedPayback,1)} yrs` : "—", color:"#16a34a" },
                     { label:"Simple Payback",       v: isFinite(R.simplePayback) ? `${fmt(R.simplePayback,1)} yrs` : "—", color:"#64748B" },
                     { label:"Project IRR",          v: R.irr ? `${fmt(R.irr,2)}%` : "—", color: R.irr&&R.irr>p.discountRate?"#16a34a":"#f97316" },
-                    { label:"Project NPV",          v: `${R.projectNpv>=0?"+":""}$${fmtK(R.projectNpv)}`, color: R.projectNpv>=0?"#16a34a":"#f97316" },
+                    { label:"Project NPV",          v: `${R.projectNpv>=0?"+":""}${currSym}${fmtK(cx(R.projectNpv))}`, color: R.projectNpv>=0?"#16a34a":"#f97316" },
                   ].map(({label,v,color})=>(
                     <div key={label} style={{ background:"#fffdf7", borderRadius:7, padding:"9px 12px", border:"1px solid #E2E8F0" }}>
                       <div style={{ fontSize:9, color:"#94a3b8", fontWeight:700, letterSpacing:".07em", textTransform:"uppercase", marginBottom:4 }}>{label}</div>
@@ -1149,56 +1234,62 @@ export default function LcoeTool() {
 
             {/* Cost Breakdown */}
             {chart==="costs" && (
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:24 }}>
-                <div>
-                  <div style={{ fontSize:11, color:"#64748B", marginBottom:12 }}>CAPEX by category</div>
-                  <Chart type="donut" height={240} series={R.catTotals.map(c => c.localTotal)} options={{
-                    chart: { ...APEX_BASE.chart, type: "donut" },
-                    labels: R.catTotals.map(c => c.label),
-                    colors: R.catTotals.map(c => c.color),
-                    plotOptions: { pie: { donut: { size: "62%" } } },
-                    legend: { show: false },
-                    dataLabels: { enabled: false },
-                    tooltip: { ...APEX_BASE.tooltip, y: { formatter: v => `$${fmtK(v)}` } },
-                  }} />
-                  <div style={{ display:"flex", flexDirection:"column", gap:6, marginTop:8 }}>
+              <div>
+                {/* Donut + side legend (PDF-style) */}
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:32, marginBottom:20 }}>
+                  <div style={{ flexShrink:0 }}>
+                    <Chart type="donut" width={220} height={220} series={R.catTotals.map(c => cx(c.localTotal))} options={{
+                      chart: { ...APEX_BASE.chart, type: "donut" },
+                      labels: R.catTotals.map(c => c.label),
+                      colors: R.catTotals.map(c => c.color),
+                      plotOptions: { pie: { donut: { size: "58%", labels: { show: true, name: { show: false }, value: { show: true, fontSize: "14px", fontFamily: "'JetBrains Mono'", color: "#0F172A", formatter: () => `${currSym}${fmtK(cx(R.capexTotal))}` }, total: { show: true, label: "Total", fontSize: "10px", color: "#94a3b8", formatter: () => `${currSym}${fmtK(cx(R.capexTotal))}` } } } } },
+                      legend: { show: false },
+                      dataLabels: { enabled: false },
+                      tooltip: { ...APEX_BASE.tooltip, y: { formatter: v => `${currSym}${fmtK(v)}` } },
+                    }} />
+                  </div>
+                  <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
                     {R.catTotals.map(c=>(
-                      <div key={c.id} style={{ display:"flex", alignItems:"center", gap:8 }}>
-                        <div style={{ width:7, height:7, borderRadius:"50%", background:c.color, flexShrink:0 }}/>
-                        <span style={{ fontSize:10, color:"#64748B", flex:1 }}>{c.label}</span>
-                        <span style={{ fontFamily:"'JetBrains Mono'", fontSize:10, color:c.color }}>{fmt(c.usdKwp,1)} USD/kWp</span>
-                        <span style={{ fontFamily:"'JetBrains Mono'", fontSize:10, color:"#475569" }}>{fmt(c.localTotal/R.capexTotal*100,1)}%</span>
+                      <div key={c.id}>
+                        <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:3 }}>
+                          <div style={{ width:10, height:10, borderRadius:3, background:c.color, flexShrink:0 }}/>
+                          <span style={{ fontSize:12, fontWeight:700, color:"#0F172A" }}>{c.label}</span>
+                        </div>
+                        <div style={{ paddingLeft:18, display:"flex", alignItems:"baseline", gap:8 }}>
+                          <span style={{ fontFamily:"'JetBrains Mono'", fontSize:12, color:"#64748B" }}>{currSym}{fmtK(cx(c.localTotal))}</span>
+                          <span style={{ fontFamily:"'JetBrains Mono'", fontSize:11, color:"#94a3b8" }}>({fmt(c.localTotal/R.capexTotal*100,1)}%)</span>
+                        </div>
                       </div>
                     ))}
                   </div>
                 </div>
-                <div>
-                  <div style={{ fontSize:11, color:"#64748B", marginBottom:12 }}>CAPEX vs discounted O&M NPV</div>
-                  <Chart type="bar" height={140} series={[
-                    { name: "CAPEX", data: [R.capexTotal] },
-                    { name: "O&M NPV", data: [R.opexNpv] },
-                  ]} options={{
-                    ...APEX_BASE,
-                    chart: { ...APEX_BASE.chart, type: "bar", stacked: true },
-                    colors: [B, O],
-                    plotOptions: { bar: { horizontal: true, borderRadius: 4, borderRadiusApplication: "end" } },
-                    xaxis: { ...APEX_BASE.xaxis, categories: ["Total NPV"], labels: { ...APEX_BASE.xaxis.labels, formatter: v => fmtK(v) } },
-                    tooltip: { ...APEX_BASE.tooltip, y: { formatter: v => `$${fmtK(v)}` } },
-                    dataLabels: { enabled: false },
-                  }} />
-                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginTop:14 }}>
-                    {[
-                      { label:"CAPEX share", v:`${fmt(R.capexTotal/R.totalDiscC*100,1)}%`, color:B },
-                      { label:"O&M share",   v:`${fmt(R.opexNpv/R.totalDiscC*100,1)}%`,   color:O },
-                      { label:"NPV Costs",   v:`$${fmtK(R.totalDiscC)}`,            color:G },
-                      { label:"LCOE (MWh)", v:`$${fmt(R.lcoe*1000,2)}/MWh`,        color:G },
-                    ].map(({label,v,color})=>(
-                      <div key={label} style={{ background:"#fffdf7", borderRadius:6, padding:"8px 10px", border:`1px solid ${color}1e` }}>
-                        <div style={{ fontSize:9, color:"#94a3b8", marginBottom:3, fontWeight:700, letterSpacing:".07em", textTransform:"uppercase" }}>{label}</div>
-                        <div style={{ fontFamily:"'JetBrains Mono'", fontSize:13, color }}>{v}</div>
-                      </div>
-                    ))}
-                  </div>
+
+                {/* CAPEX vs O&M NPV bar */}
+                <div style={{ fontSize:11, color:"#64748B", marginBottom:10, fontWeight:600 }}>CAPEX vs discounted O&M NPV</div>
+                <Chart type="bar" height={120} series={[
+                  { name: "CAPEX", data: [cx(R.capexTotal)] },
+                  { name: "O&M NPV", data: [cx(R.opexNpv)] },
+                ]} options={{
+                  ...APEX_BASE,
+                  chart: { ...APEX_BASE.chart, type: "bar", stacked: true },
+                  colors: [B, O],
+                  plotOptions: { bar: { horizontal: true, borderRadius: 4, borderRadiusApplication: "end" } },
+                  xaxis: { ...APEX_BASE.xaxis, categories: ["Total NPV"], labels: { ...APEX_BASE.xaxis.labels, formatter: v => fmtK(v) } },
+                  tooltip: { ...APEX_BASE.tooltip, y: { formatter: v => `${currSym}${fmtK(v)}` } },
+                  dataLabels: { enabled: false },
+                }} />
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:8, marginTop:12 }}>
+                  {[
+                    { label:"CAPEX share", v:`${fmt(R.capexTotal/R.totalDiscC*100,1)}%`, color:B },
+                    { label:"O&M share",   v:`${fmt(R.opexNpv/R.totalDiscC*100,1)}%`,   color:O },
+                    { label:"NPV Costs",   v:`${currSym}${fmtK(cx(R.totalDiscC))}`,      color:G },
+                    { label:"LCOE (MWh)",  v:`${currSym}${fmt(cx(R.lcoe*1000),2)}/MWh`,  color:G },
+                  ].map(({label,v,color})=>(
+                    <div key={label} style={{ background:"#fffdf7", borderRadius:6, padding:"8px 10px", border:`1px solid ${color}1e` }}>
+                      <div style={{ fontSize:9, color:"#94a3b8", marginBottom:3, fontWeight:700, letterSpacing:".07em", textTransform:"uppercase" }}>{label}</div>
+                      <div style={{ fontFamily:"'JetBrains Mono'", fontSize:13, color }}>{v}</div>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
@@ -1207,7 +1298,7 @@ export default function LcoeTool() {
             {chart==="tornado" && (
               <div>
                 <div style={{ fontSize:11, color:"#64748B", marginBottom:18 }}>
-                  LCOE change when each parameter varies ±20% · ranked by impact (USD/kWh)
+                  LCOE change when each parameter varies ±20% · ranked by impact ({currency}/kWh)
                 </div>
                 <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
                   {sens.map(({label,low,high,swing})=>{
@@ -1218,7 +1309,7 @@ export default function LcoeTool() {
                         <div style={{ display:"flex", justifyContent:"space-between", marginBottom:4 }}>
                           <span style={{ fontSize:11, color:"#475569", fontWeight:600 }}>{label}</span>
                           <span style={{ fontFamily:"'JetBrains Mono'", fontSize:10, color:"#64748B" }}>
-                            swing ±{fmt(swing/2,4)}
+                            swing ±{fmt(cx(swing/2),4)}
                           </span>
                         </div>
                         <div style={{ display:"flex", alignItems:"center", height:24, gap:3 }}>
@@ -1228,7 +1319,7 @@ export default function LcoeTool() {
                               borderRadius:"3px 0 0 3px", display:"flex", alignItems:"center",
                               justifyContent:"flex-end", paddingRight:5,
                               fontSize:10, color:G, fontFamily:"'JetBrains Mono'" }}>
-                              {low>0?`+${fmt(low,4)}`:fmt(low,4)}
+                              {cx(low)>0?`+${fmt(cx(low),4)}`:fmt(cx(low),4)}
                             </div>
                           </div>
                           <div style={{ width:2, height:24, background:"#E2E8F0", flexShrink:0 }}/>
@@ -1237,7 +1328,7 @@ export default function LcoeTool() {
                               background:`linear-gradient(90deg,${O}85,transparent)`,
                               borderRadius:"0 3px 3px 0", display:"flex", alignItems:"center",
                               paddingLeft:5, fontSize:10, color:O, fontFamily:"'JetBrains Mono'" }}>
-                              {high>0?`+${fmt(high,4)}`:fmt(high,4)}
+                              {cx(high)>0?`+${fmt(cx(high),4)}`:fmt(cx(high),4)}
                             </div>
                           </div>
                         </div>
@@ -1272,12 +1363,12 @@ export default function LcoeTool() {
                   `WACC = ${fmt(p.discountRate,2)}% · Lifetime = ${p.projectLifetime} yrs`,
                   `f₁ = ${fmt(p.firstYearFactor,3)} · d = ${fmt(p.linearDeg*1000,2)}‰/yr`,
                   `Year-25 factor = ${fmt((p.firstYearFactor-p.linearDeg*25)*100,1)}%`,
-                  `Exchange rate = ${fmt(1,2)} $/USD`,
+                  `Exchange rate = ${fmt(exchangeRate,4)} ${currency}/USD`,
                 ]},
                 { title:"Key Results", body:[
-                  `LCOE = ${fmt(R.lcoe,4)} USD/kWh = ${fmt(R.lcoe*1000,2)} mills/kWh`,
-                  `CAPEX = $${fmtK(R.capexTotal)} (${fmt(R.capexTotal/p.systemCapacity,0)} $/kWp)`,
-                  `NPV Costs = $${fmtK(R.totalDiscC)}`,
+                  `LCOE = ${fmt(cx(R.lcoe),4)} ${currency}/kWh = ${fmt(cx(R.lcoe*1000),2)} ${currSym}/MWh`,
+                  `CAPEX = ${currSym}${fmtK(cx(R.capexTotal))} (${fmt(cx(R.capexTotal/p.systemCapacity),0)} ${currSym}/kWp)`,
+                  `NPV Costs = ${currSym}${fmtK(cx(R.totalDiscC))}`,
                   `Disc. Energy = ${fmtK(R.totalDiscE)} kWh`,
                 ]},
               ].map(({title,body})=>(
@@ -1293,6 +1384,93 @@ export default function LcoeTool() {
           </Card>
         </div>
       </div>
+      {/* ── Currency popup (fixed overlay, outside Card to avoid overflow clipping) ── */}
+      {showCurrencyPopup && (
+        <div style={{
+          position:"fixed", top:0, left:0, right:0, bottom:0,
+          background:"rgba(0,0,0,.3)", zIndex:9999,
+          display:"flex", alignItems:"center", justifyContent:"center",
+        }} onClick={() => setShowCurrencyPopup(false)}>
+          <div onClick={e => e.stopPropagation()} style={{
+            background:"#fff", borderRadius:14, padding:"20px 22px 18px",
+            boxShadow:"0 16px 48px rgba(0,0,0,.18)", width:280,
+            fontFamily:"'Inter', system-ui, sans-serif",
+          }}>
+            <div style={{ fontSize:13, fontWeight:700, color:"#0F172A", marginBottom:3 }}>Currency Settings</div>
+            <div style={{ fontSize:10, color:"#64748B", marginBottom:14 }}>Convert all monetary values from USD</div>
+
+            <label style={{ fontSize:9, fontWeight:700, color:"#94a3b8", letterSpacing:".08em", textTransform:"uppercase", display:"block", marginBottom:4 }}>Currency</label>
+            <select
+              value={tempCurrency}
+              onChange={e => setTempCurrency(e.target.value)}
+              style={{
+                width:"100%", padding:"7px 10px", borderRadius:7,
+                border:"1.5px solid #E2E8F0", fontSize:12,
+                fontFamily:"'JetBrains Mono', monospace",
+                color:"#0F172A", background:"#F8FAFC",
+                marginBottom:12, outline:"none",
+                cursor:"pointer", boxSizing:"border-box",
+              }}
+            >
+              {CURRENCIES.map(c => (
+                <option key={c.code} value={c.code}>{c.code} — {c.symbol} — {c.name}</option>
+              ))}
+            </select>
+
+            <label style={{ fontSize:9, fontWeight:700, color:"#94a3b8", letterSpacing:".08em", textTransform:"uppercase", display:"block", marginBottom:4 }}>Exchange Rate (1 USD = ?)</label>
+            <input
+              type="number" min={0.0001} step={0.01}
+              value={tempRate}
+              onChange={e => setTempRate(parseFloat(e.target.value) || 0)}
+              style={{
+                width:"100%", padding:"7px 10px", borderRadius:7,
+                border:"1.5px solid #E2E8F0", fontSize:13,
+                fontFamily:"'JetBrains Mono', monospace",
+                color:"#0F172A", background:"#F8FAFC",
+                marginBottom:16, outline:"none",
+                boxSizing:"border-box",
+              }}
+            />
+
+            <div style={{ display:"flex", gap:8 }}>
+              <button
+                onClick={() => {
+                  setCurrency(tempCurrency);
+                  setExchangeRate(tempCurrency === "USD" ? 1 : tempRate);
+                  setShowCurrencyPopup(false);
+                }}
+                style={{
+                  flex:1, padding:"8px 0", borderRadius:7,
+                  background:"#1F2937", color:"#fff",
+                  border:"none", cursor:"pointer",
+                  fontSize:11, fontWeight:600,
+                  fontFamily:"'Inter', system-ui, sans-serif",
+                  transition:"background .15s",
+                }}
+                onMouseEnter={e => e.currentTarget.style.background="#374151"}
+                onMouseLeave={e => e.currentTarget.style.background="#1F2937"}
+              >Validate</button>
+              <button
+                onClick={() => {
+                  setCurrency("USD"); setExchangeRate(1);
+                  setTempCurrency("USD"); setTempRate(1);
+                  setShowCurrencyPopup(false);
+                }}
+                style={{
+                  flex:1, padding:"8px 0", borderRadius:7,
+                  background:"#F1F5F9", color:"#64748B",
+                  border:"1.5px solid #E2E8F0", cursor:"pointer",
+                  fontSize:11, fontWeight:600,
+                  fontFamily:"'Inter', system-ui, sans-serif",
+                  transition:"all .15s",
+                }}
+                onMouseEnter={e => { e.currentTarget.style.background="#E2E8F0"; }}
+                onMouseLeave={e => { e.currentTarget.style.background="#F1F5F9"; }}
+              >Reset to USD</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
