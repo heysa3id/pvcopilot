@@ -10,9 +10,26 @@ import "./promiseWithResolversPolyfill.js";
 import { getDocument, GlobalWorkerOptions } from "pdfjs-dist/legacy/build/pdf.mjs";
 import pdfWorkerUrl from "pdfjs-dist/legacy/build/pdf.worker.min.mjs?url";
 
-if (typeof window !== "undefined" && !GlobalWorkerOptions.workerSrc) {
-  GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+// Worker runs in a separate context and doesn't get the main-thread polyfill.
+// In Safari the worker throws "undefined is not a function" without this.
+let workerBlobReady = null;
+async function ensureWorkerSrc() {
+  if (GlobalWorkerOptions.workerSrc) return;
+  if (workerBlobReady) {
+    await workerBlobReady;
+    return;
+  }
+  workerBlobReady = (async () => {
+    const polyfill = `if (typeof Promise !== "undefined" && typeof Promise.withResolvers !== "function") { Promise.withResolvers = function() { var resolve, reject; var promise = new Promise(function(res, rej) { resolve = res; reject = rej; }); return { promise: promise, resolve: resolve, reject: reject }; }; }\n`;
+    const res = await fetch(pdfWorkerUrl);
+    const workerCode = await res.text();
+    const blob = new Blob([polyfill + workerCode], { type: "application/javascript" });
+    GlobalWorkerOptions.workerSrc = URL.createObjectURL(blob);
+  })();
+  await workerBlobReady;
 }
+
+// workerSrc is set in ensureWorkerSrc() before first getDocument (blob includes polyfill for Safari worker)
 
 function _num(text, defaultVal = null) {
   if (text == null) return defaultVal;
@@ -36,6 +53,8 @@ async function extractPdfText(file) {
   if (!file || typeof file.arrayBuffer !== "function") {
     throw new Error("Invalid file object for PDF parsing.");
   }
+
+  await ensureWorkerSrc();
 
   const arrayBuffer = await file.arrayBuffer();
 
