@@ -2267,6 +2267,7 @@ export default function QualityCheckPage() {
   const [sysFile, setSysFile] = useState(null);
   const [sysData, setSysData] = useState(null);
   const [toast, setToast] = useState(null);
+  const [overviewOpen, setOverviewOpen] = useState(false);
   const [dateFrom, setDateFrom] = useState(null);
   const [dateTo, setDateTo] = useState(null);
   const [resamplingStepMinutes, setResamplingStepMinutes] = useState(10);
@@ -2366,24 +2367,94 @@ export default function QualityCheckPage() {
         />
       )}
 
-      {/* Page Header */}
       <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 8 }}>
-          <div style={{
-            width: 44, height: 44, borderRadius: 12,
-            background: `${P}14`, border: `1.5px solid ${P}30`,
-            display: "flex", alignItems: "center", justifyContent: "center",
-          }}>
-            <SearchOutlined sx={{ fontSize: 24, color: P }} />
+
+        {/* ──────────── TOOL OVERVIEW (COLLAPSIBLE) ──────────── */}
+        <div style={{
+          background: "#FFFFFF",
+          border: "1px solid #E2E8F0",
+          borderRadius: 12,
+          padding: "18px 20px",
+          boxShadow: "0 1px 3px rgba(0,0,0,.06), 0 0 0 1.5px #E2E8F0",
+          marginBottom: 20,
+        }}>
+          <div
+            style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", cursor: "pointer", gap: 16 }}
+            onClick={() => setOverviewOpen(o => !o)}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <div style={{
+                width: 44, height: 44, borderRadius: 12,
+                background: `${P}14`, border: `1.5px solid ${P}30`,
+                display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
+              }}>
+                <SearchOutlined sx={{ fontSize: 24, color: P }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: "#0F172A" }}>
+                  Data Ingestion & Synchronization
+                </div>
+                <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>
+                  Upload PV data, weather data, and system configuration to inspect and validate.
+                </div>
+              </div>
+            </div>
+            <div style={{ marginLeft: "auto", borderRadius: "999px", background: "#F8FAFC", border: "1px solid #E2E8F0", padding: 4, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {overviewOpen ? (
+                <ExpandLessIcon sx={{ fontSize: 18, color: "#94a3b8" }} />
+              ) : (
+                <ExpandMoreIcon sx={{ fontSize: 18, color: "#94a3b8" }} />
+              )}
+            </div>
           </div>
-          <div>
-            <h1 style={{ fontSize: 24, fontWeight: 800, color: "#0F172A", margin: 0 }}>
-              Data Quality Check
-            </h1>
-            <p style={{ fontSize: 13, color: "#94a3b8", margin: 0 }}>
-              Upload PV data, weather data, and system configuration to inspect and validate.
-            </p>
-          </div>
+          {overviewOpen && (
+            <div style={{ marginTop: 20, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+              {/* Data Upload & Parsing */}
+              <div style={{ background: "#FFFBEB", borderRadius: 12, padding: 18, border: "1px solid #FDE68A" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#0F172A", letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 4 }}>
+                  Data Upload & Parsing
+                </div>
+                <p style={{ fontSize: 12, color: "#475569", lineHeight: 1.7, marginBottom: 10 }}>
+                  Upload PV production data, weather station data, and system configuration files in CSV format. The tool automatically detects timestamp columns, parses numeric fields, and validates data structure.
+                </p>
+                <ul style={{ fontSize: 12, color: "#64748B", lineHeight: 1.6, paddingLeft: 18, margin: 0 }}>
+                  <li>Auto-detection of date/time columns across common formats.</li>
+                  <li>System config CSV for metadata (capacity, location, tilt, azimuth).</li>
+                  <li>Configurable resampling step (1–60 min) for temporal alignment.</li>
+                </ul>
+              </div>
+
+              {/* Time Synchronization */}
+              <div style={{ background: "#FFFBEB", borderRadius: 12, padding: 18, border: "1px solid #FDE68A" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#0F172A", letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 4 }}>
+                  Time Synchronization
+                </div>
+                <p style={{ fontSize: 12, color: "#475569", lineHeight: 1.7, marginBottom: 10 }}>
+                  Align PV and weather datasets by matching timestamps with configurable time-shift rules. This corrects for logger clock drift, timezone mismatches, or deliberate offsets between data sources.
+                </p>
+                <ul style={{ fontSize: 12, color: "#64748B", lineHeight: 1.6, paddingLeft: 18, margin: 0 }}>
+                  <li>Custom sync rules with start/end windows and minute-level shifts.</li>
+                  <li>Nearest-neighbor timestamp matching within tolerance.</li>
+                  <li>Before/after correlation comparison (R²) to validate sync quality.</li>
+                </ul>
+              </div>
+
+              {/* Visualization & Export */}
+              <div style={{ background: "#FFFBEB", borderRadius: 12, padding: 18, border: "1px solid #FDE68A" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#0F172A", letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 4 }}>
+                  Visualization & Export
+                </div>
+                <p style={{ fontSize: 12, color: "#475569", lineHeight: 1.7, marginBottom: 10 }}>
+                  Interactive time-series plots and scatter correlation charts help visually confirm synchronization accuracy. Once validated, export the merged dataset as a single CSV file.
+                </p>
+                <ul style={{ fontSize: 12, color: "#64748B", lineHeight: 1.6, paddingLeft: 18, margin: 0 }}>
+                  <li>Time-series overlay of PV power vs. GHI irradiance.</li>
+                  <li>Scatter plot with linear regression and R² metric.</li>
+                  <li>One-click CSV export of the synchronized, merged dataset.</li>
+                </ul>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Data Visualization card */}
@@ -2396,7 +2467,6 @@ export default function QualityCheckPage() {
           display: "flex",
           flexDirection: "column",
           gap: 14,
-          marginTop: 28,
           marginBottom: 20,
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 2 }}>
@@ -3101,13 +3171,7 @@ export default function QualityCheckPage() {
                             </div>
                           </div>
                         </div>
-                        <div style={{
-                          flex: 1,
-                          display: "flex",
-                          justifyContent: "flex-end",
-                          alignItems: "center",
-                          minHeight: 0,
-                        }}>
+                        <div style={{ display: "flex", alignItems: "flex-end", flexShrink: 0 }}>
                           <button
                             type="button"
                             onClick={() => {

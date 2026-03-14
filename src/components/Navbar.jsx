@@ -6,12 +6,14 @@ import {
   AutoFixHigh,
   ElectricBolt,
   Savings,
+  FilterAltOutlined,
 } from "@mui/icons-material";
 
 const ICON_COLOR = "#FFB800";
 
 const TOOLS = [
-  { path: "/quality-check",    label: "Data Quality Check",  icon: <SearchOutlined sx={{ fontSize: 18, color: ICON_COLOR }} />, color: "#8b5cf6" },
+  { path: "/data-ingestion",   label: "Data Ingestion & Synchronization", icon: <SearchOutlined sx={{ fontSize: 18, color: ICON_COLOR }} />, color: "#8b5cf6" },
+  { path: "/data-filtering",   label: "Data Filtering",      icon: <FilterAltOutlined sx={{ fontSize: 18, color: ICON_COLOR }} />, color: "#e11d48" },
   { path: "/kpi-analysis",     label: "KPI Analysis",        icon: <QueryStats sx={{ fontSize: 18, color: ICON_COLOR }} />, color: "#16a34a" },
   { path: "/gap-filling",      label: "Gap Filling",         icon: <AutoFixHigh sx={{ fontSize: 18, color: ICON_COLOR }} />, color: "#059669" },
   { path: "/power-prediction", label: "Power Prediction",    icon: <ElectricBolt sx={{ fontSize: 18, color: ICON_COLOR }} />, color: "#ff7a45" },

@@ -14,6 +14,7 @@ import {
   AutoFixHigh,
   ElectricBolt,
   Savings,
+  FilterAltOutlined,
   LinkedIn,
   GitHub,
   YouTube,
@@ -25,7 +26,7 @@ const ICON_COLOR = G;
 const PIPE = [
   { id: "ingest",  label: "Data Ingestion",   sub: "PV .csv · Weather .csv · System .json", icon: <CloudDownloadOutlined sx={{ fontSize: 22 }} />, color: "#6366f1" },
   { id: "sync",    label: "Synchronization",   sub: "Timestamp alignment & resampling",      icon: <SyncOutlined sx={{ fontSize: 22 }} />, color: "#0ea5e9" },
-  { id: "qc",      label: "Quality Check",     sub: "Outlier & gap detection, statistics",   icon: <SearchOutlined sx={{ fontSize: 22 }} />, color: P },
+  { id: "qc",      label: "Data Ingestion & Sync", sub: "Ingestion, synchronization & validation", icon: <SearchOutlined sx={{ fontSize: 22 }} />, color: P },
   { id: "gap",     label: "Gap Filling",       sub: "ML models · historical pattern matching",icon: <TrendingUpOutlined sx={{ fontSize: 22 }} />, color: "#10b981" },
   { id: "kpi",     label: "KPI Calculation",   sub: "IEC 61724 · PR · degradation Rd",       icon: <AssessmentOutlined sx={{ fontSize: 22 }} />, color: Y },
   { id: "predict", label: "Power Prediction",  sub: "Physical + ML forecast models",         icon: <BoltOutlined sx={{ fontSize: 22 }} />, color: O },
@@ -39,6 +40,7 @@ const TOOL_ICONS = {
   gap: <AutoFixHigh sx={{ fontSize: 22, color: ICON_COLOR }} />,
   predict: <ElectricBolt sx={{ fontSize: 22, color: ICON_COLOR }} />,
   lcoe: <Savings sx={{ fontSize: 22, color: ICON_COLOR }} />,
+  filter: <FilterAltOutlined sx={{ fontSize: 22, color: ICON_COLOR }} />,
 };
 
 const SOCIAL_LINKS = [
@@ -391,7 +393,7 @@ export default function LandingPage() {
             fontSize: "clamp(15px, 1.6vw, 18px)", color: "#94a3b8",
             lineHeight: 1.75, maxWidth: 600, margin: "0 auto 40px",
           }}>
-            From raw sensor data to bankable reports — PVCopilot chains quality checks,
+            From raw sensor data to bankable reports — PVCopilot chains data ingestion,
             gap filling, KPI analysis, performance prediction, and LCOE evaluation
             into one integrated pipeline.
           </p>
@@ -529,9 +531,12 @@ export default function LandingPage() {
         </p>
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 20 }}>
-          <ToolCard icon={TOOL_ICONS.quality} title="Data Quality Check" subtitle="PV data & weather data validation" color={G} path="/quality-check"
+          <ToolCard icon={TOOL_ICONS.quality} title="Data Ingestion & Synchronization" subtitle="PV data & weather data ingestion, sync & validation" color={G} path="/data-ingestion"
             desc="Scans raw time-series for missing timestamps, stuck sensors, out-of-range values, nighttime noise, and statistical outliers. Outputs a gap map and quality score per channel."
             tags={["Gap detection", "Outlier flags", "Timestamp QA", "Statistics", "Visual map"]} />
+          <ToolCard icon={TOOL_ICONS.filter} title="Data Filtering" subtitle="Module under development" color={G} path="/data-filtering"
+            desc="Advanced data filtering and cleansing tools for PV time-series. Remove outliers, apply custom filters, and prepare clean datasets for downstream analysis."
+            tags={["Custom filters", "Outlier removal", "Data cleansing", "Time-series", "Coming soon"]} />
           <ToolCard icon={TOOL_ICONS.kpi} title="KPI Analysis" subtitle="IEC 61724 performance metrics" color={G} path="/kpi-analysis"
             desc={<>Calculate Performance Ratio, temperature-corrected PR, Capacity Factor, specific yield, Reference Yield Y<sub>r</sub>, Final Yield Y<sub>f</sub>, and degradation rate R<sub>d</sub> via YoY regression.</>}
             tags={["PR & PR_STC", "Capacity factor", "Degradation Rd", "Yield ratios", "Trend charts"]} />
@@ -837,7 +842,8 @@ export default function LandingPage() {
               Tools
             </div>
             {[
-              { label: "Data Quality Check", path: "/quality-check" },
+              { label: "Data Ingestion & Synchronization", path: "/data-ingestion" },
+              { label: "Data Filtering", path: "/data-filtering" },
               { label: "KPI Analysis", path: "/kpi-analysis" },
               { label: "Gap Filling", path: "/gap-filling" },
               { label: "Power Prediction", path: "/power-prediction" },

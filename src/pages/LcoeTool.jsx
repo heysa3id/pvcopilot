@@ -4,7 +4,7 @@ import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
 import AutorenewOutlinedIcon from "@mui/icons-material/AutorenewOutlined";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
 import WarningAmberOutlinedIcon from "@mui/icons-material/WarningAmberOutlined";
-import ConstructionOutlinedIcon from "@mui/icons-material/ConstructionOutlined";
+import AccountTreeOutlinedIcon from "@mui/icons-material/AccountTreeOutlined";
 import WbSunnyOutlinedIcon from "@mui/icons-material/WbSunnyOutlined";
 import SolarPowerOutlinedIcon from "@mui/icons-material/SolarPowerOutlined";
 import ElectricBoltOutlinedIcon from "@mui/icons-material/ElectricBoltOutlined";
@@ -473,12 +473,21 @@ export default function LcoeTool() {
             style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", cursor:"pointer", gap:16 }}
             onClick={() => setOverviewOpen(o => !o)}
           >
-            <div>
-              <div style={{ fontSize:9, color:"#94a3b8", fontWeight:700, letterSpacing:".1em", textTransform:"uppercase", marginBottom:4 }}>
-                Tool Overview
+            <div style={{ display:"flex", alignItems:"center", gap:14 }}>
+              <div style={{
+                width:44, height:44, borderRadius:12,
+                background:`${G}14`, border:`1.5px solid ${G}30`,
+                display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0,
+              }}>
+                <AttachMoneyOutlinedIcon sx={{ fontSize:24, color:G }} />
               </div>
-              <div style={{ fontSize:18, fontWeight:800, color:"#0F172A" }}>
-                PV LCOE and payback calculator
+              <div>
+                <div style={{ fontSize:18, fontWeight:800, color:"#0F172A" }}>
+                  PV LCOE and payback calculator
+                </div>
+                <div style={{ fontSize:12, color:"#94a3b8", marginTop:2 }}>
+                  Estimate levelized cost of energy, discounted payback, and key financial indicators.
+                </div>
               </div>
             </div>
             <div style={{ marginLeft:"auto", borderRadius:"999px", background:"#F8FAFC", border:"1px solid #E2E8F0", padding:4, display:"flex", alignItems:"center", justifyContent:"center" }}>
@@ -866,7 +875,7 @@ export default function LcoeTool() {
           {panel==="capex" && (
             <Card className="fu">
               <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:18, paddingBottom:14, borderBottom:"1px solid #E2E8F0" }}>
-                <ConstructionOutlinedIcon sx={{ fontSize:20, color: ICON_COLOR }} />
+                <AccountTreeOutlinedIcon sx={{ fontSize:20, color: ICON_COLOR }} />
                 <div>
                   <div style={{ fontWeight:700, fontSize:13, color:"#0F172A" }}>CAPEX Breakdown</div>
                   <div style={{ fontSize:10, color:"#94a3b8" }}>{currency}/kWp per item · total converts to {currency}</div>

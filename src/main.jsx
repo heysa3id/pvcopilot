@@ -6,10 +6,11 @@ import Navbar from './components/Navbar'
 import LandingPage from './pages/LandingPage'
 import LcoeTool from './pages/LcoeTool'
 import PlaceholderPage from './pages/PlaceholderPage'
-import QualityCheckPage from './pages/QualityCheckPage'
+import DataIngestionPage from './pages/QualityCheckPage'
 import QueryStats from '@mui/icons-material/QueryStats'
 import AutoFixHigh from '@mui/icons-material/AutoFixHigh'
 import ElectricBolt from '@mui/icons-material/ElectricBolt'
+import FilterAltOutlined from '@mui/icons-material/FilterAltOutlined'
 
 const ICON_COLOR = "#FFB800";
 function KpiAnalysisPage() {
@@ -39,6 +40,15 @@ function PowerPredictionPage() {
     />
   )
 }
+function DataFilteringPage() {
+  return (
+    <PlaceholderPage
+      icon={<FilterAltOutlined sx={{ fontSize: 40, color: ICON_COLOR }} />}
+      title="Data Filtering" color="#e11d48"
+      desc="Module under development."
+    />
+  )
+}
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
@@ -47,10 +57,11 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       <div style={{ paddingTop: 56 }}>
         <Routes>
           <Route path="/" element={<LandingPage />} />
-          <Route path="/quality-check" element={<QualityCheckPage />} />
+          <Route path="/data-ingestion" element={<DataIngestionPage />} />
           <Route path="/kpi-analysis" element={<KpiAnalysisPage />} />
           <Route path="/gap-filling" element={<GapFillingPage />} />
           <Route path="/power-prediction" element={<PowerPredictionPage />} />
+          <Route path="/data-filtering" element={<DataFilteringPage />} />
           <Route path="/lcoe-tool" element={<LcoeTool />} />
         </Routes>
       </div>
