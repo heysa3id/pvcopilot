@@ -18,6 +18,7 @@ import ChevronLeft from "@mui/icons-material/ChevronLeft";
 import ChevronRight from "@mui/icons-material/ChevronRight";
 import SyncAltOutlined from "@mui/icons-material/SyncAltOutlined";
 import ShowChartOutlined from "@mui/icons-material/ShowChartOutlined";
+import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -3133,26 +3134,34 @@ export default function QualityCheckPage() {
                               const url = URL.createObjectURL(blob);
                               const a = document.createElement("a");
                               a.href = url;
-                              a.download = "synced_merged_data.csv";
+                              a.download = "PV & Weather Synced Data PVCopilot.csv";
                               document.body.appendChild(a);
                               a.click();
                               document.body.removeChild(a);
                               URL.revokeObjectURL(url);
                             }}
                             style={{
-                              padding: "6px 14px",
-                              borderRadius: 999,
-                              border: "1px solid #CBD5F5",
-                              background: "#EEF2FF",
-                              fontFamily: FONT,
-                              fontSize: 11,
-                              fontWeight: 600,
-                              color: "#4F46E5",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 5,
+                              padding: "5px 14px",
+                              borderRadius: 8,
+                              background: "#1F2937",
+                              color: "#fff",
+                              border: "none",
                               cursor: "pointer",
+                              fontSize: 10,
+                              fontWeight: 600,
+                              fontFamily: "'Inter', system-ui, sans-serif",
+                              letterSpacing: ".03em",
+                              transition: "background .15s",
                               whiteSpace: "nowrap",
                             }}
+                            onMouseEnter={e => e.currentTarget.style.background = "#374151"}
+                            onMouseLeave={e => e.currentTarget.style.background = "#1F2937"}
                           >
-                            Download synced CSV
+                            <FileDownloadOutlinedIcon style={{ fontSize: 14 }} />
+                            Download Synced Data
                           </button>
                         </div>
                       </div>

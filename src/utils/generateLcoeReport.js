@@ -75,12 +75,302 @@ function sectionHeader(doc, title, y, margin) {
   return y + 10;
 }
 
+// ── Chart drawing helpers ─────────────────────────────────────────────────────
+
+function drawLineChart(doc, x, y, w, h, data, { colors, labels, yLabel, xLabel, showArea = false, dualAxis = false }) {
+  // Background
+  doc.setFillColor(...LIGHT_BG);
+  doc.roundedRect(x, y, w, h, 2, 2, "F");
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.2);
+  doc.roundedRect(x, y, w, h, 2, 2, "S");
+
+  const padL = 14, padR = dualAxis ? 14 : 6, padT = 6, padB = 14;
+  const cx = x + padL, cy = y + padT;
+  const cw = w - padL - padR, ch = h - padT - padB;
+
+  const n = data[0].length;
+
+  // Per-axis ranges
+  const ranges = dualAxis
+    ? data.map(series => {
+        const dataMax = Math.max(...series);
+        const dataMin = Math.min(...series);
+        // Use tight range (with 10% padding) so trends are visible
+        const padding = (dataMax - dataMin) * 0.15 || dataMax * 0.05;
+        const min = Math.max(0, dataMin - padding);
+        const max = dataMax + padding;
+        return { min, max, range: (max - min) || 1 };
+      })
+    : (() => {
+        const allVals = data.flat();
+        const max = Math.max(...allVals) * 1.05;
+        const min = Math.min(0, Math.min(...allVals));
+        return data.map(() => ({ min, max, range: (max - min) || 1 }));
+      })();
+
+  // Left Y axis grid + labels (series 0)
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.1);
+  for (let i = 0; i <= 4; i++) {
+    const gy = cy + ch - (ch * i / 4);
+    doc.line(cx, gy, cx + cw, gy);
+    doc.setFontSize(6);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(...(colors[0] || GRAY));
+    const val = ranges[0].min + ranges[0].range * i / 4;
+    doc.text(fmtK(val), cx - 2, gy + 1.5, { align: "right" });
+  }
+
+  // Right Y axis labels (series 1) when dualAxis
+  if (dualAxis && data.length > 1) {
+    for (let i = 0; i <= 4; i++) {
+      const gy = cy + ch - (ch * i / 4);
+      doc.setFontSize(6);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(...(colors[1] || GRAY));
+      const val = ranges[1].min + ranges[1].range * i / 4;
+      doc.text(fmtK(val), cx + cw + 2, gy + 1.5, { align: "left" });
+    }
+  }
+
+  // X axis labels
+  const step = Math.max(1, Math.floor(n / 10));
+  for (let i = 0; i < n; i += step) {
+    const lx = cx + (cw * i / (n - 1));
+    doc.setFontSize(5.5);
+    doc.setTextColor(...GRAY);
+    doc.text(`${i + 1}`, lx, cy + ch + 4, { align: "center" });
+  }
+
+  // Axis labels
+  if (xLabel) {
+    doc.setFontSize(6);
+    doc.setTextColor(...GRAY);
+    doc.text(xLabel, cx + cw / 2, cy + ch + 9, { align: "center" });
+  }
+
+  // Draw each series
+  data.forEach((series, si) => {
+    const color = colors[si] || GOLD;
+    const r = ranges[si];
+    const points = series.map((v, i) => ({
+      x: cx + (cw * i / (n - 1)),
+      y: cy + ch - ((v - r.min) / r.range * ch),
+    }));
+
+    // Area fill
+    if (showArea) {
+      doc.setFillColor(...color);
+      doc.setGState(new doc.GState({ opacity: 0.12 }));
+      doc.setFillColor(...color);
+      doc.setDrawColor(...color);
+      for (let i = 0; i < points.length - 1; i++) {
+        const baseY = cy + ch;
+        doc.triangle(points[i].x, points[i].y, points[i + 1].x, points[i + 1].y, points[i].x, baseY, "F");
+        doc.triangle(points[i + 1].x, points[i + 1].y, points[i + 1].x, baseY, points[i].x, baseY, "F");
+      }
+      doc.setGState(new doc.GState({ opacity: 1 }));
+    }
+
+    // Line
+    doc.setDrawColor(...color);
+    doc.setLineWidth(0.5);
+    for (let i = 0; i < points.length - 1; i++) {
+      doc.line(points[i].x, points[i].y, points[i + 1].x, points[i + 1].y);
+    }
+  });
+
+  // Legend
+  if (labels) {
+    const legY = y + h - 4;
+    let legX = cx;
+    labels.forEach((lbl, i) => {
+      doc.setDrawColor(...(colors[i] || GOLD));
+      doc.setLineWidth(0.8);
+      doc.line(legX, legY, legX + 6, legY);
+      doc.setFontSize(5.5);
+      doc.setTextColor(...GRAY);
+      doc.text(lbl, legX + 8, legY + 1);
+      legX += 8 + doc.getTextWidth(lbl) + 6;
+    });
+  }
+}
+
+function drawBarChart(doc, x, y, w, h, categories, values, { colors, horizontal = false, stacked = false }) {
+  doc.setFillColor(...LIGHT_BG);
+  doc.roundedRect(x, y, w, h, 2, 2, "F");
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.2);
+  doc.roundedRect(x, y, w, h, 2, 2, "S");
+
+  const padL = horizontal ? 30 : 14, padR = 6, padT = 6, padB = horizontal ? 8 : 16;
+  const cx = x + padL, cy = y + padT;
+  const cw = w - padL - padR, ch = h - padT - padB;
+
+  if (horizontal) {
+    // Horizontal bars
+    const maxV = Math.max(...values.map(v => Array.isArray(v) ? v.reduce((a, b) => a + b, 0) : v));
+    const barH = Math.min(8, (ch - 4) / categories.length);
+    const gap = (ch - barH * categories.length) / (categories.length + 1);
+
+    categories.forEach((cat, i) => {
+      const by = cy + gap + i * (barH + gap);
+      const val = Array.isArray(values[i]) ? values[i] : [values[i]];
+      let bx = cx;
+      val.forEach((v, vi) => {
+        const bw = (v / maxV) * cw;
+        const c = Array.isArray(colors[0]) ? colors[vi] : colors[i] || GOLD;
+        doc.setFillColor(...c);
+        doc.roundedRect(bx, by, Math.max(bw, 0.5), barH, 1, 1, "F");
+        bx += bw;
+      });
+      // Label
+      doc.setFontSize(5.5);
+      doc.setTextColor(...DARK);
+      doc.text(cat, cx - 2, by + barH / 2 + 1.5, { align: "right" });
+    });
+  } else {
+    // Vertical bars
+    const maxV = Math.max(...values.flat()) * 1.1;
+    const barW = Math.min(8, (cw - 4) / values.length);
+    const gap = (cw - barW * values.length) / (values.length + 1);
+
+    // Grid
+    doc.setDrawColor(226, 232, 240);
+    doc.setLineWidth(0.1);
+    for (let i = 0; i <= 4; i++) {
+      const gy = cy + ch - (ch * i / 4);
+      doc.line(cx, gy, cx + cw, gy);
+      doc.setFontSize(5.5);
+      doc.setTextColor(...GRAY);
+      doc.text(fmtK(maxV * i / 4), cx - 2, gy + 1.5, { align: "right" });
+    }
+
+    values.forEach((v, i) => {
+      const bx = cx + gap + i * (barW + gap);
+      const bh = (v / maxV) * ch;
+      const c = colors[i % colors.length] || GOLD;
+      doc.setFillColor(...c);
+      doc.roundedRect(bx, cy + ch - bh, barW, bh, 0.5, 0.5, "F");
+    });
+
+    // X labels (show subset)
+    const step = Math.max(1, Math.floor(values.length / 12));
+    for (let i = 0; i < values.length; i += step) {
+      const lx = cx + gap + i * (barW + gap) + barW / 2;
+      doc.setFontSize(5);
+      doc.setTextColor(...GRAY);
+      doc.text(categories[i] || "", lx, cy + ch + 5, { align: "center" });
+    }
+  }
+}
+
+function drawTornadoChart(doc, x, y, w, h, sensData) {
+  doc.setFillColor(...LIGHT_BG);
+  doc.roundedRect(x, y, w, h, 2, 2, "F");
+  doc.setDrawColor(226, 232, 240);
+  doc.setLineWidth(0.2);
+  doc.roundedRect(x, y, w, h, 2, 2, "S");
+
+  const padL = 42, padR = 8, padT = 6, padB = 6;
+  const cx = x + padL, cy = y + padT;
+  const cw = w - padL - padR, ch = h - padT - padB;
+  const midX = cx + cw / 2;
+  const maxSwing = Math.max(...sensData.map(s => Math.max(Math.abs(s.low), Math.abs(s.high))));
+  const barH = Math.min(7, (ch - 4) / sensData.length);
+  const gap = (ch - barH * sensData.length) / (sensData.length + 1);
+
+  // Center line
+  doc.setDrawColor(200, 200, 200);
+  doc.setLineWidth(0.3);
+  doc.line(midX, cy, midX, cy + ch);
+
+  sensData.forEach((s, i) => {
+    const by = cy + gap + i * (barH + gap);
+
+    // Favorable bar (left of center)
+    const lowW = (Math.abs(s.low) / maxSwing) * (cw / 2);
+    doc.setFillColor(...GOLD);
+    if (s.low < 0) {
+      doc.roundedRect(midX - lowW, by, lowW, barH, 1, 1, "F");
+    } else {
+      doc.roundedRect(midX, by, lowW, barH, 1, 1, "F");
+    }
+
+    // Unfavorable bar (right of center)
+    const highW = (Math.abs(s.high) / maxSwing) * (cw / 2);
+    doc.setFillColor(...ORANGE);
+    if (s.high > 0) {
+      doc.roundedRect(midX, by, highW, barH, 1, 1, "F");
+    } else {
+      doc.roundedRect(midX - highW, by, highW, barH, 1, 1, "F");
+    }
+
+    // Label
+    doc.setFontSize(5.5);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...DARK);
+    doc.text(s.label, cx - 2, by + barH / 2 + 1.5, { align: "right" });
+  });
+
+  // Legend
+  const legY = y + h - 3;
+  doc.setFillColor(...GOLD);
+  doc.rect(midX - 30, legY - 2, 5, 2.5, "F");
+  doc.setFontSize(5.5);
+  doc.setFont("helvetica", "normal");
+  doc.setTextColor(...GRAY);
+  doc.text("Favorable", midX - 24, legY);
+  doc.setFillColor(...ORANGE);
+  doc.rect(midX + 5, legY - 2, 5, 2.5, "F");
+  doc.text("Unfavorable", midX + 11, legY);
+}
+
+function drawDonutChart(doc, cx, cy, radius, data, colors) {
+  const total = data.reduce((s, v) => s + v, 0);
+  let startAngle = -Math.PI / 2;
+  const innerR = radius * 0.55;
+
+  data.forEach((val, i) => {
+    const sliceAngle = (val / total) * Math.PI * 2;
+    const endAngle = startAngle + sliceAngle;
+    const color = colors[i] || GOLD;
+
+    // Draw arc segments using small line segments
+    doc.setFillColor(...color);
+    const steps = Math.max(8, Math.ceil(sliceAngle * 20));
+    const points = [];
+    // Outer arc
+    for (let s = 0; s <= steps; s++) {
+      const a = startAngle + (sliceAngle * s / steps);
+      points.push({ x: cx + Math.cos(a) * radius, y: cy + Math.sin(a) * radius });
+    }
+    // Inner arc (reverse)
+    for (let s = steps; s >= 0; s--) {
+      const a = startAngle + (sliceAngle * s / steps);
+      points.push({ x: cx + Math.cos(a) * innerR, y: cy + Math.sin(a) * innerR });
+    }
+
+    // Draw as triangles from first point
+    for (let j = 1; j < points.length - 1; j++) {
+      doc.triangle(
+        points[0].x, points[0].y,
+        points[j].x, points[j].y,
+        points[j + 1].x, points[j + 1].y,
+        "F"
+      );
+    }
+    startAngle = endAngle;
+  });
+}
+
 // ── Page check ───────────────────────────────────────────────────────────────
 function checkPage(doc, y, needed, margin, pageH, addFooter) {
   if (y + needed > pageH - 20) {
     if (addFooter) addFooter(doc);
     doc.addPage();
-    return margin + 10;
+    return 20;
   }
   return y;
 }
@@ -96,14 +386,34 @@ export async function generateLcoeReport(p, R, sens, CAPEX_CATS) {
 
   const logoBase64 = await loadLogoBase64();
 
-  // Footer helper
-  const addFooter = (d) => {
+  // Header + Footer helper (applied to all pages at the end)
+  const addHeaderFooter = (d) => {
     const pages = d.internal.getNumberOfPages();
     for (let i = 1; i <= pages; i++) {
       d.setPage(i);
+      // ── Header: small logo left, tagline right ──
+      if (logoBase64) {
+        d.addImage(logoBase64, "PNG", margin, 5.5, 16, 8);
+      } else {
+        d.setFont("helvetica", "bold");
+        d.setFontSize(8);
+        d.setTextColor(...DARK);
+        d.text("PVCopilot", margin, 10.5);
+      }
+      d.setFont("helvetica", "italic");
+      d.setFontSize(7.5);
+      d.setTextColor(...GRAY);
+      d.text("Your Solar PV O&M Digital Assistant", pageW - margin, 10.5, { align: "right" });
+      // thin separator line below header
+      d.setDrawColor(226, 232, 240);
+      d.setLineWidth(0.2);
+      d.line(margin, 15, pageW - margin, 15);
+
+      // ── Footer ──
+      d.setFont("helvetica", "normal");
       d.setFontSize(8);
       d.setTextColor(...GRAY);
-      d.text(`PVCopilot — LCOE Report`, margin, pageH - 8);
+      d.text(`PVCopilot — LCOE Report  |  www.pvcopilot.com`, margin, pageH - 8);
       d.text(`Page ${i} of ${pages}`, pageW - margin, pageH - 8, { align: "right" });
       d.setDrawColor(220, 220, 220);
       d.setLineWidth(0.2);
@@ -262,14 +572,32 @@ export async function generateLcoeReport(p, R, sens, CAPEX_CATS) {
   // ║  PAGE 2 — CAPEX BREAKDOWN                                               ║
   // ╚══════════════════════════════════════════════════════════════════════════╝
   doc.addPage();
-  y = 14;
-
-  // Gold accent bar
-  doc.setFillColor(...GOLD);
-  doc.rect(0, 0, pageW, 3, "F");
-  y += 4;
+  y = 20;
 
   y = sectionHeader(doc, "CAPEX Breakdown", y, margin);
+
+  // Donut chart for CAPEX category shares
+  const donutCX = margin + contentW / 4;
+  const donutCY = y + 28;
+  const donutR = 22;
+  const catColors = [GOLD, BLUE, GREEN, ORANGE];
+  drawDonutChart(doc, donutCX, donutCY, donutR, R.catTotals.map(c => c.localTotal), catColors);
+
+  // Donut legend on the right
+  let legY = y + 12;
+  R.catTotals.forEach((c, i) => {
+    doc.setFillColor(...catColors[i]);
+    doc.rect(margin + contentW / 2 + 4, legY - 2.5, 4, 4, "F");
+    doc.setFontSize(8);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(...DARK);
+    doc.text(c.label, margin + contentW / 2 + 11, legY + 0.5);
+    doc.setFont("helvetica", "normal");
+    doc.setTextColor(...GRAY);
+    doc.text(`$${fmtK(c.localTotal)}  (${fmt((c.localTotal / R.capexTotal) * 100, 1)}%)`, margin + contentW / 2 + 11, legY + 5);
+    legY += 12;
+  });
+  y += 60;
 
   // Category summary
   const catSummary = R.catTotals.map((c) => [
@@ -369,46 +697,44 @@ export async function generateLcoeReport(p, R, sens, CAPEX_CATS) {
   // ║  PAGE 3 — CASH FLOW & ENERGY                                            ║
   // ╚══════════════════════════════════════════════════════════════════════════╝
   doc.addPage();
-  y = 14;
-  doc.setFillColor(...GOLD);
-  doc.rect(0, 0, pageW, 3, "F");
-  y += 4;
+  y = 20;
 
   y = sectionHeader(doc, "Energy Production Profile", y, margin);
 
-  // Show first 5 + last 5 rows for brevity
+  // Energy line chart
+  const energyMWhData = R.rows.map(r => r.energyMWh);
+  const discCostData = R.rows.map(r => r.discCost);
+  drawLineChart(doc, margin, y, contentW, 55, [energyMWhData, discCostData], {
+    colors: [GOLD, BLUE],
+    labels: ["Energy (MWh)", "Disc. O&M ($)"],
+    xLabel: "Year",
+    showArea: true,
+    dualAxis: true,
+  });
+  y += 60;
+
+  // Energy table on a new page so all rows fit
+  doc.addPage();
+  y = 20;
+  y = sectionHeader(doc, "Energy Production Profile — Data", y, margin);
+
+  // Show ALL rows — adapt font size and padding to fit on one page
   const energyRows = R.rows;
-  const showRows = [];
-  if (energyRows.length <= 12) {
-    energyRows.forEach((r) =>
-      showRows.push([
-        `Year ${r.year}`,
-        `${fmt(r.energyMWh, 1)} MWh`,
-        `${fmt(r.degF, 1)}%`,
-        `$${fmtK(r.discCost)}`,
-      ])
-    );
-  } else {
-    for (let i = 0; i < 5; i++) {
-      const r = energyRows[i];
-      showRows.push([
-        `Year ${r.year}`,
-        `${fmt(r.energyMWh, 1)} MWh`,
-        `${fmt(r.degF, 1)}%`,
-        `$${fmtK(r.discCost)}`,
-      ]);
-    }
-    showRows.push(["...", "...", "...", "..."]);
-    for (let i = energyRows.length - 5; i < energyRows.length; i++) {
-      const r = energyRows[i];
-      showRows.push([
-        `Year ${r.year}`,
-        `${fmt(r.energyMWh, 1)} MWh`,
-        `${fmt(r.degF, 1)}%`,
-        `$${fmtK(r.discCost)}`,
-      ]);
-    }
-  }
+  const showRows = energyRows.map((r) => [
+    `Year ${r.year}`,
+    `${fmt(r.energyMWh, 1)} MWh`,
+    `${fmt(r.degF, 1)}%`,
+    `$${fmtK(r.discCost)}`,
+  ]);
+
+  // Available space on page (subtract header area + bottom margin)
+  const availH = pageH - y - 20;
+  // Estimate row height: fontSize * 0.35 + cellPadding * 2
+  // Scale down for large tables to fit in one page
+  const rowCount = showRows.length + 1; // +1 for header
+  const targetRowH = availH / rowCount;
+  const energyFontSize = Math.max(6, Math.min(9, targetRowH / 1.1));
+  const energyPadding = Math.max(1, Math.min(3, (targetRowH - energyFontSize * 0.35) / 2));
 
   autoTable(doc, {
     startY: y,
@@ -417,16 +743,16 @@ export async function generateLcoeReport(p, R, sens, CAPEX_CATS) {
     margin: { left: margin, right: margin },
     styles: {
       font: "helvetica",
-      fontSize: 9,
-      cellPadding: 3,
+      fontSize: energyFontSize,
+      cellPadding: energyPadding,
       textColor: DARK,
       lineColor: [226, 232, 240],
-      lineWidth: 0.2,
+      lineWidth: 0.15,
     },
-    headStyles: { fillColor: DARK, textColor: WHITE, fontStyle: "bold", fontSize: 9 },
+    headStyles: { fillColor: DARK, textColor: WHITE, fontStyle: "bold", fontSize: energyFontSize },
     alternateRowStyles: { fillColor: LIGHT_BG },
     columnStyles: {
-      0: { fontStyle: "bold", cellWidth: 30 },
+      0: { fontStyle: "bold", cellWidth: 25 },
       1: { halign: "right" },
       2: { halign: "center" },
       3: { halign: "right" },
@@ -434,45 +760,55 @@ export async function generateLcoeReport(p, R, sens, CAPEX_CATS) {
   });
   y = doc.lastAutoTable.finalY + 10;
 
-  // ── Cash Flow Summary ──────────────────────────────────────────────────────
-  y = checkPage(doc, y, 70, margin + 10, pageH, null);
+  // ── Cash Flow Chart ──────────────────────────────────────────────────────
+  doc.addPage();
+  y = 20;
   y = sectionHeader(doc, "Cash Flow Analysis", y, margin);
 
+  // Bar chart: revenue vs opex per year
+  const cfRevData = R.cashFlowRows.map(r => r.discountedRevenue);
+  const cfYears = R.cashFlowRows.map(r => `${r.year}`);
+  drawBarChart(doc, margin, y, contentW, 55, cfYears, cfRevData, {
+    colors: cfRevData.map(() => GREEN),
+  });
+  // Overlay cumulative line
+  const cfCumData = R.cashFlowRows.map(r => r.cumulativeDiscountedCashFlow);
+  y += 58;
+
+  doc.setFontSize(7);
+  doc.setTextColor(...GRAY);
+  doc.text("Bars: Discounted Revenue per year", margin + 4, y);
+  y += 6;
+
+  // Cumulative cash flow line chart
+  drawLineChart(doc, margin, y, contentW, 50, [cfCumData], {
+    colors: [BLUE],
+    labels: ["Cumulative Disc. Cash Flow ($)"],
+    xLabel: "Year",
+    showArea: true,
+  });
+  y += 55;
+
+  // ── Cash Flow Table ──────────────────────────────────────────────────────
+  doc.addPage();
+  y = 20;
+  y = sectionHeader(doc, "Cash Flow Analysis — Data", y, margin);
+
   const cfRows = R.cashFlowRows;
-  const cfShow = [];
-  if (cfRows.length <= 12) {
-    cfRows.forEach((r) =>
-      cfShow.push([
-        `Year ${r.year}`,
-        `$${fmtK(r.discountedRevenue)}`,
-        `$${fmtK(Math.abs(r.discountedOpex))}`,
-        `$${fmtK(r.discountedNetCashFlow)}`,
-        `$${fmtK(r.cumulativeDiscountedCashFlow)}`,
-      ])
-    );
-  } else {
-    for (let i = 0; i < 5; i++) {
-      const r = cfRows[i];
-      cfShow.push([
-        `Year ${r.year}`,
-        `$${fmtK(r.discountedRevenue)}`,
-        `$${fmtK(Math.abs(r.discountedOpex))}`,
-        `$${fmtK(r.discountedNetCashFlow)}`,
-        `$${fmtK(r.cumulativeDiscountedCashFlow)}`,
-      ]);
-    }
-    cfShow.push(["...", "...", "...", "...", "..."]);
-    for (let i = cfRows.length - 5; i < cfRows.length; i++) {
-      const r = cfRows[i];
-      cfShow.push([
-        `Year ${r.year}`,
-        `$${fmtK(r.discountedRevenue)}`,
-        `$${fmtK(Math.abs(r.discountedOpex))}`,
-        `$${fmtK(r.discountedNetCashFlow)}`,
-        `$${fmtK(r.cumulativeDiscountedCashFlow)}`,
-      ]);
-    }
-  }
+  const cfShow = cfRows.map((r) => [
+    `Year ${r.year}`,
+    `$${fmtK(r.discountedRevenue)}`,
+    `$${fmtK(Math.abs(r.discountedOpex))}`,
+    `$${fmtK(r.discountedNetCashFlow)}`,
+    `$${fmtK(r.cumulativeDiscountedCashFlow)}`,
+  ]);
+
+  // Adapt font size and padding to fit all rows on one page
+  const cfAvailH = pageH - y - 20;
+  const cfRowCount = cfShow.length + 1; // +1 for header
+  const cfTargetRowH = cfAvailH / cfRowCount;
+  const cfFontSize = Math.max(6, Math.min(8.5, cfTargetRowH / 1.1));
+  const cfPadding = Math.max(1, Math.min(2.8, (cfTargetRowH - cfFontSize * 0.35) / 2));
 
   autoTable(doc, {
     startY: y,
@@ -481,13 +817,13 @@ export async function generateLcoeReport(p, R, sens, CAPEX_CATS) {
     margin: { left: margin, right: margin },
     styles: {
       font: "helvetica",
-      fontSize: 8.5,
-      cellPadding: 2.8,
+      fontSize: cfFontSize,
+      cellPadding: cfPadding,
       textColor: DARK,
       lineColor: [226, 232, 240],
-      lineWidth: 0.2,
+      lineWidth: 0.15,
     },
-    headStyles: { fillColor: DARK, textColor: WHITE, fontStyle: "bold", fontSize: 8.5 },
+    headStyles: { fillColor: DARK, textColor: WHITE, fontStyle: "bold", fontSize: cfFontSize },
     alternateRowStyles: { fillColor: LIGHT_BG },
     columnStyles: {
       0: { fontStyle: "bold", cellWidth: 25 },
@@ -503,11 +839,7 @@ export async function generateLcoeReport(p, R, sens, CAPEX_CATS) {
   // ║  SENSITIVITY ANALYSIS                                                    ║
   // ╚══════════════════════════════════════════════════════════════════════════╝
   y = checkPage(doc, y, 80, margin + 10, pageH, null);
-  if (y < 30) {
-    doc.setFillColor(...GOLD);
-    doc.rect(0, 0, pageW, 3, "F");
-    y = 18;
-  }
+  if (y < 30) y = 20;
   y = sectionHeader(doc, "Sensitivity Analysis", y, margin);
 
   doc.setFont("helvetica", "normal");
@@ -515,6 +847,12 @@ export async function generateLcoeReport(p, R, sens, CAPEX_CATS) {
   doc.setTextColor(...GRAY);
   doc.text("LCOE variation when each parameter changes by +/-20%", margin, y);
   y += 7;
+
+  // Tornado chart
+  drawTornadoChart(doc, margin, y, contentW, Math.min(65, 10 + sens.length * 10), sens);
+  y += Math.min(65, 10 + sens.length * 10) + 6;
+
+  y = checkPage(doc, y, 50, margin + 10, pageH, null);
 
   const sensData = sens.map((s) => [
     s.label,
@@ -549,11 +887,7 @@ export async function generateLcoeReport(p, R, sens, CAPEX_CATS) {
 
   // ── LCOE Methodology ──────────────────────────────────────────────────────
   y = checkPage(doc, y, 55, margin + 10, pageH, null);
-  if (y < 30) {
-    doc.setFillColor(...GOLD);
-    doc.rect(0, 0, pageW, 3, "F");
-    y = 18;
-  }
+  if (y < 30) y = 20;
   y = sectionHeader(doc, "Methodology", y, margin);
 
   doc.setFont("helvetica", "normal");
@@ -607,8 +941,8 @@ export async function generateLcoeReport(p, R, sens, CAPEX_CATS) {
   const disclaimerLines = doc.splitTextToSize(disclaimer, contentW);
   doc.text(disclaimerLines, margin, y);
 
-  // ── Apply footer to all pages ──────────────────────────────────────────────
-  addFooter(doc);
+  // ── Apply header + footer to all pages ─────────────────────────────────────
+  addHeaderFooter(doc);
 
   // ── Download ───────────────────────────────────────────────────────────────
   doc.save(`PVCopilot_LCOE_Report_${fmt(p.systemCapacity, 0)}kWp.pdf`);
