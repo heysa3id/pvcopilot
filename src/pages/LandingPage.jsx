@@ -7,18 +7,17 @@ import {
   TrendingUpOutlined,
   AssessmentOutlined,
   BoltOutlined,
-  AttachMoneyOutlined,
   SummarizeOutlined,
   LinkOutlined,
   QueryStats,
   AutoFixHigh,
   ElectricBolt,
-  Savings,
   FilterAltOutlined,
   LinkedIn,
   GitHub,
   YouTube,
 } from "@mui/icons-material";
+import CurrencyExchangeIcon from "@mui/icons-material/CurrencyExchange";
 
 const G = "#FFB800", B = "#1d9bf0", O = "#ff7a45", Y = "#16a34a", P = "#8b5cf6";
 const ICON_COLOR = G;
@@ -30,7 +29,7 @@ const PIPE = [
   { id: "gap",     label: "Gap Filling",       sub: "ML models · historical pattern matching",icon: <TrendingUpOutlined sx={{ fontSize: 22 }} />, color: "#10b981" },
   { id: "kpi",     label: "KPI Calculation",   sub: "IEC 61724 · PR · degradation Rd",       icon: <AssessmentOutlined sx={{ fontSize: 22 }} />, color: Y },
   { id: "predict", label: "Power Prediction",  sub: "Physical + ML forecast models",         icon: <BoltOutlined sx={{ fontSize: 22 }} />, color: O },
-  { id: "lcoe",    label: "LCOE & Financials", sub: "Levelized cost · IRR · NPV · payback",  icon: <AttachMoneyOutlined sx={{ fontSize: 22 }} />, color: G },
+  { id: "lcoe",    label: "LCOE & Financials", sub: "Levelized cost · IRR · NPV · payback",  icon: <CurrencyExchangeIcon sx={{ fontSize: 22, color: G }} />, color: G },
   { id: "report",  label: "System Report",     sub: "PDF / dashboard export",                icon: <SummarizeOutlined sx={{ fontSize: 22 }} />, color: "#94a3b8" },
 ];
 
@@ -39,7 +38,7 @@ const TOOL_ICONS = {
   kpi: <QueryStats sx={{ fontSize: 22, color: ICON_COLOR }} />,
   gap: <AutoFixHigh sx={{ fontSize: 22, color: ICON_COLOR }} />,
   predict: <ElectricBolt sx={{ fontSize: 22, color: ICON_COLOR }} />,
-  lcoe: <Savings sx={{ fontSize: 22, color: ICON_COLOR }} />,
+  lcoe: <CurrencyExchangeIcon sx={{ fontSize: 22, color: ICON_COLOR }} />,
   filter: <FilterAltOutlined sx={{ fontSize: 22, color: ICON_COLOR }} />,
 };
 
@@ -442,7 +441,7 @@ function PlatformModuleCard({ number, icon, title, subtitle, desc, tags, path, e
           {number}
         </div>
         {/* Category label */}
-        <div style={{ fontSize: 12, fontWeight: 600, color: "#dec89a", marginBottom: 6, letterSpacing: "0.02em" }}>
+        <div style={{ fontSize: 12, fontWeight: 600, color: G, marginBottom: 6, letterSpacing: "0.02em" }}>
           {subtitle || "Core pipeline module"}
         </div>
         {/* Title */}
@@ -469,10 +468,20 @@ function PlatformModuleCard({ number, icon, title, subtitle, desc, tags, path, e
         )}
         {/* Link */}
         {path ? (
-          <Link to={path} style={{
+          <Link to={path}
+            onMouseEnter={e => {
+              e.currentTarget.style.color = G;
+              e.currentTarget.style.transform = "translateX(2px)";
+            }}
+            onMouseLeave={e => {
+              e.currentTarget.style.color = "#dec89a";
+              e.currentTarget.style.transform = "translateX(0)";
+            }}
+            style={{
             fontFamily: "Inter, Arial, sans-serif",
             display: "inline-flex", alignItems: "center", gap: 10,
             color: "#dec89a", textDecoration: "none", fontSize: 14, fontWeight: 800,
+            transition: "color 0.25s ease, transform 0.25s ease",
           }}>
             Open Module <span style={{ fontSize: 16, lineHeight: 1 }}>→</span>
           </Link>
@@ -494,15 +503,16 @@ function PlatformModuleCard({ number, icon, title, subtitle, desc, tags, path, e
         borderRadius: 42,
         overflow: "hidden",
         background: [
-          "radial-gradient(circle at 45% 14%, rgba(255, 180, 34, 0.36), transparent 21%)",
-          "radial-gradient(circle at 28% 80%, rgba(255, 152, 23, 0.24), transparent 24%)",
-          "radial-gradient(circle at 64% 62%, rgba(255, 196, 66, 0.12), transparent 29%)",
-          "radial-gradient(circle at 86% 76%, rgba(41, 79, 142, 0.05), transparent 24%)",
-          "linear-gradient(135deg, #090704 0%, #120d05 28%, #1a1308 52%, #101827 100%)",
+          "radial-gradient(circle at 18% 12%, rgba(167, 243, 208, 0.12), transparent 28%)",
+          "radial-gradient(circle at 82% 22%, rgba(147, 197, 253, 0.18), transparent 30%)",
+          "radial-gradient(circle at 72% 78%, rgba(250, 204, 21, 0.12), transparent 30%)",
+          "linear-gradient(140deg, rgba(15, 23, 42, 0.88) 0%, rgba(19, 33, 58, 0.8) 45%, rgba(27, 46, 80, 0.84) 100%)",
         ].join(", "),
-        border: "1px solid rgba(174, 184, 201, 0.16)",
-        boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 18px 40px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(255, 149, 0, 0.03)",
-        transition: "box-shadow 0.3s ease",
+        border: "1px solid rgba(226, 232, 240, 0.24)",
+        backdropFilter: "blur(16px) saturate(115%)",
+        WebkitBackdropFilter: "blur(16px) saturate(115%)",
+        boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.26), inset 0 -30px 50px rgba(15, 23, 42, 0.18), 0 20px 46px rgba(2, 6, 23, 0.4)",
+        transition: "box-shadow 0.3s ease, border-color 0.3s ease",
       }}
     >
       {/* Optional soft orange bloom (like ::before in example) */}
@@ -511,11 +521,11 @@ function PlatformModuleCard({ number, icon, title, subtitle, desc, tags, path, e
           position: "absolute",
           width: 200,
           height: 200,
-          right: "15%",
-          top: -20,
-          background: "rgba(255, 149, 0, 0.24)",
+          right: "8%",
+          top: -34,
+          background: "radial-gradient(circle, rgba(148, 163, 184, 0.26) 0%, rgba(245, 158, 11, 0.14) 45%, rgba(15, 23, 42, 0) 72%)",
           borderRadius: "50%",
-          filter: "blur(40px)",
+          filter: "blur(48px)",
           pointerEvents: "none",
           zIndex: 1,
         }}
@@ -642,12 +652,25 @@ export default function LandingPage() {
         }}
       >
         <div style={{ maxWidth: 1140, margin: "0 auto" }}>
-          <h2 style={{ fontSize: 26, fontWeight: 800, textAlign: "center", marginBottom: 8, color: "#0F172A", letterSpacing: "-.02em" }}>
-            End-to-End Processing Pipeline
-          </h2>
-          <p style={{ fontSize: 14, color: "#64748B", textAlign: "center", marginBottom: 44 }}>
-            Each stage outputs corrected data that feeds the next — run the full chain or any subset.
-          </p>
+          {/* Header row */}
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 24, marginBottom: 48 }}>
+            <div style={{ maxWidth: 480, textAlign: "left", paddingLeft: 0, marginLeft: 0 }}>
+              <span style={{
+                display: "inline-block", fontSize: 11, fontWeight: 700, color: G,
+                letterSpacing: ".12em", textTransform: "uppercase",
+                padding: "5px 12px", borderRadius: 6,
+                background: "rgba(255,184,0,0.12)", marginBottom: 14,
+              }}>
+                Processing Pipeline
+              </span>
+              <h2 style={{ fontSize: "clamp(24px, 3vw, 32px)", fontWeight: 800, color: "#0F172A", lineHeight: 1.2, letterSpacing: "-.02em", margin: 0, marginLeft: 0, paddingLeft: 0 }}>
+                End-to-End Processing Pipeline
+              </h2>
+            </div>
+            <p style={{ maxWidth: 340, fontSize: 14, color: "#64748B", lineHeight: 1.65, margin: 0, paddingTop: 28 }}>
+              Each stage outputs corrected data that feeds the next — run the full chain or any subset.
+            </p>
+          </div>
 
           <div style={{
             display: "flex",
@@ -655,137 +678,282 @@ export default function LandingPage() {
             alignItems: "flex-start",
             justifyContent: "center",
             flexWrap: "wrap",
-            gap: 10,
+            gap: 6,
           }}>
-            {PIPE.map((step, i) => (
-              <span key={step.id} style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
-                <div style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  width: 110,
-                  minWidth: 110,
-                  height: 100,
-                  padding: "10px 8px",
-                  borderRadius: 12,
-                  border: "1px solid #E2E8F0",
-                  background: "#FFFFFF",
-                  boxSizing: "border-box",
-                }}>
-                  <div
-                    style={{
+            {PIPE.map((step, i) => {
+              const gradientId = `badge-grad-${i}`;
+              const t = PIPE.length > 1 ? i / (PIPE.length - 1) : 0;
+              const badgeStart = "#FFB800";
+              const badgeEnd = "#FF8C00";
+              return (
+                <span key={step.id} style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
+                  <div style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    width: 120,
+                    minWidth: 120,
+                  }}>
+                    {/* Blob background with icon */}
+                    <div style={{
                       position: "relative",
-                      width: 40,
-                      height: 40,
-                      flexShrink: 0,
-                      borderRadius: 10,
-                      background: "rgba(255, 184, 0, 0.14)",
+                      width: 100,
+                      height: 100,
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      marginBottom: 8,
-                    }}
-                  >
-                    <span style={{ color: G, display: "flex", fontSize: 20 }}>{step.icon}</span>
-                    <span
-                      style={{
+                      marginBottom: 12,
+                    }}>
+                      {/* Organic blob shape with warm tint */}
+                      <svg viewBox="0 0 200 200" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
+                        <defs>
+                          <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stopColor={badgeStart} />
+                            <stop offset="100%" stopColor={badgeEnd} />
+                          </linearGradient>
+                        </defs>
+                        <path
+                          d="M 100, 20 C 140, 20  175, 45  180, 85 C 185, 125  155, 170  115, 178 C 75, 186  30, 160  22, 120 C 14, 80  60, 20  100, 20 Z"
+                          fill="#FFF9EC"
+                        />
+                      </svg>
+                      {/* Icon */}
+                      <span style={{ position: "relative", zIndex: 1, display: "flex", fontSize: 28 }}>
+                        {cloneElement(step.icon, { sx: { fontSize: 32, color: G } })}
+                      </span>
+                      {/* Number badge */}
+                      <span style={{
                         position: "absolute",
-                        top: -5,
-                        right: -5,
-                        width: 18,
-                        height: 18,
+                        top: 0,
+                        right: 2,
+                        zIndex: 2,
+                        width: 24,
+                        height: 24,
                         borderRadius: "50%",
-                        background: G,
+                        background: `linear-gradient(135deg, ${badgeStart}, ${badgeEnd})`,
                         color: "#FFFFFF",
-                        fontSize: 10,
+                        fontSize: 11,
                         fontWeight: 700,
                         display: "flex",
                         alignItems: "center",
                         justifyContent: "center",
-                      }}
-                    >
-                      {i + 1}
+                        boxShadow: "0 2px 8px rgba(255,184,0,0.4)",
+                      }}>
+                        {String(i + 1).padStart(2, "0")}
+                      </span>
+                    </div>
+                    {/* Label */}
+                    <div style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: "#0F172A",
+                      textAlign: "center",
+                      lineHeight: 1.3,
+                      overflow: "hidden",
+                      display: "-webkit-box",
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: "vertical",
+                    }}>
+                      {step.label}
+                    </div>
+                  </div>
+                  {/* Decorative dots between items */}
+                  {i < PIPE.length - 1 && (
+                    <span style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 4,
+                      alignItems: "center",
+                      margin: "0 2px",
+                      paddingBottom: 24,
+                    }}>
+                      {[4, 5, 4].map((size, di) => (
+                        <span key={di} style={{
+                          width: size,
+                          height: size,
+                          borderRadius: "50%",
+                          background: di === 1 ? G : "rgba(255,184,0,0.25)",
+                          opacity: di === 1 ? 0.7 : 0.5,
+                        }} />
+                      ))}
                     </span>
-                  </div>
-                  <div style={{ fontSize: 11, fontWeight: 700, color: "#0F172A", textAlign: "center", lineHeight: 1.25, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
-                    {step.label}
-                  </div>
-                </div>
-                {i < PIPE.length - 1 && (
-                  <span style={{
-                    color: "#CBD5E1",
-                    fontSize: 15,
-                    marginLeft: 2,
-                    marginRight: 0,
-                    marginTop: 2,
-                  }}>›</span>
-                )}
-              </span>
-            ))}
+                  )}
+                </span>
+              );
+            })}
           </div>
         </div>
       </section>
 
       {/* ━━━ TECHNICAL SPECS ━━━ */}
-      <section style={{ padding: "64px 24px 72px", background: "#FFFFFF", borderTop: "1px solid #E2E8F0" }}>
-        <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-          {/* Header row */}
-          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 24, marginBottom: 48 }}>
-            <div style={{ maxWidth: 480 }}>
+      <style>{`
+        .tf-section { max-width: 1260px; margin: 0 auto; padding: 64px 24px 72px; }
+        .tf-header { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 24px; margin-bottom: 48px; }
+        .tf-grid { display: grid; grid-template-columns: 1fr 1.3fr 1fr; gap: 16px; align-items: stretch; }
+        .tf-card { position: relative; background: #FFFFFF; border: 1px solid #E8ECF1; border-radius: 22px; box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08); backdrop-filter: blur(10px); overflow: hidden; }
+        .tf-card.tf-light { padding: 20px; }
+        .tf-card.tf-core {
+          background: radial-gradient(circle at 18% 84%, rgba(255,149,0,0.12), transparent 24%), radial-gradient(circle at 50% 12%, rgba(255,180,0,0.10), transparent 24%), linear-gradient(135deg, rgba(255,255,255,0.94) 0%, rgba(255,251,245,0.98) 100%);
+          padding: 0; display: grid; grid-template-rows: auto 1fr auto; min-height: 340px; height: 100%;
+        }
+        @media (max-width: 1180px) {
+          .tf-section { padding: 56px 20px 72px; }
+          .tf-card.tf-light { padding: 22px; }
+        }
+        @media (max-width: 900px) {
+          .tf-header { grid-template-columns: 1fr; }
+          .tf-grid { gap: 12px; }
+          .tf-card.tf-light { padding: 18px; }
+        }
+        @media (max-width: 640px) {
+          .tf-section { padding: 28px 12px 44px; }
+          .tf-grid { gap: 10px; }
+          .tf-card.tf-light { padding: 16px 14px; }
+        }
+      `}</style>
+      <section style={{ padding: 0, background: "#FFFFFF", borderTop: "1px solid #E2E8F0" }}>
+        <div className="tf-section">
+          <div className="tf-header">
+            <div style={{ maxWidth: 480, textAlign: "left", paddingLeft: 0, marginLeft: 0 }}>
               <span style={{
                 display: "inline-block", fontSize: 11, fontWeight: 700, color: G,
                 letterSpacing: ".12em", textTransform: "uppercase",
                 padding: "5px 12px", borderRadius: 6,
                 background: "rgba(255,184,0,0.12)", marginBottom: 14,
               }}>
-                Technical Specs
+                Technical Foundation
               </span>
-              <h2 style={{ fontSize: "clamp(24px, 3vw, 32px)", fontWeight: 800, color: "#0F172A", lineHeight: 1.2, letterSpacing: "-.02em", margin: 0 }}>
-                Built on Industry Standards & Proven Models
+              <h2 style={{ fontSize: "clamp(24px, 3vw, 32px)", fontWeight: 800, color: "#0F172A", lineHeight: 1.2, letterSpacing: "-.02em", margin: 0, marginLeft: 0, paddingLeft: 0 }}>
+                Trusted Inputs, Bankable Methods, and Decision-Ready Outputs
               </h2>
             </div>
             <p style={{ maxWidth: 340, fontSize: 14, color: "#64748B", lineHeight: 1.65, margin: 0, paddingTop: 28 }}>
-              IEC-compliant KPIs, NREL/IEA LCOE methodology, and ML-powered analytics — all integrated into one pipeline.
+              PVCopilot structures the LCOE and analytics engine as a clear logic flow: what comes in, how it is processed, and what the user gets out.
             </p>
           </div>
 
-          {/* Cards */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 20 }}>
-            {[
-              { cat: "Data Inputs", icon: <CloudDownloadOutlined sx={{ fontSize: 22, color: G }} />, items: ["PV power & energy CSV", "Weather station CSV (GHI, Tamb, Wspd)", "System info JSON (kWp, tilt, azimuth)", "PVsyst PDF report auto-parse"] },
-              { cat: "Standards", icon: <AssessmentOutlined sx={{ fontSize: 22, color: G }} />, items: ["IEC 61724-1 KPI definitions", "IEC 61724-3 capacity testing", "LCOE per NREL / IEA methodology", "Linear degradation model (Rd)"] },
-              { cat: "Models", icon: <BoltOutlined sx={{ fontSize: 22, color: G }} />, items: ["Single-diode PV model", "Temperature-corrected PR", "ML gap-filling (XGBoost / kNN)", "Discounted cash flow (DCF)"] },
-              { cat: "Outputs", icon: <SummarizeOutlined sx={{ fontSize: 22, color: G }} />, items: ["Interactive dashboards", "LCOE with sensitivity tornado", "Cash flow & payback charts", "Exportable PDF reports"] },
-            ].map(({ cat, icon, items }) => (
-              <div key={cat} style={{
-                padding: "24px 22px",
-                background: "#FFFFFF",
-                borderRadius: 14,
-                border: "1px solid #E8ECF1",
-                boxShadow: "0 2px 12px rgba(15,23,42,0.05)",
-                display: "flex", flexDirection: "column", gap: 16,
+          <div className="tf-grid">
+            {/* Inputs card */}
+            <article className="tf-card tf-light tf-inputs">
+              <div style={{
+                width: 46, height: 46, borderRadius: 14, background: "rgba(255, 180, 0, 0.12)",
+                display: "grid", placeItems: "center", marginBottom: 20, color: "#ff9500", fontSize: 20,
+              }}>⤓</div>
+              <h3 style={{ margin: "0 0 10px", fontSize: 26, lineHeight: 1, letterSpacing: "-0.035em", fontWeight: 800, color: "#0f1b36" }}>Inputs</h3>
+              <p style={{ margin: "0 0 14px", color: "#5e6b80", fontSize: 14, lineHeight: 1.45 }}>
+                Validated technical and operational data sources used to feed the analytics pipeline.
+              </p>
+              <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gap: 10 }}>
+                {[
+                  "PV power and energy CSV imports",
+                  "Weather station CSV such as GHI, Tamb, and wind speed",
+                  "System metadata in JSON including kWp, tilt, and azimuth",
+                  "PVsyst report parsing for baseline design assumptions",
+                ].map((item, i) => (
+                  <li key={i} style={{ display: "grid", gridTemplateColumns: "8px 1fr", gap: 10, alignItems: "start", color: "#44536a", fontSize: 13, lineHeight: 1.35 }}>
+                    <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#ffb400", marginTop: 7 }} />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+              <div style={{ marginTop: 14, color: "#7a879a", fontSize: 12, lineHeight: 1.35 }}>
+                Structured source data is normalized before KPI, forecast, and LCOE workflows begin.
+              </div>
+            </article>
+
+            {/* Core engine card */}
+            <article className="tf-card tf-core">
+              <div style={{
+                padding: "20px 18px 14px", borderBottom: "1px solid rgba(15, 23, 42, 0.06)",
+                display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12,
               }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                  <div style={{
-                    width: 44, height: 44, borderRadius: 12, flexShrink: 0,
-                    background: "rgba(255,184,0,0.12)",
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                  }}>
-                    {icon}
-                  </div>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A" }}>{cat}</div>
+                <div>
+                  <h3 style={{ margin: "0 0 8px", fontSize: 24, lineHeight: 1.02, letterSpacing: "-0.04em", fontWeight: 800, color: "#0f1b36" }}>
+                    Standards &amp; Models Engine
+                  </h3>
+                  <p style={{ margin: 0, color: "#5e6b80", fontSize: 13, lineHeight: 1.4 }}>
+                    The technical core combines recognized PV performance standards with techno-economic and data-driven modeling blocks.
+                  </p>
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {items.map((item, j) => (
-                    <div key={j} style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
-                      <span style={{ color: G, fontSize: 8, marginTop: 5, flexShrink: 0 }}>●</span>
-                      <span style={{ fontSize: 13, color: "#475569", lineHeight: 1.5 }}>{item}</span>
-                    </div>
-                  ))}
+                <div style={{
+                  display: "inline-flex", alignItems: "center", justifyContent: "center",
+                  minWidth: 78, padding: "10px 12px", borderRadius: 999,
+                  background: "#111827", color: "#fff8ef",
+                  fontSize: 11, fontWeight: 800, letterSpacing: "0.08em", textTransform: "uppercase",
+                  boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.06)", flexShrink: 0,
+                }}>
+                  Core logic
                 </div>
               </div>
-            ))}
+
+              <div style={{ padding: "14px 18px 16px", display: "grid", gridTemplateColumns: "1fr", gap: 10 }}>
+                <div style={{
+                  border: "1px solid rgba(15, 23, 42, 0.06)", borderRadius: 16,
+                  background: "rgba(255,255,255,0.72)", padding: "12px 12px 10px",
+                }}>
+                  <p style={{ margin: "0 0 8px", color: "#cc7b00", fontSize: 11, fontWeight: 800, letterSpacing: "0.12em", textTransform: "uppercase" }}>Standards</p>
+                  <ul style={{ margin: 0, paddingLeft: 16, color: "#44536a", display: "grid", gap: 7, fontSize: 12, lineHeight: 1.35 }}>
+                    <li>IEC 61724-1 KPI definitions</li>
+                    <li>IEC 61724-3 capacity testing</li>
+                    <li>NREL / IEA LCOE methodology</li>
+                    <li>Linear degradation assumptions</li>
+                  </ul>
+                </div>
+                <div style={{
+                  border: "1px solid rgba(15, 23, 42, 0.06)", borderRadius: 16,
+                  background: "rgba(255,255,255,0.72)", padding: "12px 12px 10px",
+                }}>
+                  <p style={{ margin: "0 0 8px", color: "#cc7b00", fontSize: 11, fontWeight: 800, letterSpacing: "0.12em", textTransform: "uppercase" }}>Models</p>
+                  <ul style={{ margin: 0, paddingLeft: 16, color: "#44536a", display: "grid", gap: 7, fontSize: 12, lineHeight: 1.35 }}>
+                    <li>Single-diode PV model</li>
+                    <li>Temperature-corrected PR</li>
+                    <li>ML-based gap filling</li>
+                    <li>Discounted cash flow engine</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div style={{
+                padding: "12px 18px 18px", borderTop: "1px solid rgba(15, 23, 42, 0.06)",
+                display: "flex", flexWrap: "wrap", gap: 8,
+              }}>
+                {["Bankable KPIs", "Performance analytics", "Economic evaluation", "Explainable workflow"].map(chip => (
+                  <span key={chip} style={{
+                    borderRadius: 999, padding: "7px 10px",
+                    background: "rgba(17, 24, 39, 0.05)", color: "#24324b",
+                    fontSize: 11, fontWeight: 700,
+                  }}>{chip}</span>
+                ))}
+              </div>
+            </article>
+
+            {/* Outputs card */}
+            <article className="tf-card tf-light tf-outputs">
+              <div style={{
+                width: 46, height: 46, borderRadius: 14, background: "rgba(255, 180, 0, 0.12)",
+                display: "grid", placeItems: "center", marginBottom: 20, color: "#ff9500", fontSize: 20,
+              }}>⤴</div>
+              <h3 style={{ margin: "0 0 10px", fontSize: 26, lineHeight: 1, letterSpacing: "-0.035em", fontWeight: 800, color: "#0f1b36" }}>Outputs</h3>
+              <p style={{ margin: "0 0 14px", color: "#5e6b80", fontSize: 14, lineHeight: 1.45 }}>
+                Decision-ready technical and economic results produced from the combined analytics engine.
+              </p>
+              <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gap: 10 }}>
+                {[
+                  "Interactive dashboards for KPIs, PR, and system losses",
+                  "LCOE sensitivity and scenario analysis",
+                  "Cash flow, payback, and long-term economic charts",
+                  "Exportable reports for stakeholders and technical review",
+                ].map((item, i) => (
+                  <li key={i} style={{ display: "grid", gridTemplateColumns: "8px 1fr", gap: 10, alignItems: "start", color: "#44536a", fontSize: 13, lineHeight: 1.35 }}>
+                    <span style={{ width: 5, height: 5, borderRadius: "50%", background: "#ffb400", marginTop: 7 }} />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+              <div style={{ marginTop: 14, color: "#7a879a", fontSize: 12, lineHeight: 1.35 }}>
+                Outputs are designed for O&amp;M teams, analysts, and decision-makers working on PV assets.
+              </div>
+            </article>
           </div>
         </div>
       </section>
@@ -812,11 +980,16 @@ export default function LandingPage() {
         }} />
         <div style={{ position: "relative", zIndex: 1, maxWidth: 1200, margin: "0 auto" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16, marginBottom: 32 }}>
-            <div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#ffc423", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 6 }}>
+            <div style={{ maxWidth: 520, textAlign: "left", paddingLeft: 0, marginLeft: 0 }}>
+              <span style={{
+                display: "inline-block", fontSize: 11, fontWeight: 700, color: G,
+                letterSpacing: ".12em", textTransform: "uppercase",
+                padding: "5px 12px", borderRadius: 6,
+                background: "rgba(255,184,0,0.12)", marginBottom: 14,
+              }}>
                 Platform Modules
-              </div>
-              <h2 style={{ fontSize: "clamp(22px, 3vw, 28px)", fontWeight: 800, color: "#f3f4f6", margin: 0, lineHeight: 1.2 }}>
+              </span>
+              <h2 style={{ fontSize: "clamp(24px, 3vw, 32px)", fontWeight: 800, color: "#f3f4f6", lineHeight: 1.2, letterSpacing: "-.02em", margin: 0, marginLeft: 0, paddingLeft: 0 }}>
                 Each module runs standalone or chains into a series workflow
               </h2>
             </div>
@@ -882,19 +1055,28 @@ export default function LandingPage() {
       {/* ━━━ TEAM — profile card (image left, content right) ━━━ */}
       <section id="team" style={{
         padding: "72px 24px 80px",
-        background: "linear-gradient(180deg, #F8FAFC 0%, #F1F5F9 100%)",
+        background: "#FFFFFF",
         borderTop: "1px solid #E2E8F0",
       }}>
         <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-          <h2 style={{
-            fontSize: 22, fontWeight: 800, color: "#0F172A",
-            letterSpacing: "-.02em", marginBottom: 8, textAlign: "center",
-          }}>
-            Get to know who’s behind PVCopilot
-          </h2>
-          <p style={{ fontSize: 12, color: "#64748B", marginBottom: 40, maxWidth: 900, margin: "0 auto 40px", textAlign: "center" }}>
-          Led by Said Elhamaoui, combining hands-on PV engineering, applied research, and digital innovation to support smarter solar asset management.
-          </p>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 24, marginBottom: 48 }}>
+            <div style={{ maxWidth: 480 }}>
+              <span style={{
+                display: "inline-block", fontSize: 11, fontWeight: 700, color: G,
+                letterSpacing: ".12em", textTransform: "uppercase",
+                padding: "5px 12px", borderRadius: 6,
+                background: "rgba(255,184,0,0.12)", marginBottom: 14,
+              }}>
+                Meet the Team
+              </span>
+              <h2 style={{ fontSize: "clamp(24px, 3vw, 32px)", fontWeight: 800, color: "#0F172A", lineHeight: 1.2, letterSpacing: "-.02em", margin: 0 }}>
+                Get to Know Who’s Behind PVCopilot
+              </h2>
+            </div>
+            <p style={{ maxWidth: 340, fontSize: 14, color: "#64748B", lineHeight: 1.65, margin: 0, paddingTop: 28 }}>
+              Led by Said Elhamaoui, combining hands-on PV engineering, applied research, and digital innovation to support smarter solar asset management.
+            </p>
+          </div>
 
           <div
             className="team-card"
@@ -935,18 +1117,18 @@ export default function LandingPage() {
                 <p style={{ fontSize: 13, color: "#64748B", marginBottom: 12, fontWeight: 400 }}>
                   R&D Engineer, Founder <span style={{ color: "#FFB800", fontWeight: 600 }}>@PVCopilot</span>
                 </p>
-                <p style={{ fontSize: 14, color: "#475569", lineHeight: 1.55, marginBottom: 8 }}>
+                <p style={{ fontSize: 12.5, color: "#475569", lineHeight: 1.55, marginBottom: 8 }}>
                   R&D Engineer with 5 years of experience in PV systems testing, characterization, and performance analysis. I have led multiple R&D and applied research projects in solar energy.
                 </p>
                 <ul style={{
-                  fontSize: 14, color: "#475569", lineHeight: 1.55, marginBottom: 14,
+                  fontSize: 12.5, color: "#475569", lineHeight: 1.55, marginBottom: 14,
                   paddingLeft: 20, marginTop: 0,
                 }}>
                   <li style={{ marginBottom: 4 }}>Served as Project Coordinator for SolarTwin, a digital twin platform for PV O&M at Green Energy Park.</li>
                   <li style={{ marginBottom: 4 }}>ExCo & Task 13 Expert at IEA PVPS.</li>
                   <li style={{ marginBottom: 4 }}>Director of Outreach & Communication at PV Camper (Sandia Labs).</li>
                 </ul>
-                <p style={{ fontSize: 14, color: "#475569", lineHeight: 1.55, marginBottom: 14 }}>
+                <p style={{ fontSize: 12.5, color: "#475569", lineHeight: 1.55, marginBottom: 14 }}>
                   Through PVCopilot, I combine field experience, research, and digital innovation to deliver reliable tools for PV performance monitoring and decision support.
                 </p>
                 <blockquote style={{
@@ -965,7 +1147,7 @@ export default function LandingPage() {
                   </cite>
                 </blockquote>
               </div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 16 }}>
+              <div style={{ display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 16, marginTop: 16, flexWrap: "wrap" }}>
                 <div style={{ display: "flex", gap: 10 }}>
                   {SOCIAL_LINKS.map(({ id, icon }) => (
                     <a
@@ -1002,7 +1184,6 @@ export default function LandingPage() {
                     textDecoration: "none", borderRadius: 10, fontWeight: 700, fontSize: 14,
                     boxShadow: "0 2px 12px rgba(255,184,0,.35)",
                     transition: "transform .15s, box-shadow .15s",
-                    alignSelf: "flex-start",
                   }}
                   onMouseEnter={e => {
                     e.currentTarget.style.transform = "translateY(-2px)";

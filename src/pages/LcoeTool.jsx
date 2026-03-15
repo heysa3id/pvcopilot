@@ -9,14 +9,13 @@ import WbSunnyOutlinedIcon from "@mui/icons-material/WbSunnyOutlined";
 import SolarPowerOutlinedIcon from "@mui/icons-material/SolarPowerOutlined";
 import ElectricBoltOutlinedIcon from "@mui/icons-material/ElectricBoltOutlined";
 import BatteryChargingFullOutlinedIcon from "@mui/icons-material/BatteryChargingFullOutlined";
-import AttachMoneyOutlinedIcon from "@mui/icons-material/AttachMoneyOutlined";
 import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import ExpandLessIcon from "@mui/icons-material/ExpandLess";
 import LocationOnOutlinedIcon from "@mui/icons-material/LocationOnOutlined";
 import { parsePvsystPdfClient } from "../utils/parsePvsystPdfClient";
 import { generateLcoeReport } from "../utils/generateLcoeReport";
 import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
-import CurrencyExchangeOutlinedIcon from "@mui/icons-material/CurrencyExchangeOutlined";
+import CurrencyExchangeIcon from "@mui/icons-material/CurrencyExchange";
 
 // ── Currency data ─────────────────────────────────────────────────────────────
 const CURRENCIES = [
@@ -479,7 +478,7 @@ export default function LcoeTool() {
                 background:`${G}14`, border:`1.5px solid ${G}30`,
                 display:"flex", alignItems:"center", justifyContent:"center", flexShrink:0,
               }}>
-                <AttachMoneyOutlinedIcon sx={{ fontSize:24, color:G }} />
+                <CurrencyExchangeIcon sx={{ fontSize:24, color:G }} />
               </div>
               <div>
                 <div style={{ fontSize:18, fontWeight:800, color:"#0F172A" }}>
@@ -960,7 +959,7 @@ export default function LcoeTool() {
           {panel==="finance" && (
             <Card className="fu">
               <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:18, paddingBottom:14, borderBottom:"1px solid #E2E8F0" }}>
-                <AttachMoneyOutlinedIcon sx={{ fontSize:20, color: ICON_COLOR }} />
+                <CurrencyExchangeIcon sx={{ fontSize:20, color: ICON_COLOR }} />
                 <div>
                   <div style={{ fontWeight:700, fontSize:13, color:"#0F172A" }}>Financial Parameters</div>
                   <div style={{ fontSize:10, color:"#94a3b8" }}>WACC · O&M · tariff · project life</div>
@@ -1018,7 +1017,7 @@ export default function LcoeTool() {
                   onMouseEnter={e => { e.currentTarget.style.background="#E2E8F0"; e.currentTarget.style.borderColor="#CBD5E1"; }}
                   onMouseLeave={e => { e.currentTarget.style.background="#F1F5F9"; e.currentTarget.style.borderColor="#E2E8F0"; }}
                 >
-                  <CurrencyExchangeOutlinedIcon style={{ fontSize:13 }} />
+                  <CurrencyExchangeIcon style={{ fontSize:13 }} />
                   {currency}
                   {exchangeRate !== 1 && <span style={{ fontSize:8, color:"#94a3b8", fontWeight:400 }}>×{fmt(exchangeRate,2)}</span>}
                 </button>
