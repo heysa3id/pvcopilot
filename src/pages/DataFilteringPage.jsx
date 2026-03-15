@@ -1531,8 +1531,6 @@ function PdcComparisonChart({ comparisonData }) {
 }
 
 // ── Measured Vs Calculated Power (filtered + removed points) ──
-const ROLL_K = 1; // smoothing half-window (bins)
-
 function PdcFilterChart({ comparisonData, filterResult, resampleMinutes }) {
   const [expanded, setExpanded] = useState(true);
   const chartSpec = useMemo(() => {
@@ -1540,7 +1538,6 @@ function PdcFilterChart({ comparisonData, filterResult, resampleMinutes }) {
     const times = comparisonData.map((d) => d.time);
     const pdcRaw = comparisonData.map((d) => d.P_DC);
     const pvRaw = comparisonData.map((d) => d.PVWatts);
-    const pvSmooth = rollingSmooth(pvRaw, ROLL_K);
 
     const traces = [
       {
@@ -1554,7 +1551,7 @@ function PdcFilterChart({ comparisonData, filterResult, resampleMinutes }) {
       },
       {
         x: times,
-        y: pvSmooth,
+        y: pvRaw,
         type: "scatter",
         mode: "lines",
         name: "PVWatts",
@@ -1566,10 +1563,9 @@ function PdcFilterChart({ comparisonData, filterResult, resampleMinutes }) {
     if (filterResult?.filtered?.length) {
       const ft = filterResult.filtered.map((d) => d.time);
       const fpdc = filterResult.filtered.map((d) => d.P_DC);
-      const fpdcSmooth = rollingSmooth(fpdc, ROLL_K);
-      // Map time -> smoothed value for filtered points only
+      // Map time -> P_DC for filtered points only (raw values)
       const filteredTimeToY = new Map();
-      ft.forEach((t, i) => filteredTimeToY.set(t, fpdcSmooth[i]));
+      ft.forEach((t, i) => filteredTimeToY.set(t, fpdc[i]));
       // Use full time grid: null where point was removed so line does not link across gaps
       const filteredYOnFullGrid = times.map((t) => (filteredTimeToY.has(t) ? filteredTimeToY.get(t) : null));
       traces.push({
