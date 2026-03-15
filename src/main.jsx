@@ -1,3 +1,5 @@
+// Safari/WebKit: polyfill must run before any code that uses Promise.withResolvers (e.g. pdfjs)
+import './utils/promiseWithResolversPolyfill.js'
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'

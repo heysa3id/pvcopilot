@@ -21,7 +21,23 @@ async function ensureWorkerSrc() {
   }
   workerBlobReady = (async () => {
     const polyfill = `if (typeof Promise !== "undefined" && typeof Promise.withResolvers !== "function") { Promise.withResolvers = function() { var resolve, reject; var promise = new Promise(function(res, rej) { resolve = res; reject = rej; }); return { promise: promise, resolve: resolve, reject: reject }; }; }\n`;
-    const res = await fetch(pdfWorkerUrl);
+    // Resolve worker URL against app base (GitHub Pages uses e.g. /repo-name/)
+    let base = (typeof import.meta !== "undefined" && import.meta.env && import.meta.env.BASE_URL) || "";
+    if (!base && typeof document !== "undefined") {
+      const baseTag = document.querySelector("base");
+      if (baseTag && baseTag.getAttribute("href")) base = baseTag.getAttribute("href");
+      else if (typeof window !== "undefined" && window.location.pathname !== "/") {
+        const path = window.location.pathname;
+        base = path.endsWith("/") ? path : path.replace(/\/[^/]*$/, "/");
+      }
+    }
+    base = (base || "").replace(/\/$/, "");
+    const workerHref =
+      pdfWorkerUrl.startsWith("http") || pdfWorkerUrl.startsWith("blob:")
+        ? pdfWorkerUrl
+        : base + (pdfWorkerUrl.startsWith("/") ? pdfWorkerUrl : "/" + pdfWorkerUrl);
+    const res = await fetch(workerHref);
+    if (!res.ok) throw new Error(`PDF worker failed to load (${res.status}). Try refreshing.`);
     const workerCode = await res.text();
     const blob = new Blob([polyfill + workerCode], { type: "application/javascript" });
     GlobalWorkerOptions.workerSrc = URL.createObjectURL(blob);
@@ -304,9 +320,12 @@ export async function parsePvsystPdfClient(file) {
   }
 
   // pdfjs fallback: "Manufacturer Model <Name> <Model> (Original PVsyst database)"
-  // First occurrence = PV module, second = inverter
+  // First occurrence = PV module, second = inverter. Use exec loop for Safari (matchAll not in older Safari).
   if (!result.moduleManufacturer || !result.inverterManufacturer) {
-    const mfrMatches = [...p3.matchAll(/Manufacturer\s+Model\s+(.+?)\s+(\S+)\s+\(Original/g)];
+    const mfrRe = /Manufacturer\s+Model\s+(.+?)\s+(\S+)\s+\(Original/g;
+    const mfrMatches = [];
+    let m;
+    while ((m = mfrRe.exec(p3)) !== null) mfrMatches.push(m);
     if (mfrMatches.length >= 1 && !result.moduleManufacturer) {
       result.moduleManufacturer = mfrMatches[0][1].trim();
       result.moduleModel = mfrMatches[0][2].trim();
