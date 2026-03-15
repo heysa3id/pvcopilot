@@ -76,7 +76,7 @@ export default function Navbar() {
                   fontWeight: isToolPage ? 700 : 600,
                   color: isToolPage ? "#0F172A" : "#64748B",
                   background: isToolPage ? "#FFF8E1" : "transparent",
-                  fontFamily: "'Inter', system-ui, sans-serif",
+                  fontFamily: "Inter, Arial, sans-serif",
                   display: "flex", alignItems: "center", gap: 5,
                   transition: "all .15s",
                 }}

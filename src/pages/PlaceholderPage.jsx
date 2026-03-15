@@ -6,7 +6,7 @@ export default function PlaceholderPage({ icon, title, color, desc }) {
       style={{
         display: "flex", alignItems: "center", justifyContent: "center",
         minHeight: "calc(100vh - 56px)", background: "#FAFBFC",
-        fontFamily: "'Inter', system-ui, sans-serif",
+        fontFamily: "Inter, Arial, sans-serif",
       }}
     >
       <div style={{ textAlign: "center", padding: 40, maxWidth: 460 }}>

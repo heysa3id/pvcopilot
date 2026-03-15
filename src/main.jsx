@@ -1,6 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Routes, Route } from 'react-router-dom'
+import { createTheme, ThemeProvider } from '@mui/material/styles'
 import './index.css'
 import Navbar from './components/Navbar'
 import LandingPage from './pages/LandingPage'
@@ -50,10 +51,27 @@ function DataFilteringPage() {
   )
 }
 
+const theme = createTheme({
+  typography: {
+    fontFamily: '"Inter", Arial, sans-serif',
+    h1: { fontWeight: 700 },
+    h2: { fontWeight: 700 },
+    h3: { fontWeight: 700 },
+    h4: { fontWeight: 700 },
+    h5: { fontWeight: 700 },
+    h6: { fontWeight: 700 },
+    button: { fontWeight: 600 },
+    body1: { fontWeight: 400 },
+    body2: { fontWeight: 400 },
+    caption: { fontWeight: 500 },
+  },
+})
+
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
-    <BrowserRouter>
-      <Navbar />
+    <ThemeProvider theme={theme}>
+      <BrowserRouter>
+        <Navbar />
       <div style={{ paddingTop: 56 }}>
         <Routes>
           <Route path="/" element={<LandingPage />} />
@@ -66,5 +84,6 @@ ReactDOM.createRoot(document.getElementById('root')).render(
         </Routes>
       </div>
     </BrowserRouter>
+    </ThemeProvider>
   </React.StrictMode>,
 )

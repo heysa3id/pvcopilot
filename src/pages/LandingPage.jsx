@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { useEffect, useRef, useState } from "react";
+import { cloneElement, useEffect, useRef, useState } from "react";
 import {
   CloudDownloadOutlined,
   SyncOutlined,
@@ -24,9 +24,9 @@ const G = "#FFB800", B = "#1d9bf0", O = "#ff7a45", Y = "#16a34a", P = "#8b5cf6";
 const ICON_COLOR = G;
 
 const PIPE = [
-  { id: "ingest",  label: "Data Ingestion",   sub: "PV .csv · Weather .csv · System .json", icon: <CloudDownloadOutlined sx={{ fontSize: 22 }} />, color: "#6366f1" },
-  { id: "sync",    label: "Synchronization",   sub: "Timestamp alignment & resampling",      icon: <SyncOutlined sx={{ fontSize: 22 }} />, color: "#0ea5e9" },
-  { id: "qc",      label: "Data Ingestion & Sync", sub: "Ingestion, synchronization & validation", icon: <SearchOutlined sx={{ fontSize: 22 }} />, color: P },
+  { id: "ingest",  label: "Import Data",       sub: "PV .csv · Weather .csv · System .json", icon: <CloudDownloadOutlined sx={{ fontSize: 22 }} />, color: "#6366f1" },
+  { id: "sync",    label: "Data Ingestion & Sync", sub: "PV data & weather ingestion, sync & validation", icon: <SearchOutlined sx={{ fontSize: 22, color: ICON_COLOR }} />, color: "#0ea5e9" },
+  { id: "qc",      label: "Data Filtering",       sub: "Custom filters · outlier removal · cleansing", icon: <FilterAltOutlined sx={{ fontSize: 22, color: ICON_COLOR }} />, color: P },
   { id: "gap",     label: "Gap Filling",       sub: "ML models · historical pattern matching",icon: <TrendingUpOutlined sx={{ fontSize: 22 }} />, color: "#10b981" },
   { id: "kpi",     label: "KPI Calculation",   sub: "IEC 61724 · PR · degradation Rd",       icon: <AssessmentOutlined sx={{ fontSize: 22 }} />, color: Y },
   { id: "predict", label: "Power Prediction",  sub: "Physical + ML forecast models",         icon: <BoltOutlined sx={{ fontSize: 22 }} />, color: O },
@@ -47,6 +47,12 @@ const SOCIAL_LINKS = [
   { id: "LinkedIn", icon: <LinkedIn sx={{ fontSize: 18, color: ICON_COLOR }} /> },
   { id: "GitHub", icon: <GitHub sx={{ fontSize: 18, color: ICON_COLOR }} /> },
   { id: "YouTube", icon: <YouTube sx={{ fontSize: 18, color: ICON_COLOR }} /> },
+];
+
+const PARTNER_LOGOS = [
+  { name: "PVCopilot", logo: "/logoBlack.svg", bg: "#F8FAFC" },
+  { name: "Green Energy Park", logo: "/partners-green-energy-park.png", bg: "#FFFFFF" },
+  { name: "Solar Twin by Green Energy Park", logo: "/partners-solar-twin.png", bg: "#FFFFFF" },
 ];
 
 function HeroParticles() {
@@ -352,10 +358,188 @@ function ToolCard({ icon, title, subtitle, color, desc, tags, path }) {
   );
 }
 
+function PlatformModuleCard({ number, icon, title, subtitle, desc, tags, path, expanded, onMouseEnter, onMouseLeave, isWorkflow }) {
+  const cardContent = (
+    <>
+      {/* Collapsed: vertical label + number */}
+      <div style={{
+        position: "absolute",
+        inset: 0,
+        zIndex: 2,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "flex-end",
+        paddingBottom: 16,
+        opacity: expanded ? 0 : 1,
+        pointerEvents: expanded ? "none" : "auto",
+        transition: "opacity 0.2s ease",
+      }}>
+        <div style={{
+          writingMode: "vertical-rl",
+          textOrientation: "mixed",
+          transform: "rotate(180deg)",
+          color: "#f3f4f6",
+          fontSize: 15,
+          fontWeight: 800,
+          letterSpacing: "0.02em",
+          marginBottom: 12,
+          whiteSpace: "nowrap",
+        }}>
+          {title}
+        </div>
+        <div style={{
+          width: 32,
+          height: 32,
+          borderRadius: "50%",
+          border: "1px solid rgba(255,255,255,0.2)",
+          background: "rgba(248,249,250,0.95)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 11,
+          fontWeight: 800,
+          color: "#0b1220",
+        }}>
+          {number}
+        </div>
+      </div>
+
+      {/* Expanded: badge top-left, icon top-right, label → title → desc → tags → link */}
+      <div style={{
+        position: "absolute",
+        inset: 0,
+        zIndex: 2,
+        padding: "28px 32px 28px 32px",
+        display: "flex",
+        flexDirection: "column",
+        opacity: expanded ? 1 : 0,
+        pointerEvents: expanded ? "auto" : "none",
+        transition: "opacity 0.25s ease",
+        overflow: "hidden",
+      }}>
+        {/* Icon top-right (white) */}
+        {icon && (
+          <div style={{ position: "absolute", top: 28, right: 28, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            {cloneElement(icon, { sx: { ...icon.props?.sx, color: "#fff", fontSize: 26 } })}
+          </div>
+        )}
+        {/* Badge */}
+        <div style={{
+          width: 48,
+          height: 48,
+          borderRadius: 999,
+          background: "rgba(243, 244, 246, 0.95)",
+          color: "#0b1220",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontSize: 15,
+          fontWeight: 800,
+          marginBottom: 18,
+          flexShrink: 0,
+        }}>
+          {number}
+        </div>
+        {/* Category label */}
+        <div style={{ fontSize: 12, fontWeight: 600, color: "#dec89a", marginBottom: 6, letterSpacing: "0.02em" }}>
+          {subtitle || "Core pipeline module"}
+        </div>
+        {/* Title */}
+        <h2 style={{ fontFamily: "Inter, Arial, sans-serif", margin: "0 0 10px", fontSize: "clamp(1.4rem, 2.8vw, 1.85rem)", lineHeight: 1.05, fontWeight: 800, letterSpacing: "-0.03em", color: "#f3f4f6" }}>{title}</h2>
+        {/* Description */}
+        {desc && <p style={{ margin: "0 0 16px", fontSize: 13, lineHeight: 1.5, color: "rgba(243,244,246,0.7)", flex: 1 }}>{desc}</p>}
+        {/* Tags as pill badges */}
+        {tags && tags.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+            {tags.slice(0, 4).map(t => (
+              <span key={t} style={{
+                padding: "6px 14px",
+                background: "rgba(255,255,255,0.08)",
+                border: "1px solid rgba(255,255,255,0.1)",
+                color: "#f3f4f6",
+                borderRadius: 999,
+                fontSize: 11,
+                fontWeight: 600,
+              }}>
+                {t}
+              </span>
+            ))}
+          </div>
+        )}
+        {/* Link */}
+        {path ? (
+          <Link to={path} style={{
+            fontFamily: "Inter, Arial, sans-serif",
+            display: "inline-flex", alignItems: "center", gap: 10,
+            color: "#dec89a", textDecoration: "none", fontSize: 14, fontWeight: 800,
+          }}>
+            Open Module <span style={{ fontSize: 16, lineHeight: 1 }}>→</span>
+          </Link>
+        ) : (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 10, fontSize: 14, fontWeight: 800, color: "#dec89a" }}>Open Module →</span>
+        )}
+      </div>
+    </>
+  );
+
+  return (
+    <div
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      style={{
+        position: "relative",
+        width: "100%",
+        height: 320,
+        borderRadius: 42,
+        overflow: "hidden",
+        background: [
+          "radial-gradient(circle at 45% 14%, rgba(255, 180, 34, 0.36), transparent 21%)",
+          "radial-gradient(circle at 28% 80%, rgba(255, 152, 23, 0.24), transparent 24%)",
+          "radial-gradient(circle at 64% 62%, rgba(255, 196, 66, 0.12), transparent 29%)",
+          "radial-gradient(circle at 86% 76%, rgba(41, 79, 142, 0.05), transparent 24%)",
+          "linear-gradient(135deg, #090704 0%, #120d05 28%, #1a1308 52%, #101827 100%)",
+        ].join(", "),
+        border: "1px solid rgba(174, 184, 201, 0.16)",
+        boxShadow: "inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 18px 40px rgba(0, 0, 0, 0.28), 0 0 0 1px rgba(255, 149, 0, 0.03)",
+        transition: "box-shadow 0.3s ease",
+      }}
+    >
+      {/* Optional soft orange bloom (like ::before in example) */}
+      <div
+        style={{
+          position: "absolute",
+          width: 200,
+          height: 200,
+          right: "15%",
+          top: -20,
+          background: "rgba(255, 149, 0, 0.24)",
+          borderRadius: "50%",
+          filter: "blur(40px)",
+          pointerEvents: "none",
+          zIndex: 1,
+        }}
+      />
+      {cardContent}
+    </div>
+  );
+}
+
+const PLATFORM_MODULES = [
+  { number: "01", icon: TOOL_ICONS.quality, title: "Data Ingestion & Sync", subtitle: "PV data & weather ingestion, sync & validation", path: "/data-ingestion", desc: "Scans raw time-series for missing timestamps, stuck sensors, out-of-range values, nighttime noise, and statistical outliers. Outputs a gap map and quality score per channel.", tags: ["Gap detection", "Outlier flags", "Timestamp QA", "Statistics"] },
+  { number: "02", icon: TOOL_ICONS.filter, title: "Data Filtering", subtitle: "Module under development", path: "/data-filtering", desc: "Advanced data filtering and cleansing tools for PV time-series. Remove outliers, apply custom filters, and prepare clean datasets for downstream analysis.", tags: ["Custom filters", "Outlier removal", "Data cleansing", "Coming soon"] },
+  { number: "03", icon: TOOL_ICONS.kpi, title: "KPI Analysis", subtitle: "IEC 61724 performance metrics", path: "/kpi-analysis", desc: "Calculate Performance Ratio, temperature-corrected PR, Capacity Factor, specific yield, Reference Yield Yr, Final Yield Yf, and degradation rate Rd via YoY regression.", tags: ["PR & PR_STC", "Capacity factor", "Degradation Rd", "Yield ratios"] },
+  { number: "04", icon: TOOL_ICONS.gap, title: "Gap Filling", subtitle: "ML-based missing data recovery", path: "/gap-filling", desc: "Detects gaps in the corrected dataset, selects contextually similar historical windows, trains a lightweight regression model, and generates synthetic values with uncertainty bounds.", tags: ["Auto-detect gaps", "Historical matching", "ML imputation", "Uncertainty bands"] },
+  { number: "05", icon: TOOL_ICONS.predict, title: "Power Prediction", subtitle: "Energy forecast & performance model", path: "/power-prediction", desc: "Combines a single-diode physical model with weather inputs (GHI, Tamb, wind) to predict expected power. Flags under-performance and estimates energy losses.", tags: ["Physical model", "Weather correlation", "Loss analysis", "Scenarios"] },
+  { number: "06", icon: TOOL_ICONS.lcoe, title: "LCOE Calculator", subtitle: "Financial analysis & PVsyst integration", path: "/lcoe-tool", desc: "Industry-standard Levelized Cost of Energy with 20+ itemized CAPEX line items, linear degradation, DCF analysis, IRR, NPV, payback, and tornado sensitivity charts.", tags: ["LCOE $/kWh", "CAPEX breakdown", "Cash flow", "IRR / NPV"] },
+  { number: "07", icon: <LinkOutlined sx={{ fontSize: 22, color: "#fff" }} />, title: "Series Workflows", subtitle: "Chain tools on the same dataset", path: "/data-ingestion", desc: "Execute multiple modules in sequence: QC → Gap Fill → KPI → Prediction → Report. Each stage consumes corrected output from the previous one, ensuring full data consistency.", tags: ["QC", "Gap Fill", "KPI", "Predict", "LCOE", "Report"], isWorkflow: true },
+];
+
 export default function LandingPage() {
   const [teamImgError, setTeamImgError] = useState(false);
+  const [hoveredModuleIndex, setHoveredModuleIndex] = useState(0);
   return (
-    <div style={{ minHeight: "100vh", fontFamily: "'Inter', system-ui, sans-serif", color: "#0F172A" }}>
+    <div style={{ minHeight: "100vh", fontFamily: "Inter, Arial, sans-serif", color: "#0F172A" }}>
 
       {/* ━━━ HERO — dark, dramatic, geometric ━━━ */}
       <section style={{
@@ -438,7 +622,7 @@ export default function LandingPage() {
               { value: "40 yr", label: "Project Horizon" },
             ].map(s => (
               <div key={s.label} style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 22, fontWeight: 800, color: "#FFFFFF", fontFamily: "'JetBrains Mono', monospace" }}>
+                <div style={{ fontSize: 22, fontWeight: 800, color: "#FFFFFF", fontFamily: "Inter, Arial, sans-serif" }}>
                   {s.value}
                 </div>
                 <div style={{ fontSize: 11, color: "#64748B", marginTop: 2 }}>{s.label}</div>
@@ -448,184 +632,247 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ━━━ PIPELINE ━━━ */}
-      <section id="pipeline" style={{ padding: "64px 24px 72px", maxWidth: 1100, margin: "0 auto" }}>
-        <h2 style={{ fontSize: 24, fontWeight: 800, textAlign: "center", marginBottom: 6 }}>
-          End-to-End Processing Pipeline
-        </h2>
-        <p style={{ fontSize: 14, color: "#94a3b8", textAlign: "center", marginBottom: 40 }}>
-          Each stage outputs corrected data that feeds the next — run the full chain or any subset
-        </p>
+      {/* ━━━ PIPELINE — horizontal flowchart (8 stages, chevrons) ━━━ */}
+      <section
+        id="pipeline"
+        style={{
+          padding: "72px 24px 56px",
+          background: "#FFFFFF",
+          borderTop: "1px solid #E2E8F0",
+        }}
+      >
+        <div style={{ maxWidth: 1140, margin: "0 auto" }}>
+          <h2 style={{ fontSize: 26, fontWeight: 800, textAlign: "center", marginBottom: 8, color: "#0F172A", letterSpacing: "-.02em" }}>
+            End-to-End Processing Pipeline
+          </h2>
+          <p style={{ fontSize: 14, color: "#64748B", textAlign: "center", marginBottom: 44 }}>
+            Each stage outputs corrected data that feeds the next — run the full chain or any subset.
+          </p>
 
-        <div style={{
-          display: "flex", alignItems: "flex-start", justifyContent: "center",
-          gap: 0, overflowX: "auto", padding: "8px 0 16px",
-        }}>
-          {PIPE.map((step, i) => (
-            <div key={step.id} style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
-              {/* Card */}
-              <div style={{
-                display: "flex", flexDirection: "column", alignItems: "center",
-                gap: 8, padding: "14px 10px 12px", width: 100,
-                cursor: "default",
-              }}>
-                {/* Icon container — per-step color highlight */}
-                <div style={{
-                  width: 52, height: 52, borderRadius: 14,
-                  background: `${step.color}12`,
-                  border: `1.5px solid ${step.color}40`,
-                  boxShadow: `0 1px 4px ${step.color}15`,
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  position: "relative",
-                  transition: "box-shadow .15s, background .15s",
-                  color: step.color,
-                }}
-                onMouseEnter={e => {
-                  e.currentTarget.style.boxShadow = `0 4px 14px ${step.color}40`;
-                  e.currentTarget.style.background = `${step.color}22`;
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.boxShadow = `0 1px 4px ${step.color}15`;
-                  e.currentTarget.style.background = `${step.color}12`;
-                }}
-                >
-                  {/* Clone icon with step color */}
-                  <span style={{ color: step.color, display:"flex" }}>{step.icon}</span>
-                  {/* Step number dot */}
-                  <span style={{
-                    position: "absolute", top: -5, right: -5,
-                    width: 16, height: 16, borderRadius: "50%",
-                    background: step.color, color: "#fff",
-                    fontSize: 8, fontWeight: 800,
-                    display: "flex", alignItems: "center", justifyContent: "center",
-                    fontFamily: "'JetBrains Mono', monospace",
-                    border: "2px solid #fff",
-                  }}>{i + 1}</span>
-                </div>
-                {/* Label */}
-                <span style={{
-                  fontSize: 11, fontWeight: 700, color: "#0F172A",
-                  textAlign: "center", lineHeight: 1.3,
-                }}>{step.label}</span>
-              </div>
-
-              {/* Arrow connector */}
-              {i < PIPE.length - 1 && (
-                <div style={{
-                  fontSize: 14, color: "#CBD5E1", fontWeight: 700,
-                  marginBottom: 22, flexShrink: 0, userSelect: "none",
-                }}>›</div>
-              )}
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* ━━━ TOOL CARDS ━━━ */}
-      <section style={{ padding: "48px 24px 72px", maxWidth: 1100, margin: "0 auto" }}>
-        <h2 style={{ fontSize: 24, fontWeight: 800, textAlign: "center", marginBottom: 6 }}>
-          Platform Modules
-        </h2>
-        <p style={{ fontSize: 14, color: "#94a3b8", textAlign: "center", marginBottom: 44 }}>
-          Each module runs standalone or chains into a series workflow for the same dataset
-        </p>
-
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 20 }}>
-          <ToolCard icon={TOOL_ICONS.quality} title="Data Ingestion & Synchronization" subtitle="PV data & weather data ingestion, sync & validation" color={G} path="/data-ingestion"
-            desc="Scans raw time-series for missing timestamps, stuck sensors, out-of-range values, nighttime noise, and statistical outliers. Outputs a gap map and quality score per channel."
-            tags={["Gap detection", "Outlier flags", "Timestamp QA", "Statistics", "Visual map"]} />
-          <ToolCard icon={TOOL_ICONS.filter} title="Data Filtering" subtitle="Module under development" color={G} path="/data-filtering"
-            desc="Advanced data filtering and cleansing tools for PV time-series. Remove outliers, apply custom filters, and prepare clean datasets for downstream analysis."
-            tags={["Custom filters", "Outlier removal", "Data cleansing", "Time-series", "Coming soon"]} />
-          <ToolCard icon={TOOL_ICONS.kpi} title="KPI Analysis" subtitle="IEC 61724 performance metrics" color={G} path="/kpi-analysis"
-            desc={<>Calculate Performance Ratio, temperature-corrected PR, Capacity Factor, specific yield, Reference Yield Y<sub>r</sub>, Final Yield Y<sub>f</sub>, and degradation rate R<sub>d</sub> via YoY regression.</>}
-            tags={["PR & PR_STC", "Capacity factor", "Degradation Rd", "Yield ratios", "Trend charts"]} />
-          <ToolCard icon={TOOL_ICONS.gap} title="Gap Filling" subtitle="ML-based missing data recovery" color={G} path="/gap-filling"
-            desc="Detects gaps in the corrected dataset, selects contextually similar historical windows, trains a lightweight regression model, and generates synthetic values with uncertainty bounds."
-            tags={["Auto-detect gaps", "Historical matching", "ML imputation", "Uncertainty bands", "Validation"]} />
-          <ToolCard icon={TOOL_ICONS.predict} title="Power Prediction" subtitle="Energy forecast & performance model" color={G} path="/power-prediction"
-            desc={<>Combines a single-diode physical model with weather inputs (GHI, T<sub>amb</sub>, wind) to predict expected power. Flags under-performance and estimates energy losses.</>}
-            tags={["Physical model", "Weather correlation", "Loss analysis", "Performance index", "Scenarios"]} />
-          <ToolCard icon={TOOL_ICONS.lcoe} title="LCOE Calculator" subtitle="Financial analysis & PVsyst integration" color={G} path="/lcoe-tool"
-            desc="Industry-standard Levelized Cost of Energy with 20+ itemized CAPEX line items, linear degradation, DCF analysis, IRR, NPV, payback, and tornado sensitivity charts."
-            tags={["LCOE $/kWh", "CAPEX breakdown", "Cash flow", "IRR / NPV", "Sensitivity"]} />
-
-          {/* Workflow card */}
           <div style={{
-            background: "#FFFFFF",
-            border: "1px solid #E2E8F0",
-            borderTop: `3px solid ${G}`,
-            borderRadius: 12,
-            padding: "22px 24px",
-            boxShadow: "0 1px 3px rgba(0,0,0,.04)",
+            display: "flex",
+            flexDirection: "row",
+            alignItems: "flex-start",
+            justifyContent: "center",
+            flexWrap: "wrap",
+            gap: 10,
           }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
-              <div style={{
-                width: 44,
-                height: 44,
-                borderRadius: 11,
-                background: `${G}10`,
-                border: `1.5px solid ${G}35`,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0,
-              }}>
-                <LinkOutlined sx={{ fontSize: 20, color: ICON_COLOR }} />
-              </div>
-              <div>
-                <div style={{ fontSize: 15, fontWeight: 700 }}>Series Workflows</div>
-                <div style={{ fontSize: 11, color: "#94a3b8" }}>Chain tools on the same dataset</div>
-              </div>
-            </div>
-            <p style={{ fontSize: 13, color: "#64748B", lineHeight: 1.7, marginBottom: 16 }}>
-              Execute multiple modules in sequence: <strong>QC → Gap Fill → KPI → Prediction → Report</strong>.
-              Each stage consumes corrected output from the previous one, ensuring full data consistency.
-            </p>
-            <div style={{
-              background: "#FFFFFF", border: "1px solid #E2E8F0", borderRadius: 8,
-              padding: "12px 16px", fontFamily: "'JetBrains Mono', monospace",
-              fontSize: 11, color: "#64748B", lineHeight: 2,
-            }}>
-              <span style={{ color: G }}>QC</span>
-              <span style={{ color: "#CBD5E1" }}> → </span>
-              <span style={{ color: G }}>Gap Fill</span>
-              <span style={{ color: "#CBD5E1" }}> → </span>
-              <span style={{ color: G }}>KPI</span>
-              <span style={{ color: "#CBD5E1" }}> → </span>
-              <span style={{ color: G }}>Predict</span>
-              <span style={{ color: "#CBD5E1" }}> → </span>
-              <span style={{ color: G }}>LCOE</span>
-              <span style={{ color: "#CBD5E1" }}> → </span>
-              <span style={{ color: G }}>Report</span>
-            </div>
+            {PIPE.map((step, i) => (
+              <span key={step.id} style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
+                <div style={{
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  width: 110,
+                  minWidth: 110,
+                  height: 100,
+                  padding: "10px 8px",
+                  borderRadius: 12,
+                  border: "1px solid #E2E8F0",
+                  background: "#FFFFFF",
+                  boxSizing: "border-box",
+                }}>
+                  <div
+                    style={{
+                      position: "relative",
+                      width: 40,
+                      height: 40,
+                      flexShrink: 0,
+                      borderRadius: 10,
+                      background: "rgba(255, 184, 0, 0.14)",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      marginBottom: 8,
+                    }}
+                  >
+                    <span style={{ color: G, display: "flex", fontSize: 20 }}>{step.icon}</span>
+                    <span
+                      style={{
+                        position: "absolute",
+                        top: -5,
+                        right: -5,
+                        width: 18,
+                        height: 18,
+                        borderRadius: "50%",
+                        background: G,
+                        color: "#FFFFFF",
+                        fontSize: 10,
+                        fontWeight: 700,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      {i + 1}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#0F172A", textAlign: "center", lineHeight: 1.25, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>
+                    {step.label}
+                  </div>
+                </div>
+                {i < PIPE.length - 1 && (
+                  <span style={{
+                    color: "#CBD5E1",
+                    fontSize: 15,
+                    marginLeft: 2,
+                    marginRight: 0,
+                    marginTop: 2,
+                  }}>›</span>
+                )}
+              </span>
+            ))}
           </div>
         </div>
       </section>
 
       {/* ━━━ TECHNICAL SPECS ━━━ */}
-      <section style={{ padding: "56px 24px 64px", background: "#FFFFFF", borderTop: "1px solid #E2E8F0" }}>
+      <section style={{ padding: "64px 24px 72px", background: "#FFFFFF", borderTop: "1px solid #E2E8F0" }}>
         <div style={{ maxWidth: 1100, margin: "0 auto" }}>
-          <h2 style={{ fontSize: 20, fontWeight: 800, textAlign: "center", marginBottom: 36 }}>
-            Technical Specifications
-          </h2>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 16 }}>
+          {/* Header row */}
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 24, marginBottom: 48 }}>
+            <div style={{ maxWidth: 480 }}>
+              <span style={{
+                display: "inline-block", fontSize: 11, fontWeight: 700, color: G,
+                letterSpacing: ".12em", textTransform: "uppercase",
+                padding: "5px 12px", borderRadius: 6,
+                background: "rgba(255,184,0,0.12)", marginBottom: 14,
+              }}>
+                Technical Specs
+              </span>
+              <h2 style={{ fontSize: "clamp(24px, 3vw, 32px)", fontWeight: 800, color: "#0F172A", lineHeight: 1.2, letterSpacing: "-.02em", margin: 0 }}>
+                Built on Industry Standards & Proven Models
+              </h2>
+            </div>
+            <p style={{ maxWidth: 340, fontSize: 14, color: "#64748B", lineHeight: 1.65, margin: 0, paddingTop: 28 }}>
+              IEC-compliant KPIs, NREL/IEA LCOE methodology, and ML-powered analytics — all integrated into one pipeline.
+            </p>
+          </div>
+
+          {/* Cards */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: 20 }}>
             {[
-              { cat: "Data Inputs", items: ["PV power & energy CSV", "Weather station CSV (GHI, Tamb, Wspd)", "System info JSON (kWp, tilt, azimuth)", "PVsyst PDF report auto-parse"] },
-              { cat: "Standards", items: ["IEC 61724-1 KPI definitions", "IEC 61724-3 capacity testing", "LCOE per NREL / IEA methodology", "Linear degradation model (Rd)"] },
-              { cat: "Models", items: ["Single-diode PV model", "Temperature-corrected PR", "ML gap-filling (XGBoost / kNN)", "Discounted cash flow (DCF)"] },
-              { cat: "Outputs", items: ["Interactive dashboards", "LCOE with sensitivity tornado", "Cash flow & payback charts", "Exportable PDF reports"] },
-            ].map(({ cat, items }) => (
-              <div key={cat} style={{ padding: 22, background: "#FAFBFC", borderRadius: 10, border: "1px solid #E2E8F0" }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: G, letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 14 }}>
-                  {cat}
-                </div>
-                {items.map((item, j) => (
-                  <div key={j} style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 8 }}>
-                    <span style={{ color: "#CBD5E1", fontSize: 8, marginTop: 5 }}>●</span>
-                    <span style={{ fontSize: 13, color: "#475569", lineHeight: 1.5 }}>{item}</span>
+              { cat: "Data Inputs", icon: <CloudDownloadOutlined sx={{ fontSize: 22, color: G }} />, items: ["PV power & energy CSV", "Weather station CSV (GHI, Tamb, Wspd)", "System info JSON (kWp, tilt, azimuth)", "PVsyst PDF report auto-parse"] },
+              { cat: "Standards", icon: <AssessmentOutlined sx={{ fontSize: 22, color: G }} />, items: ["IEC 61724-1 KPI definitions", "IEC 61724-3 capacity testing", "LCOE per NREL / IEA methodology", "Linear degradation model (Rd)"] },
+              { cat: "Models", icon: <BoltOutlined sx={{ fontSize: 22, color: G }} />, items: ["Single-diode PV model", "Temperature-corrected PR", "ML gap-filling (XGBoost / kNN)", "Discounted cash flow (DCF)"] },
+              { cat: "Outputs", icon: <SummarizeOutlined sx={{ fontSize: 22, color: G }} />, items: ["Interactive dashboards", "LCOE with sensitivity tornado", "Cash flow & payback charts", "Exportable PDF reports"] },
+            ].map(({ cat, icon, items }) => (
+              <div key={cat} style={{
+                padding: "24px 22px",
+                background: "#FFFFFF",
+                borderRadius: 14,
+                border: "1px solid #E8ECF1",
+                boxShadow: "0 2px 12px rgba(15,23,42,0.05)",
+                display: "flex", flexDirection: "column", gap: 16,
+              }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                  <div style={{
+                    width: 44, height: 44, borderRadius: 12, flexShrink: 0,
+                    background: "rgba(255,184,0,0.12)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    {icon}
                   </div>
-                ))}
+                  <div style={{ fontSize: 15, fontWeight: 700, color: "#0F172A" }}>{cat}</div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                  {items.map((item, j) => (
+                    <div key={j} style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+                      <span style={{ color: G, fontSize: 8, marginTop: 5, flexShrink: 0 }}>●</span>
+                      <span style={{ fontSize: 13, color: "#475569", lineHeight: 1.5 }}>{item}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ━━━ PLATFORM MODULES — hover-to-expand cards ━━━ */}
+      <section style={{
+        position: "relative",
+        padding: "72px 24px 80px",
+        background: "linear-gradient(160deg, #0F172A 0%, #131c2e 30%, #1a1710 60%, #0F172A 100%)",
+        overflow: "hidden",
+      }}>
+        {/* Particle network animation */}
+        <HeroParticles />
+        {/* Ambient warm glow behind the cards */}
+        <div style={{
+          position: "absolute", top: "10%", left: "20%", width: "50%", height: "80%",
+          background: "radial-gradient(ellipse at center, rgba(255,149,0,0.08) 0%, transparent 65%)",
+          filter: "blur(60px)", pointerEvents: "none",
+        }} />
+        <div style={{
+          position: "absolute", bottom: "0%", right: "10%", width: "40%", height: "60%",
+          background: "radial-gradient(ellipse at center, rgba(255,180,0,0.05) 0%, transparent 60%)",
+          filter: "blur(50px)", pointerEvents: "none",
+        }} />
+        <div style={{ position: "relative", zIndex: 1, maxWidth: 1200, margin: "0 auto" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16, marginBottom: 32 }}>
+            <div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#ffc423", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 6 }}>
+                Platform Modules
+              </div>
+              <h2 style={{ fontSize: "clamp(22px, 3vw, 28px)", fontWeight: 800, color: "#f3f4f6", margin: 0, lineHeight: 1.2 }}>
+                Each module runs standalone or chains into a series workflow
+              </h2>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{
+                padding: "10px 20px",
+                background: "rgba(255,255,255,0.06)",
+                border: "1px solid rgba(255,196,35,0.25)",
+                color: "#ffc423",
+                borderRadius: 12, fontSize: 12, fontWeight: 700, letterSpacing: "0.04em",
+              }}>
+                EXPLORE MODULES
+              </span>
+              <a href="#platform-modules-cards" style={{
+                width: 44, height: 44, borderRadius: "50%",
+                background: "rgba(255,255,255,0.06)",
+                border: "1px solid rgba(255,196,35,0.25)",
+                display: "flex", alignItems: "center", justifyContent: "center", color: "#ffc423",
+                textDecoration: "none",
+              }} aria-label="Scroll to modules">
+                <span style={{ fontSize: 18, transform: "rotate(45deg)", display: "block" }}>↗</span>
+              </a>
+            </div>
+          </div>
+
+          <div id="platform-modules-cards" style={{
+            display: "flex",
+            flexDirection: "row",
+            alignItems: "stretch",
+            gap: 16,
+            width: "100%",
+            minHeight: 336,
+          }}>
+            {PLATFORM_MODULES.map((mod, index) => (
+              <div
+                key={mod.number}
+                style={{
+                  flex: hoveredModuleIndex === index ? 1 : 0,
+                  minWidth: hoveredModuleIndex === index ? 320 : 64,
+                  width: hoveredModuleIndex === index ? undefined : 64,
+                  transition: "flex 0.35s ease, min-width 0.35s ease, width 0.35s ease",
+                }}
+              >
+                <PlatformModuleCard
+                  number={mod.number}
+                  icon={mod.icon}
+                  title={mod.title}
+                  subtitle={mod.subtitle}
+                  desc={mod.desc}
+                  tags={mod.tags}
+                  path={mod.path}
+                  expanded={hoveredModuleIndex === index}
+                  onMouseEnter={() => setHoveredModuleIndex(index)}
+                  onMouseLeave={() => {}}
+                  isWorkflow={mod.isWorkflow}
+                />
               </div>
             ))}
           </div>
@@ -643,10 +890,10 @@ export default function LandingPage() {
             fontSize: 22, fontWeight: 800, color: "#0F172A",
             letterSpacing: "-.02em", marginBottom: 8, textAlign: "center",
           }}>
-            The team behind PVCopilot
+            Get to know who’s behind PVCopilot
           </h2>
-          <p style={{ fontSize: 14, color: "#64748B", marginBottom: 40, maxWidth: 520, margin: "0 auto 40px", textAlign: "center" }}>
-            Engineers and analysts focused on solar O&M and levelized cost modeling.
+          <p style={{ fontSize: 12, color: "#64748B", marginBottom: 40, maxWidth: 900, margin: "0 auto 40px", textAlign: "center" }}>
+          Led by Said Elhamaoui, combining hands-on PV engineering, applied research, and digital innovation to support smarter solar asset management.
           </p>
 
           <div
@@ -662,7 +909,7 @@ export default function LandingPage() {
                 position: "absolute", inset: 0,
                 background: "linear-gradient(135deg, #FFB800 0%, #ff9500 100%)",
                 display: "flex", alignItems: "center", justifyContent: "center",
-                color: "#0F172A", fontSize: 48, fontWeight: 800, fontFamily: "'Inter', system-ui, sans-serif",
+                color: "#0F172A", fontSize: 48, fontWeight: 800, fontFamily: "Inter, Arial, sans-serif",
                 visibility: teamImgError ? "visible" : "hidden",
               }}>
                 PV
@@ -682,14 +929,25 @@ export default function LandingPage() {
               display: "flex", flexDirection: "column", justifyContent: "space-between",
             }}>
               <div>
-                <h3 style={{ fontSize: 26, fontWeight: 800, color: "#0F172A", marginBottom: 6, letterSpacing: "-.02em" }}>
+                <h3 style={{ fontSize: 22, fontWeight: 800, color: "#0F172A", marginBottom: 6, letterSpacing: "-.02em" }}>
                   Said ELHAMAOUI
                 </h3>
-                <p style={{ fontSize: 14, color: "#64748B", marginBottom: 12, fontWeight: 400 }}>
-                  R&D Engineer, Founder @PVCopilot
+                <p style={{ fontSize: 13, color: "#64748B", marginBottom: 12, fontWeight: 400 }}>
+                  R&D Engineer, Founder <span style={{ color: "#FFB800", fontWeight: 600 }}>@PVCopilot</span>
                 </p>
-                <p style={{ fontSize: 15, color: "#475569", lineHeight: 1.55, marginBottom: 14 }}>
-                  We lead the platform with a focus on bankable LCOE, IEC-aligned KPIs, and real-world O&M workflows—so every stakeholder can trust the numbers.
+                <p style={{ fontSize: 14, color: "#475569", lineHeight: 1.55, marginBottom: 8 }}>
+                  R&D Engineer with 5 years of experience in PV systems testing, characterization, and performance analysis. I have led multiple R&D and applied research projects in solar energy.
+                </p>
+                <ul style={{
+                  fontSize: 14, color: "#475569", lineHeight: 1.55, marginBottom: 14,
+                  paddingLeft: 20, marginTop: 0,
+                }}>
+                  <li style={{ marginBottom: 4 }}>Served as Project Coordinator for SolarTwin, a digital twin platform for PV O&M at Green Energy Park.</li>
+                  <li style={{ marginBottom: 4 }}>ExCo & Task 13 Expert at IEA PVPS.</li>
+                  <li style={{ marginBottom: 4 }}>Director of Outreach & Communication at PV Camper (Sandia Labs).</li>
+                </ul>
+                <p style={{ fontSize: 14, color: "#475569", lineHeight: 1.55, marginBottom: 14 }}>
+                  Through PVCopilot, I combine field experience, research, and digital innovation to deliver reliable tools for PV performance monitoring and decision support.
                 </p>
                 <blockquote style={{
                   margin: "0 0 16px 0", padding: "12px 16px 12px 20px",
@@ -697,12 +955,12 @@ export default function LandingPage() {
                   borderRadius: "0 10px 10px 0", border: "1px solid #FDE68A",
                 }}>
                   <p style={{
-                    fontSize: 14, fontStyle: "italic", color: "#475569",
+                    fontSize: 13, fontStyle: "italic", color: "#475569",
                     lineHeight: 1.6, margin: "0 0 8px 0",
                   }}>
-                    "Our goal is to make solar fleet analytics as reliable and transparent as the technology itself—so every stakeholder can trust the numbers."
+                    " Our goal is to help you automate the O&M workflow of your solar PV system and integrate digital tools into data processing, so you can monitor performance more efficiently, reduce manual work, and make faster, more reliable decisions.                    "
                   </p>
-                  <cite style={{ fontSize: 12, color: "#64748B", fontStyle: "normal", fontWeight: 600 }}>
+                  <cite style={{ fontSize: 11, color: "#64748B", fontStyle: "normal", fontWeight: 600 }}>
                     — PVCopilot
                   </cite>
                 </blockquote>
@@ -763,11 +1021,85 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ━━━ OUR PARTNERS — logo marquee (endless loop, no empty space) ━━━ */}
+      <style>{`
+        @keyframes partners-marquee {
+          0% { transform: translateX(0); }
+          100% { transform: translateX(-25%); }
+        }
+        .partners-track:hover { animation-play-state: paused; }
+      `}</style>
+      <section id="partners" style={{
+        padding: "56px 24px 64px",
+        background: "#FFFFFF",
+        borderTop: "1px solid #E2E8F0",
+      }}>
+        <div style={{ maxWidth: 1100, margin: "0 auto", textAlign: "center", marginBottom: 32 }}>
+          <h2 style={{
+            fontSize: 22, fontWeight: 800, color: "#0F172A",
+            letterSpacing: "-.02em", marginBottom: 8,
+          }}>
+            Our Partners
+          </h2>
+          <p style={{ fontSize: 14, color: "#64748B", maxWidth: 520, margin: "0 auto" }}>
+            Collaborating with leading institutions in solar research and digital innovation.
+          </p>
+        </div>
+        <div style={{ overflow: "hidden", width: "100%", marginLeft: -24, marginRight: -24 }}>
+          <div
+            className="partners-track"
+            style={{
+              display: "flex",
+              width: "max-content",
+              animation: "partners-marquee 30s linear infinite",
+              gap: 48,
+            }}
+          >
+            {[...PARTNER_LOGOS, ...PARTNER_LOGOS, ...PARTNER_LOGOS, ...PARTNER_LOGOS].map((partner, i) => (
+              <div
+                key={i}
+                style={{
+                  flexShrink: 0,
+                  width: 140,
+                  height: 72,
+                  borderRadius: 12,
+                  background: partner.bg,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#fff",
+                  fontSize: 18,
+                  fontWeight: 700,
+                  fontFamily: "Inter, Arial, sans-serif",
+                  boxShadow: "0 4px 14px rgba(0,0,0,.12)",
+                  transition: "transform .2s ease, box-shadow .2s ease",
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.transform = "scale(1.05)";
+                  e.currentTarget.style.boxShadow = "0 8px 24px rgba(0,0,0,.18)";
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.transform = "scale(1)";
+                  e.currentTarget.style.boxShadow = "0 4px 14px rgba(0,0,0,.12)";
+                }}
+                title={partner.name}
+              >
+                {partner.logo ? (
+                  <img src={partner.logo} alt={partner.name} style={{ height: 36, width: "auto", objectFit: "contain", maxWidth: 120 }} />
+                ) : (
+                  partner.short
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
       {/* ━━━ FOOTER — particle background only (no sun trajectory) ━━━ */}
       <footer style={{
         position: "relative", overflow: "hidden",
         background: "#0F172A", color: "#94a3b8",
-        fontFamily: "'Inter', system-ui, sans-serif",
+        fontFamily: "Inter, Arial, sans-serif",
       }}>
         <HeroParticles />
         <div style={{ position: "relative", zIndex: 1 }}>

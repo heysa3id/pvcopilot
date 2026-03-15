@@ -254,7 +254,7 @@ function Lbl({ children, sub }) {
     <div style={{ marginBottom: 5 }}>
       <span style={{
         fontSize:11,
-        fontFamily:"'Inter', system-ui, sans-serif",
+        fontFamily:"Inter, Arial, sans-serif",
         fontWeight:600,
         color:"#1F2933",
         letterSpacing:".06em",
@@ -312,7 +312,7 @@ function Div({ label }) {
   return (
     <div style={{ display:"flex", alignItems:"center", gap:10, margin:"16px 0 12px" }}>
       <div style={{ flex:1, height:1, background:"#CBD5E1" }} />
-      {label && <span style={{ fontSize:10, color:"#64748B", fontFamily:"'Inter'",
+      {label && <span style={{ fontSize:10, color:"#64748B", fontFamily:"Inter, Arial, sans-serif",
         fontWeight:700, letterSpacing:".1em", textTransform:"uppercase" }}>{label}</span>}
       <div style={{ flex:1, height:1, background:"#CBD5E1" }} />
     </div>
@@ -321,7 +321,7 @@ function Div({ label }) {
 
 // ── Shared ApexCharts base config ─────────────────────────────────────────────
 const APEX_BASE = {
-  chart: { fontFamily: "'Inter', system-ui, sans-serif", toolbar: { show: false }, zoom: { enabled: false }, background: "transparent" },
+  chart: { fontFamily: "Inter, Arial, sans-serif", toolbar: { show: false }, zoom: { enabled: false }, background: "transparent" },
   grid: { borderColor: "#E2E8F0", strokeDashArray: 3 },
   tooltip: {
     theme: "light",
@@ -463,7 +463,7 @@ export default function LcoeTool() {
   const lcoeRating = lcoeMwh > 45 ? "Low" : lcoeMwh < 34 ? "Excellent" : "Rentable";
 
   return (
-    <div style={{ minHeight:"100vh", background:"#FFFFFF", fontFamily:"'Inter',system-ui,sans-serif",
+    <div style={{ minHeight:"100vh", background:"#FFFFFF", fontFamily:"Inter, Arial, sans-serif",
       color:"#0F172A", padding:"28px 20px" }}>
 
       {/* ──────────── TOOL OVERVIEW (COLLAPSIBLE) ──────────── */}
@@ -613,7 +613,7 @@ export default function LcoeTool() {
                   <button onClick={e=>{e.stopPropagation();setPdfState({status:"idle",filename:"",extracted:null,error:null});
                     setP(prev => ({ ...prev, _energySource: "calculated", annualEnergy: Math.round(prev.systemCapacity * prev.specificYield) }))}}
                     style={{ background:"none", border:"1px solid #E2E8F0", borderRadius:4, padding:"3px 8px",
-                      color:"#64748B", fontSize:10, cursor:"pointer", fontFamily:"'Inter'" }}>Clear</button>
+                      color:"#64748B", fontSize:10, cursor:"pointer", fontFamily:"Inter, Arial, sans-serif" }}>Clear</button>
                 </div>
                 {pdfState.extracted.systemType && (
                   <div style={{ marginBottom:8 }}>
@@ -892,7 +892,7 @@ export default function LcoeTool() {
                         display:"flex", alignItems:"center", justifyContent:"space-between" }}>
                       <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                         <div style={{ width:7, height:7, borderRadius:"50%", background:cat.color }} />
-                        <span style={{ fontFamily:"'Inter'", fontWeight:700, fontSize:11,
+                        <span style={{ fontFamily:"Inter, Arial, sans-serif", fontWeight:700, fontSize:11,
                           color:cat.color, letterSpacing:".05em", textTransform:"uppercase" }}>{cat.label}</span>
                       </div>
                       <div style={{ display:"flex", alignItems:"center", gap:10 }}>
@@ -1043,7 +1043,7 @@ export default function LcoeTool() {
                     background:lcoeColor+"15",
                     border:`1px solid ${lcoeColor}33`,
                     color:lcoeColor,
-                    fontFamily:"'Inter', system-ui, sans-serif"
+                    fontFamily:"Inter, Arial, sans-serif"
                   }}>
                     {lcoeRating}
                   </span>
@@ -1059,7 +1059,7 @@ export default function LcoeTool() {
                     background:"#1F2937", color:"#fff",
                     border:"none", cursor:"pointer",
                     fontSize:10, fontWeight:600,
-                    fontFamily:"'Inter', system-ui, sans-serif",
+                    fontFamily:"Inter, Arial, sans-serif",
                     letterSpacing:".03em",
                     transition:"background .15s",
                     zIndex:1,
@@ -1403,7 +1403,7 @@ export default function LcoeTool() {
           <div onClick={e => e.stopPropagation()} style={{
             background:"#fff", borderRadius:14, padding:"20px 22px 18px",
             boxShadow:"0 16px 48px rgba(0,0,0,.18)", width:280,
-            fontFamily:"'Inter', system-ui, sans-serif",
+            fontFamily:"Inter, Arial, sans-serif",
           }}>
             <div style={{ fontSize:13, fontWeight:700, color:"#0F172A", marginBottom:3 }}>Currency Settings</div>
             <div style={{ fontSize:10, color:"#64748B", marginBottom:14 }}>Convert all monetary values from USD</div>
@@ -1453,7 +1453,7 @@ export default function LcoeTool() {
                   background:"#1F2937", color:"#fff",
                   border:"none", cursor:"pointer",
                   fontSize:11, fontWeight:600,
-                  fontFamily:"'Inter', system-ui, sans-serif",
+                  fontFamily:"Inter, Arial, sans-serif",
                   transition:"background .15s",
                 }}
                 onMouseEnter={e => e.currentTarget.style.background="#374151"}
@@ -1470,7 +1470,7 @@ export default function LcoeTool() {
                   background:"#F1F5F9", color:"#64748B",
                   border:"1.5px solid #E2E8F0", cursor:"pointer",
                   fontSize:11, fontWeight:600,
-                  fontFamily:"'Inter', system-ui, sans-serif",
+                  fontFamily:"Inter, Arial, sans-serif",
                   transition:"all .15s",
                 }}
                 onMouseEnter={e => { e.currentTarget.style.background="#E2E8F0"; }}

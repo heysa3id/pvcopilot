@@ -23,7 +23,7 @@ import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
 const Plot = createPlotlyComponent(Plotly);
 
 const G = "#FFB800", B = "#1d9bf0", P = "#8b5cf6", Y = "#16a34a", O = "#ff7a45";
-const FONT = "'Inter', system-ui, sans-serif";
+const FONT = "Inter, Arial, sans-serif";
 const MONO = "'JetBrains Mono', monospace";
 function parseCSV(text) {
   const lines = text.trim().split("\n").filter(l => l.trim());
@@ -3216,7 +3216,7 @@ export default function QualityCheckPage() {
                               cursor: "pointer",
                               fontSize: 10,
                               fontWeight: 600,
-                              fontFamily: "'Inter', system-ui, sans-serif",
+                              fontFamily: FONT,
                               letterSpacing: ".03em",
                               transition: "background .15s",
                               whiteSpace: "nowrap",
