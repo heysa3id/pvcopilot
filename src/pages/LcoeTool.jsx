@@ -1,5 +1,10 @@
 import { useState, useMemo, useCallback } from "react";
 import Chart from "react-apexcharts";
+import Dialog from "@mui/material/Dialog";
+import DialogTitle from "@mui/material/DialogTitle";
+import DialogContent from "@mui/material/DialogContent";
+import DialogActions from "@mui/material/DialogActions";
+import Button from "@mui/material/Button";
 import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
 import AutorenewOutlinedIcon from "@mui/icons-material/AutorenewOutlined";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
@@ -343,6 +348,7 @@ export default function LcoeTool() {
   const [dragOver, setDragOver] = useState(false);
   const [overviewOpen, setOverviewOpen] = useState(false);
   const [showCurrencyPopup, setShowCurrencyPopup] = useState(false);
+  const [showBrowserRecommendDialog, setShowBrowserRecommendDialog] = useState(false);
   const [currency, setCurrency] = useState("USD");
   const [exchangeRate, setExchangeRate] = useState(1);
   const [tempCurrency, setTempCurrency] = useState("USD");
@@ -446,6 +452,7 @@ export default function LcoeTool() {
       setPanel("system");
     } catch(e) {
       setPdfState({ status: "error", filename: file.name, extracted: null, error: e.message });
+      setShowBrowserRecommendDialog(true);
     }
   }, []);
 
@@ -464,6 +471,27 @@ export default function LcoeTool() {
   return (
     <div style={{ minHeight:"100vh", background:"#FFFFFF", fontFamily:"Inter, Arial, sans-serif",
       color:"#0F172A", padding:"28px 20px" }}>
+
+      {/* Parse failed: recommend Chrome or Opera */}
+      <Dialog open={showBrowserRecommendDialog} onClose={() => setShowBrowserRecommendDialog(false)}>
+        <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1 }}>
+          <WarningAmberOutlinedIcon sx={{ color: O }} />
+          PDF parsing failed
+        </DialogTitle>
+        <DialogContent>
+          <p style={{ margin: 0, color: "#334155" }}>
+            This browser may not support PDF parsing correctly. For the best experience, please try again using <strong>Chrome</strong> or <strong>Opera</strong>.
+          </p>
+          {pdfState.error && (
+            <p style={{ margin: "8px 0 0", fontSize: 12, color: "#64748b" }}>{pdfState.error}</p>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setShowBrowserRecommendDialog(false)} variant="contained" sx={{ bgcolor: G, "&:hover": { bgcolor: "#e6a200" } }}>
+            OK
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* ──────────── TOOL OVERVIEW (COLLAPSIBLE) ──────────── */}
       <div style={{ maxWidth:1380, margin:"0 auto 24px", padding:"0 20px" }}>
