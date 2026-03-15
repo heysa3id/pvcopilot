@@ -133,15 +133,32 @@ function computePdcComparison(headers, rows, config, lossFactor = 0.97) {
 }
 
 /**
+ * Time-of-day weight: 1 at solar noon, decreases toward dawn/dusk.
+ * Same formula as backend _time_of_day_weight.
+ * @param {number} hourFloat - Hour of day as float (e.g. 8.5 for 08:30)
+ * @param {number} solarNoon - Solar noon hour (default 12)
+ * @param {number} minWeight - Minimum weight at edges (default 0.2)
+ * @returns {number} weight in [minWeight, 1]
+ */
+function timeOfDayWeight(hourFloat, solarNoon = 12, minWeight = 0.2) {
+  const m = Math.max(0, Math.min(1, minWeight));
+  const raw = (1 + Math.cos((Math.PI * (hourFloat - solarNoon)) / 6)) / 2;
+  return m + (1 - m) * Math.max(0, Math.min(1, raw));
+}
+
+/**
  * Apply PVWatts filter in JS (mirrors backend pvwatts_filter).
  * comparisonData: array of { time, P_DC, PVWatts }.
  * threshold: max relative error (e.g. 0.2 = 20%).
+ * options: { timeWeightMin?: number } - if set (e.g. 0.2), scale error by time-of-day weight.
  * Returns { labeled, filtered, removedTimes }.
  */
-function pvwattsFilterJS(comparisonData, threshold) {
+function pvwattsFilterJS(comparisonData, threshold, options = {}) {
   if (!Array.isArray(comparisonData) || comparisonData.length === 0) return null;
   const th = Number(threshold);
   const t = Number.isFinite(th) && th >= 0 ? th : 0.5;
+  const timeWeightMin = options.timeWeightMin != null ? Number(options.timeWeightMin) : null;
+  const useTimeWeight = Number.isFinite(timeWeightMin) && timeWeightMin >= 0 && timeWeightMin <= 1;
 
   const labeled = [];
   for (const d of comparisonData) {
@@ -149,7 +166,17 @@ function pvwattsFilterJS(comparisonData, threshold) {
     const pv = d.PVWatts != null ? Number(d.PVWatts) : NaN;
     if (!Number.isFinite(pv) || pv <= 0 || !Number.isFinite(pdc)) continue;
     const relError = Math.abs((pdc - pv) / pv);
-    const status = relError <= t ? "valid" : "removed";
+    let compareError = relError;
+    if (useTimeWeight) {
+      const tMs = d.time != null ? (d.time instanceof Date ? d.time.getTime() : new Date(d.time).getTime()) : NaN;
+      if (Number.isFinite(tMs)) {
+        const date = new Date(tMs);
+        const hourFloat = date.getHours() + date.getMinutes() / 60 + date.getSeconds() / 3600;
+        const w = timeOfDayWeight(hourFloat, 12, timeWeightMin);
+        compareError = relError * w;
+      }
+    }
+    const status = compareError <= t ? "valid" : "removed";
     labeled.push({ ...d, rel_error: relError, status });
   }
 
@@ -1513,13 +1540,12 @@ function PdcFilterChart({ comparisonData, filterResult, resampleMinutes }) {
     const times = comparisonData.map((d) => d.time);
     const pdcRaw = comparisonData.map((d) => d.P_DC);
     const pvRaw = comparisonData.map((d) => d.PVWatts);
-    const pdcSmooth = rollingSmooth(pdcRaw, ROLL_K);
     const pvSmooth = rollingSmooth(pvRaw, ROLL_K);
 
     const traces = [
       {
         x: times,
-        y: pdcSmooth,
+        y: pdcRaw,
         type: "scatter",
         mode: "lines",
         name: "Power",
@@ -2353,10 +2379,15 @@ export default function DataFilteringPage() {
   const [resamplingStepMinutes, setResamplingStepMinutes] = useState(10);
   const [lossFactor, setLossFactor] = useState("0.97");
   const [filterThreshold, setFilterThreshold] = useState("0.2");
+  const [timeWeightEnabled, setTimeWeightEnabled] = useState(false);
+  const [timeWeightMin, setTimeWeightMin] = useState("0.2");
   const [downloadFilter, setDownloadFilter] = useState("all"); // 'all' | 'valid' | 'removed' for summary card download
   const [thresholdHelpOpen, setThresholdHelpOpen] = useState(false);
   const thresholdHelpRef = useRef(null);
   const thresholdHelpTriggerRef = useRef(null);
+  const [timeWeightHelpOpen, setTimeWeightHelpOpen] = useState(false);
+  const timeWeightHelpRef = useRef(null);
+  const timeWeightHelpTriggerRef = useRef(null);
   const [lossFactorHelpOpen, setLossFactorHelpOpen] = useState(false);
   const lossFactorHelpRef = useRef(null);
   const lossFactorHelpTriggerRef = useRef(null);
@@ -2443,8 +2474,17 @@ export default function DataFilteringPage() {
 
   const filterResult = useMemo(() => {
     if (!comparisonData || comparisonData.length === 0) return null;
-    return pvwattsFilterJS(comparisonData, filterThreshold);
-  }, [comparisonData, filterThreshold]);
+    const opts = timeWeightEnabled && Number.isFinite(Number(timeWeightMin))
+      ? { timeWeightMin: Math.max(0, Math.min(1, Number(timeWeightMin))) }
+      : {};
+    return pvwattsFilterJS(comparisonData, filterThreshold, opts);
+  }, [comparisonData, filterThreshold, timeWeightEnabled, timeWeightMin]);
+
+  const timeWeightHelpChartData = useMemo(() => {
+    const hours = [];
+    for (let i = 0; i <= 96; i++) hours.push(i * 0.25);
+    return { x: hours, y: hours.map((hr) => timeOfDayWeight(hr, 12, 0.2)) };
+  }, []);
 
   // Default date range to start and end of loaded PV data
   useEffect(() => {
@@ -2470,6 +2510,16 @@ export default function DataFilteringPage() {
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [thresholdHelpOpen]);
+
+  useEffect(() => {
+    if (!timeWeightHelpOpen) return;
+    const onDown = (e) => {
+      if (timeWeightHelpTriggerRef.current?.contains(e.target) || timeWeightHelpRef.current?.contains(e.target)) return;
+      setTimeWeightHelpOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [timeWeightHelpOpen]);
 
   useEffect(() => {
     if (!lossFactorHelpOpen) return;
@@ -3111,6 +3161,134 @@ export default function DataFilteringPage() {
                       />
                       <span style={{ fontFamily: FONT, fontSize: 14, color: "#64748B" }}>%</span>
                     </div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0, position: "relative" }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontFamily: FONT, fontSize: 12, color: "#334155" }}>
+                      <input
+                        type="checkbox"
+                        checked={timeWeightEnabled}
+                        onChange={(e) => setTimeWeightEnabled(e.target.checked)}
+                        style={{ width: 16, height: 16, accentColor: "#2563eb" }}
+                      />
+                      Soften at dawn/dusk
+                    </label>
+                    <span
+                      ref={timeWeightHelpTriggerRef}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setTimeWeightHelpOpen((v) => !v)}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setTimeWeightHelpOpen((v) => !v); }}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        width: 20,
+                        height: 20,
+                        borderRadius: "50%",
+                        color: "#64748B",
+                        cursor: "pointer",
+                        outline: "none",
+                      }}
+                      aria-label="Explain soften at dawn/dusk"
+                    >
+                      <HelpOutline sx={{ fontSize: 18 }} />
+                    </span>
+                    {timeWeightHelpOpen && (
+                      <div
+                        ref={timeWeightHelpRef}
+                        style={{
+                          position: "absolute",
+                          top: "100%",
+                          right: 0,
+                          marginTop: 8,
+                          zIndex: 1001,
+                          background: "#fff",
+                          borderRadius: 12,
+                          border: "1px solid #E2E8F0",
+                          boxShadow: "0 10px 40px rgba(0,0,0,0.12)",
+                          padding: 12,
+                          width: 500,
+                          maxWidth: "min(500px, calc(100vw - 24px))",
+                          fontFamily: FONT,
+                          fontSize: 12,
+                          color: "#334155",
+                          lineHeight: 1.5,
+                        }}
+                      >
+                        <div style={{ fontWeight: 700, color: "#0F172A", marginBottom: 4 }}>Soften at dawn/dusk</div>
+                        <p style={{ margin: "0 0 6px 0" }}>
+                          At sunrise and sunset, measured and theoretical power are both low, so the same small absolute difference becomes a large <strong>relative error</strong> and many points get removed even when the difference is acceptable.
+                        </p>
+                        <p style={{ margin: "0 0 8px 0" }}>
+                          When enabled, the relative error is multiplied by a <strong>time-of-day weight</strong>: 1 at solar noon (no change) and lower at dawn/dusk. So the effective threshold is relaxed when the sun is low, and fewer points are removed at the edges of the day. <strong>Min weight</strong> is the minimum multiplier at 6:00 and 18:00 (e.g. 0.2 = 20%).
+                        </p>
+                        <div style={{ marginTop: 6, height: 100 }}>
+                          <Plot
+                            data={[{
+                              x: timeWeightHelpChartData.x,
+                              y: timeWeightHelpChartData.y,
+                              type: "scatter",
+                              mode: "lines",
+                              name: "Weight",
+                              line: { color: "#2563eb", width: 2, shape: "spline", smoothing: 0.3 },
+                              fill: "tozeroy",
+                              fillcolor: "rgba(37, 99, 235, 0.15)",
+                            }]}
+                            layout={{
+                              margin: { t: 16, r: 16, b: 20, l: 36 },
+                              height: 100,
+                              xaxis: {
+                                title: { text: "Hour of day", font: { size: 10 } },
+                                range: [0, 24],
+                                tickvals: [0, 6, 12, 18, 24],
+                                tickfont: { size: 9 },
+                                gridcolor: "#F1F5F9",
+                              },
+                              yaxis: {
+                                title: { text: "Weight", font: { size: 10 } },
+                                range: [0, 1.05],
+                                tickfont: { size: 9 },
+                                gridcolor: "#F1F5F9",
+                              },
+                              showlegend: false,
+                              plot_bgcolor: "#fff",
+                              paper_bgcolor: "#fff",
+                              font: { family: FONT, size: 10 },
+                              annotations: [
+                                { x: 12, y: 1, text: "noon", showarrow: false, font: { size: 9 }, yshift: 4 },
+                                { x: 6, y: 0.2, text: "dawn", showarrow: false, font: { size: 9 }, yshift: -6 },
+                                { x: 18, y: 0.2, text: "dusk", showarrow: false, font: { size: 9 }, yshift: -6 },
+                              ],
+                            }}
+                            config={{ displayModeBar: false, responsive: true }}
+                            style={{ width: "100%" }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                    {timeWeightEnabled && (
+                      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <span style={{ fontFamily: FONT, fontSize: 12, color: "#64748B" }}>min weight</span>
+                        <input
+                          type="number"
+                          min={0}
+                          max={1}
+                          step={0.1}
+                          value={timeWeightMin}
+                          onChange={(e) => setTimeWeightMin(e.target.value)}
+                          style={{
+                            width: 48,
+                            padding: "6px 8px",
+                            borderRadius: 8,
+                            border: "1px solid #E2E8F0",
+                            fontFamily: MONO,
+                            fontSize: 12,
+                            color: "#0F172A",
+                            background: "#FAFBFC",
+                          }}
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

@@ -11,6 +11,18 @@ import numpy as np
 import pandas as pd
 
 
+def _time_of_day_weight(hour_float: np.ndarray, solar_noon: float = 12.0, min_weight: float = 0.2) -> np.ndarray:
+    """
+    Weight = 1 at solar noon, decreases toward morning/evening.
+    Formula: weight = min_weight + (1 - min_weight) * (1 + cos(pi * (hour - solar_noon) / 6)) / 2.
+    So at hour 6 or 18 (relative to noon 12) weight is min_weight; at noon weight is 1.
+    """
+    min_weight = max(0.0, min(1.0, min_weight))
+    raw = (1 + np.cos(np.pi * (hour_float - solar_noon) / 6.0)) / 2.0
+    raw = np.clip(raw, 0, 1)
+    return min_weight + (1.0 - min_weight) * raw
+
+
 # Expected keys in system config (system_info.json "config" object)
 SYSTEM_KEYS = ("coef_a", "coef_b", "delta", "tot_power", "temp_coef")
 
@@ -143,10 +155,13 @@ def pvwatts_filter(
     pvwatts_column: str = "PVWatts",
     threshold: float = 0.5,
     resample_interval: str | None = "10T",
+    time_weight_min: float | None = None,
+    solar_noon_hour: float = 12.0,
 ) -> tuple[pd.DataFrame, pd.DataFrame, list]:
     """
     Filters out rows with high deviation from PVWatts estimates and labels removed rows.
     Optionally resamples data over a defined time interval.
+    Optional time-of-day weight: scale relative error by a factor 1 at noon, lower at dawn/dusk.
 
     Parameters
     ----------
@@ -158,6 +173,12 @@ def pvwatts_filter(
         Acceptable relative deviation from PVWatts (e.g. 0.5 = ±50%).
     resample_interval : str or None
         Resampling frequency string (e.g. '10T', '1H'). None to skip resampling.
+    time_weight_min : float or None
+        If set (e.g. 0.2), scale rel_error by a time-of-day weight (1 at solar noon, >= time_weight_min
+        at dawn/dusk). Comparison uses scaled_error <= threshold, so fewer points are removed at low sun.
+        If None, no time weighting (current behavior).
+    solar_noon_hour : float
+        Hour of day for solar noon (default 12) used when time_weight_min is set.
 
     Returns
     -------
@@ -183,7 +204,12 @@ def pvwatts_filter(
         df = df[numeric_cols].resample(resample_interval).mean()
         df = df.reset_index()
 
-    df["hour"] = df["time"].dt.hour
+    # Hour as float for smooth weight (e.g. 8.5 for 08:30)
+    df["hour"] = (
+        df["time"].dt.hour
+        + df["time"].dt.minute / 60.0
+        + df["time"].dt.second / 3600.0
+    )
 
     # Drop rows with missing or invalid PVWatts
     df = df[df[pvwatts_column] > 0]
@@ -191,7 +217,13 @@ def pvwatts_filter(
 
     # Relative error vs PVWatts (denominator = PVWatts to avoid div by zero when P_DC=0)
     df["rel_error"] = np.abs((df["P_DC"] - df[pvwatts_column]) / df[pvwatts_column])
-    df["status"] = df["rel_error"].apply(lambda x: "valid" if x <= threshold else "removed")
+
+    if time_weight_min is not None:
+        weight = _time_of_day_weight(df["hour"].values, solar_noon_hour, time_weight_min)
+        scaled_error = df["rel_error"].values * weight
+        df["status"] = np.where(scaled_error <= threshold, "valid", "removed")
+    else:
+        df["status"] = np.where(df["rel_error"] <= threshold, "valid", "removed")
 
     filtered_data = df[df["status"] == "valid"].drop(columns=["hour", "rel_error"])
     removed_times = df[df["status"] == "removed"]["time"].tolist()
