@@ -14,6 +14,7 @@ import TimelineOutlined from "@mui/icons-material/TimelineOutlined";
 import ChevronLeft from "@mui/icons-material/ChevronLeft";
 import ChevronRight from "@mui/icons-material/ChevronRight";
 import CloseOutlined from "@mui/icons-material/CloseOutlined";
+import FileDownloadOutlined from "@mui/icons-material/FileDownloadOutlined";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -72,6 +73,131 @@ function getDateColumnIndex(headers) {
     if (/time|date|timestamp|datetime/.test((headers[i] || "").toLowerCase())) return i;
   }
   return 0;
+}
+
+/** Return first column index whose header matches one of the candidate names. */
+function getColumnIndex(headers, candidates) {
+  if (!headers?.length || !candidates?.length) return -1;
+  const set = new Set(candidates.map((c) => String(c).trim()));
+  for (let i = 0; i < headers.length; i++) {
+    if (set.has(String(headers[i] ?? "").trim())) return i;
+  }
+  return -1;
+}
+
+/**
+ * Compute Tcell and PVWatts for each row (same formulas as backend datafiltering.py).
+ * config: { coef_a, coef_b, delta, tot_power, temp_coef [, loss_factor ] } (numbers).
+ * lossFactor: optional multiplier at end of PVWatts formula (default 0.97).
+ * Returns array of { time, P_DC, PVWatts } or null if required columns/config missing.
+ */
+function computePdcComparison(headers, rows, config, lossFactor = 0.97) {
+  if (!headers?.length || !rows?.length || !config || typeof config !== "object") return null;
+  const cfg = config.config || config;
+  const coef_a = Number(cfg.coef_a);
+  const coef_b = Number(cfg.coef_b);
+  const delta = Number(cfg.delta);
+  const tot_power = Number(cfg.tot_power);
+  const temp_coef = Number(cfg.temp_coef);
+  const num = Number(lossFactor);
+  const factor = (Number.isFinite(num) && num >= 0) ? num : 0.97;
+  if ([coef_a, coef_b, delta, tot_power, temp_coef].some((n) => !Number.isFinite(n))) return null;
+
+  const timeIdx = getDateColumnIndex(headers);
+  const airIdx = getColumnIndex(headers, ["Air_Temp", "weather_Air_Temp"]);
+  const gtiIdx = getColumnIndex(headers, ["GTI", "weather_GTI"]);
+  const windIdx = getColumnIndex(headers, ["Wind_speed", "weather_Wind_speed"]);
+  const pdcIdx = getColumnIndex(headers, ["P_DC"]);
+  if (timeIdx < 0 || airIdx < 0 || gtiIdx < 0 || windIdx < 0 || pdcIdx < 0) return null;
+
+  const result = [];
+  for (const row of rows) {
+    if (!Array.isArray(row)) continue;
+    const airTemp = parseFloat(row[airIdx]);
+    const gti = parseFloat(row[gtiIdx]);
+    const wind = parseFloat(row[windIdx]);
+    const pdc = parseFloat(row[pdcIdx]);
+    if (!Number.isFinite(gti) || !Number.isFinite(airTemp) || !Number.isFinite(wind)) continue;
+    const tcell = airTemp + (gti * Math.exp(coef_a + coef_b * wind)) + (gti * delta / 1000);
+    const pvWatts = (gti * tot_power * (1 + (temp_coef * 1e-2) * (tcell - 25))) * factor;
+    result.push({
+      time: row[timeIdx],
+      P_DC: Number.isFinite(pdc) ? pdc : null,
+      PVWatts: Number.isFinite(pvWatts) ? pvWatts : null,
+      weather_GTI: Number.isFinite(gti) ? gti : null,
+    });
+  }
+  return result.length ? result : null;
+}
+
+/**
+ * Apply PVWatts filter in JS (mirrors backend pvwatts_filter).
+ * comparisonData: array of { time, P_DC, PVWatts }.
+ * threshold: max relative error (e.g. 0.2 = 20%).
+ * Returns { labeled, filtered, removedTimes }.
+ */
+function pvwattsFilterJS(comparisonData, threshold) {
+  if (!Array.isArray(comparisonData) || comparisonData.length === 0) return null;
+  const th = Number(threshold);
+  const t = Number.isFinite(th) && th >= 0 ? th : 0.5;
+
+  const labeled = [];
+  for (const d of comparisonData) {
+    const pdc = d.P_DC != null ? Number(d.P_DC) : NaN;
+    const pv = d.PVWatts != null ? Number(d.PVWatts) : NaN;
+    if (!Number.isFinite(pv) || pv <= 0 || !Number.isFinite(pdc)) continue;
+    const relError = Math.abs((pdc - pv) / pv);
+    const status = relError <= t ? "valid" : "removed";
+    labeled.push({ ...d, rel_error: relError, status });
+  }
+
+  const filtered = labeled.filter((r) => r.status === "valid");
+  const removedTimes = labeled.filter((r) => r.status === "removed").map((r) => r.time);
+  return { labeled, filtered, removedTimes };
+}
+
+/** Simple linear regression: returns { slope, intercept, r2 } from x[], y[]. */
+function linearRegression(x, y) {
+  const n = x.length;
+  if (n < 2) return { slope: 0, intercept: 0, r2: 0 };
+  let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
+  for (let i = 0; i < n; i++) {
+    sumX += x[i]; sumY += y[i]; sumXY += x[i] * y[i]; sumX2 += x[i] * x[i]; sumY2 += y[i] * y[i];
+  }
+  const denom = n * sumX2 - sumX * sumX;
+  const slope = denom === 0 ? 0 : (n * sumXY - sumX * sumY) / denom;
+  const intercept = (sumY - slope * sumX) / n;
+  let ssRes = 0, ssTot = 0;
+  const meanY = sumY / n;
+  for (let i = 0; i < n; i++) {
+    const fit = slope * x[i] + intercept;
+    ssRes += (y[i] - fit) ** 2;
+    ssTot += (y[i] - meanY) ** 2;
+  }
+  const r2 = ssTot === 0 ? 0 : 1 - ssRes / ssTot;
+  return { slope, intercept, r2 };
+}
+
+/** Centered rolling mean, min_periods 1. */
+function rollingSmooth(arr, halfWindow = 1) {
+  if (!Array.isArray(arr) || arr.length === 0) return arr;
+  const k = Math.max(1, Math.floor(halfWindow));
+  const out = [];
+  for (let i = 0; i < arr.length; i++) {
+    const start = Math.max(0, i - k);
+    const end = Math.min(arr.length, i + k + 1);
+    let sum = 0;
+    let count = 0;
+    for (let j = start; j < end; j++) {
+      const v = arr[j];
+      if (v != null && Number.isFinite(v)) {
+        sum += v;
+        count++;
+      }
+    }
+    out.push(count > 0 ? sum / count : arr[i]);
+  }
+  return out;
 }
 
 function parseDateCell(val) {
@@ -621,6 +747,10 @@ const thStyle = {
   fontWeight: 700,
   fontSize: 11,
   fontFamily: MONO,
+  background: "#F8FAFC",
+  position: "sticky",
+  top: 0,
+  zIndex: 2,
 };
 const tdStyle = {
   padding: "8px 14px",
@@ -1237,6 +1367,630 @@ function FilterCSVTable({ title, icon, color, headers, rows, resampled, original
   );
 }
 
+// ── P_DC vs PVWatts comparison chart (Data Filtering only) ──
+function PdcComparisonChart({ comparisonData }) {
+  const [expanded, setExpanded] = useState(true);
+  if (!comparisonData || comparisonData.length === 0) return null;
+
+  const x = comparisonData.map((d) => d.time);
+  const pdcY = comparisonData.map((d) => d.P_DC);
+  const pvWattsY = comparisonData.map((d) => d.PVWatts);
+
+  const chartData = [
+    {
+      x,
+      y: pdcY,
+      type: "scatter",
+      mode: "lines",
+      name: "P_DC (measured)",
+      line: { color: O, width: 1.5, shape: "spline", smoothing: 1.2 },
+      hovertemplate: "<b>P_DC</b>: %{y}<extra></extra>",
+    },
+    {
+      x,
+      y: pvWattsY,
+      type: "scatter",
+      mode: "lines",
+      name: "PVWatts (theoretical)",
+      line: { color: B, width: 1.5, shape: "spline", smoothing: 1.2 },
+      hovertemplate: "<b>PVWatts</b>: %{y}<extra></extra>",
+    },
+  ];
+
+  return (
+    <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #E2E8F0", overflow: "hidden", marginTop: 20 }}>
+      <div
+        onClick={() => setExpanded(!expanded)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "14px 20px",
+          cursor: "pointer",
+          userSelect: "none",
+          borderBottom: expanded ? "1px solid #E2E8F0" : "none",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <ShowChartOutlined sx={{ fontSize: 20, color: DF }} />
+          <span style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: FONT }}>P_DC vs PVWatts</span>
+        </div>
+        {expanded ? <ExpandLessIcon sx={{ fontSize: 20, color: "#94a3b8" }} /> : <ExpandMoreIcon sx={{ fontSize: 20, color: "#94a3b8" }} />}
+      </div>
+      {expanded && (
+        <div style={{ padding: "8px 12px 12px" }}>
+          <Plot
+            data={chartData}
+            layout={{
+              height: 320,
+              margin: { t: 44, r: 40, b: 50, l: 60 },
+              hovermode: "x unified",
+              showlegend: true,
+              legend: { orientation: "h", x: 0.5, y: 1.02, xanchor: "center", yanchor: "bottom", font: { family: FONT, size: 11 } },
+              xaxis: {
+                title: { text: "Time", font: { family: FONT, size: 12, color: "#94a3b8" } },
+                gridcolor: "#F1F5F9",
+                tickfont: { family: MONO, size: 10, color: "#94a3b8" },
+              },
+              yaxis: {
+                title: { text: "Power (W)", font: { family: FONT, size: 12, color: "#94a3b8" } },
+                gridcolor: "#F1F5F9",
+                tickfont: { family: MONO, size: 10, color: "#94a3b8" },
+              },
+              plot_bgcolor: "#fff",
+              paper_bgcolor: "#fff",
+              font: { family: FONT },
+            }}
+            config={{ displaylogo: false, responsive: true, modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d"] }}
+            style={{ width: "100%" }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Measured Vs Calculated Power (filtered + removed points) ──
+const ROLL_K = 1; // smoothing half-window (bins)
+
+function PdcFilterChart({ comparisonData, filterResult, resampleMinutes }) {
+  const [expanded, setExpanded] = useState(true);
+  const chartSpec = useMemo(() => {
+    if (!comparisonData || comparisonData.length === 0) return null;
+    const times = comparisonData.map((d) => d.time);
+    const pdcRaw = comparisonData.map((d) => d.P_DC);
+    const pvRaw = comparisonData.map((d) => d.PVWatts);
+    const pdcSmooth = rollingSmooth(pdcRaw, ROLL_K);
+    const pvSmooth = rollingSmooth(pvRaw, ROLL_K);
+
+    const traces = [
+      {
+        x: times,
+        y: pdcSmooth,
+        type: "scatter",
+        mode: "lines",
+        name: "Power",
+        line: { color: "#2563eb", width: 1.5, shape: "spline", smoothing: 1.2 },
+        connectgaps: true,
+      },
+      {
+        x: times,
+        y: pvSmooth,
+        type: "scatter",
+        mode: "lines",
+        name: "PVWatts",
+        line: { color: "#16a34a", width: 1.5, shape: "spline", smoothing: 1.2 },
+        connectgaps: true,
+      },
+    ];
+
+    if (filterResult?.filtered?.length) {
+      const ft = filterResult.filtered.map((d) => d.time);
+      const fpdc = filterResult.filtered.map((d) => d.P_DC);
+      const fpdcSmooth = rollingSmooth(fpdc, ROLL_K);
+      // Map time -> smoothed value for filtered points only
+      const filteredTimeToY = new Map();
+      ft.forEach((t, i) => filteredTimeToY.set(t, fpdcSmooth[i]));
+      // Use full time grid: null where point was removed so line does not link across gaps
+      const filteredYOnFullGrid = times.map((t) => (filteredTimeToY.has(t) ? filteredTimeToY.get(t) : null));
+      traces.push({
+        x: times,
+        y: filteredYOnFullGrid,
+        type: "scatter",
+        mode: "lines",
+        name: "Filtered Data",
+        line: { color: "#ea580c", width: 1.5, shape: "spline", smoothing: 1.2, dash: "dash" },
+        connectgaps: false,
+      });
+    }
+
+    if (filterResult?.labeled) {
+      const removed = filterResult.labeled.filter((r) => r.status === "removed");
+      if (removed.length > 0) {
+        traces.push({
+          x: removed.map((r) => r.time),
+          y: removed.map((r) => r.P_DC),
+          type: "scatter",
+          mode: "markers",
+          name: "Removed Points",
+          marker: { color: "#DE3163", size: 4, symbol: "x", line: { width: 1, color: "#DE3163" } },
+        });
+      }
+    }
+
+    return { traces, title: `Measured Vs Calculated Power (resampled every ${resampleMinutes ?? 10} min)` };
+  }, [comparisonData, filterResult, resampleMinutes]);
+
+  if (!chartSpec) return null;
+
+  return (
+    <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #E2E8F0", overflow: "hidden", marginTop: 20 }}>
+      <div
+        onClick={() => setExpanded(!expanded)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "14px 20px",
+          cursor: "pointer",
+          userSelect: "none",
+          borderBottom: expanded ? "1px solid #E2E8F0" : "none",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <ShowChartOutlined sx={{ fontSize: 20, color: DF }} />
+          <span style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: FONT }}>{chartSpec.title}</span>
+        </div>
+        {expanded ? <ExpandLessIcon sx={{ fontSize: 20, color: "#94a3b8" }} /> : <ExpandMoreIcon sx={{ fontSize: 20, color: "#94a3b8" }} />}
+      </div>
+      {expanded && (
+        <div style={{ padding: "8px 12px 12px" }}>
+          <Plot
+            data={chartSpec.traces}
+            layout={{
+              height: 340,
+              margin: { t: 44, r: 40, b: 50, l: 60 },
+              hovermode: "x unified",
+              showlegend: true,
+              legend: { orientation: "h", x: 0.5, y: 1.02, xanchor: "center", yanchor: "bottom", font: { family: FONT, size: 11 } },
+              title: { text: "", font: { size: 0 } },
+              xaxis: {
+                title: { text: "Time", font: { family: FONT, size: 12, color: "#94a3b8" } },
+                gridcolor: "#F1F5F9",
+                tickfont: { family: MONO, size: 10, color: "#94a3b8" },
+              },
+              yaxis: {
+                title: { text: "Power (W)", font: { family: FONT, size: 12, color: "#94a3b8" } },
+                gridcolor: "#F1F5F9",
+                tickfont: { family: MONO, size: 10, color: "#94a3b8" },
+              },
+              plot_bgcolor: "#fff",
+              paper_bgcolor: "#fff",
+              font: { family: FONT },
+            }}
+            config={{ displaylogo: false, responsive: true, modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d"] }}
+            style={{ width: "100%" }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── P_DC vs weather_GTI correlation scatter (above Labeled data table), data from labeled_data ──
+const CORRELATION_PURPLE = "#7c3aed";
+
+function PdcPvWattsCorrelationChart({ data }) {
+  const [collapsed, setCollapsed] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("all"); // 'all' | 'valid' | 'removed'
+
+  const filteredByStatus = useMemo(() => {
+    if (!Array.isArray(data)) return [];
+    if (statusFilter === "all") return data;
+    return data.filter((d) => d.status === statusFilter);
+  }, [data, statusFilter]);
+
+  const chartSpec = useMemo(() => {
+    if (filteredByStatus.length === 0) return null;
+    const validColor = Y;   // green
+    const removedColor = DF; // red
+    const validPoints = { x: [], y: [] };
+    const removedPoints = { x: [], y: [] };
+    const allX = [];
+    const allY = [];
+    for (const d of filteredByStatus) {
+      const gti = d.weather_GTI != null ? Number(d.weather_GTI) : NaN;
+      const pdc = d.P_DC != null ? Number(d.P_DC) : NaN;
+      if (Number.isFinite(gti) && Number.isFinite(pdc)) {
+        allX.push(gti);
+        allY.push(pdc);
+        if (d.status === "valid") {
+          validPoints.x.push(gti);
+          validPoints.y.push(pdc);
+        } else {
+          removedPoints.x.push(gti);
+          removedPoints.y.push(pdc);
+        }
+      }
+    }
+    if (allX.length < 2) return null;
+    const { slope, intercept, r2 } = linearRegression(allX, allY);
+    const minX = Math.min(...allX);
+    const maxX = Math.max(...allX);
+    const lineX = [minX, maxX];
+    const lineY = [slope * minX + intercept, slope * maxX + intercept];
+
+    const markerBase = { size: 6, opacity: 0.7, line: { width: 1, color: "rgba(255,255,255,0.9)" }, symbol: "circle" };
+    const scatterTraces = [];
+    if (statusFilter === "all") {
+      if (validPoints.x.length > 0) {
+        scatterTraces.push({
+          x: validPoints.x,
+          y: validPoints.y,
+          type: "scatter",
+          mode: "markers",
+          name: "Valid",
+          marker: { ...markerBase, color: validColor },
+          hovertemplate: "<b>Valid</b><br>weather_GTI: %{x:.2f}<br>P_DC: %{y:.2f}<extra></extra>",
+        });
+      }
+      if (removedPoints.x.length > 0) {
+        scatterTraces.push({
+          x: removedPoints.x,
+          y: removedPoints.y,
+          type: "scatter",
+          mode: "markers",
+          name: "Removed",
+          marker: { ...markerBase, color: removedColor },
+          hovertemplate: "<b>Removed</b><br>weather_GTI: %{x:.2f}<br>P_DC: %{y:.2f}<extra></extra>",
+        });
+      }
+    } else {
+      scatterTraces.push({
+        x: allX,
+        y: allY,
+        type: "scatter",
+        mode: "markers",
+        name: statusFilter === "valid" ? "Valid" : "Removed",
+        marker: { ...markerBase, color: statusFilter === "valid" ? validColor : removedColor },
+        hovertemplate: "<b>weather_GTI</b>: %{x:.2f}<br><b>P_DC</b>: %{y:.2f}<extra></extra>",
+      });
+    }
+    const traceLine = {
+      x: lineX,
+      y: lineY,
+      type: "scatter",
+      mode: "lines",
+      name: `Trend (R² = ${r2.toFixed(3)})`,
+      line: { color: DF, width: 2.5 },
+      hovertemplate: "Trend: P_DC = %{y:.2f}<extra></extra>",
+    };
+
+    const layout = {
+      height: 360,
+      margin: { t: 32, r: 40, b: 56, l: 60 },
+      hovermode: "x unified",
+      showlegend: true,
+      legend: {
+        x: 1,
+        y: 1.02,
+        xanchor: "right",
+        yanchor: "bottom",
+        font: { family: FONT, size: 12, color: "#475569" },
+        bgcolor: "rgba(255,255,255,0.9)",
+        bordercolor: "#E2E8F0",
+        borderwidth: 1,
+      },
+      xaxis: {
+        title: { text: "weather_GTI", font: { family: FONT, size: 13, color: "#334155" } },
+        gridcolor: "#E2E8F0",
+        zerolinecolor: "#E2E8F0",
+        tickfont: { family: MONO, size: 11, color: "#64748B" },
+        showline: true,
+        linecolor: "#E2E8F0",
+      },
+      yaxis: {
+        title: { text: "P_DC", font: { family: FONT, size: 13, color: "#334155" } },
+        gridcolor: "#E2E8F0",
+        zerolinecolor: "#E2E8F0",
+        tickfont: { family: MONO, size: 11, color: "#64748B" },
+        showline: true,
+        linecolor: "#E2E8F0",
+      },
+      plot_bgcolor: "#FAFBFC",
+      paper_bgcolor: "#fff",
+      font: { family: FONT },
+    };
+    return { traces: [...scatterTraces, traceLine], layout };
+  }, [filteredByStatus, statusFilter]);
+
+  if (!Array.isArray(data) || data.length === 0) return null;
+
+  return (
+    <div
+      style={{
+        background: "#ffffff",
+        borderRadius: 16,
+        border: "1px solid #E2E8F0",
+        boxShadow: "0 18px 45px rgba(15, 23, 42, 0.10)",
+        padding: "16px 18px 20px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 14,
+        marginTop: 20,
+      }}
+    >
+      <div
+        onClick={() => setCollapsed((c) => !c)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          flexWrap: "wrap",
+          gap: 10,
+          cursor: "pointer",
+          userSelect: "none",
+          borderBottom: !collapsed ? "1px solid #E2E8F0" : "none",
+          paddingBottom: !collapsed ? 14 : 0,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div
+            style={{
+              width: 30,
+              height: 30,
+              borderRadius: 10,
+              background: `${CORRELATION_PURPLE}18`,
+              border: `1px solid ${CORRELATION_PURPLE}40`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <TimelineOutlined sx={{ fontSize: 18, color: CORRELATION_PURPLE }} />
+          </div>
+          <div style={{ display: "flex", flexDirection: "column" }}>
+            <span style={{ fontFamily: FONT, fontSize: 14, fontWeight: 800, color: "#0F172A" }}>
+              P_DC vs weather_GTI — Correlation
+            </span>
+            <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>
+              Data from labeled_data. Filter by status to change points shown.
+            </span>
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {!collapsed && (
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }} onClick={(e) => e.stopPropagation()}>
+              {[
+                { opt: "all", color: B },
+                { opt: "valid", color: Y },
+                { opt: "removed", color: DF },
+              ].map(({ opt, color }) => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={() => setStatusFilter(opt)}
+                  style={{
+                    padding: "4px 10px",
+                    border: `1px solid ${statusFilter === opt ? color : "#E2E8F0"}`,
+                    borderRadius: 8,
+                    background: statusFilter === opt ? `${color}14` : "#fff",
+                    color: statusFilter === opt ? color : "#64748B",
+                    fontFamily: FONT,
+                    fontSize: 11,
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    textTransform: "capitalize",
+                  }}
+                >
+                  {opt}
+                </button>
+              ))}
+            </div>
+          )}
+          {collapsed ? <ExpandMoreIcon sx={{ fontSize: 20, color: "#94a3b8" }} /> : <ExpandLessIcon sx={{ fontSize: 20, color: "#94a3b8" }} />}
+        </div>
+      </div>
+      {!collapsed && (chartSpec ? (
+      <Plot
+        data={chartSpec.traces}
+        layout={chartSpec.layout}
+        config={{ displaylogo: false, responsive: true, modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d"] }}
+        style={{ width: "100%" }}
+      />
+      ) : (
+        <div style={{ height: 360, display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", fontFamily: FONT, fontSize: 13 }}>
+          No data points for selected status ({statusFilter}). Choose another filter or ensure labeled_data has weather_GTI and P_DC.
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Labeled data table (labeled_df) below Measured Vs Calculated Power ──
+function FilteredDataTable({ data, title = "Labeled data" }) {
+  const [expanded, setExpanded] = useState(false);
+  const [statusFilterOpen, setStatusFilterOpen] = useState(false);
+  const [statusFilter, setStatusFilter] = useState("all"); // 'all' | 'valid' | 'removed'
+  const statusFilterRef = useRef(null);
+  const statusPopoverRef = useRef(null);
+
+  const rows = Array.isArray(data) ? data : [];
+  const filteredRows = useMemo(() => {
+    if (statusFilter === "all") return rows;
+    return rows.filter((r) => r.status === statusFilter);
+  }, [rows, statusFilter]);
+
+  useEffect(() => {
+    if (!statusFilterOpen) return;
+    const onDown = (e) => {
+      if (statusFilterRef.current?.contains(e.target) || statusPopoverRef.current?.contains(e.target)) return;
+      setStatusFilterOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [statusFilterOpen]);
+
+  return (
+    <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #E2E8F0", overflow: "hidden", marginTop: 20 }}>
+      <div
+        onClick={() => setExpanded(!expanded)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "14px 20px",
+          cursor: "pointer",
+          userSelect: "none",
+          borderBottom: expanded ? "1px solid #E2E8F0" : "none",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <FilterAltOutlined sx={{ fontSize: 20, color: DF }} />
+          <span style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: FONT }}>{title}</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: DF, background: `${DF}14`, padding: "2px 10px", borderRadius: 20, fontFamily: FONT }}>
+            {statusFilter === "all" ? `${rows.length} rows` : `${filteredRows.length} of ${rows.length} rows`}
+          </span>
+        </div>
+        {expanded ? <ExpandLessIcon sx={{ fontSize: 20, color: "#94a3b8" }} /> : <ExpandMoreIcon sx={{ fontSize: 20, color: "#94a3b8" }} />}
+      </div>
+      {expanded && (
+        <>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "flex-end",
+              padding: "8px 14px 4px",
+              borderBottom: "1px solid #F1F5F9",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {[
+              { opt: "all", color: B },
+              { opt: "valid", color: Y },
+              { opt: "removed", color: DF },
+            ].map(({ opt, color }) => (
+              <button
+                key={opt}
+                type="button"
+                onClick={() => setStatusFilter(opt)}
+                style={{
+                  padding: "4px 10px",
+                  border: `1px solid ${statusFilter === opt ? color : "#E2E8F0"}`,
+                  borderRadius: 8,
+                  background: statusFilter === opt ? `${color}14` : "#fff",
+                  color: statusFilter === opt ? color : "#64748B",
+                  fontFamily: FONT,
+                  fontSize: 11,
+                  fontWeight: 600,
+                  cursor: "pointer",
+                  textTransform: "capitalize",
+                }}
+              >
+                {opt}
+              </button>
+            ))}
+          </div>
+          <div style={{ overflowX: "auto", maxHeight: 370, overflowY: "auto" }}>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, fontFamily: FONT }}>
+            <thead>
+              <tr>
+                <th style={thStyle}>#</th>
+                <th style={thStyle}>Time</th>
+                <th style={thStyle}>P_DC</th>
+                <th style={thStyle}>PVWatts</th>
+                <th style={thStyle}>rel_error</th>
+                <th style={thStyle}>
+                  <span>status</span>
+                  <button
+                    ref={statusFilterRef}
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setStatusFilterOpen((v) => !v); }}
+                    style={{
+                      marginLeft: 6,
+                      padding: 2,
+                      border: "none",
+                      background: "transparent",
+                      cursor: "pointer",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      verticalAlign: "middle",
+                    }}
+                    title="Filter by status"
+                  >
+                    <FilterAltOutlined sx={{ fontSize: 14, color: statusFilter !== "all" ? DF : "#94a3b8" }} />
+                  </button>
+                  {statusFilterOpen && (
+                    <div
+                      ref={statusPopoverRef}
+                      style={{
+                        position: "absolute",
+                        top: "100%",
+                        left: 0,
+                        marginTop: 4,
+                        background: "#fff",
+                        border: "1px solid #E2E8F0",
+                        borderRadius: 10,
+                        boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                        zIndex: 50,
+                        minWidth: 120,
+                        padding: "6px 0",
+                      }}
+                    >
+                      {[
+                        { opt: "all", color: B },
+                        { opt: "valid", color: Y },
+                        { opt: "removed", color: DF },
+                      ].map(({ opt, color }) => (
+                        <button
+                          key={opt}
+                          type="button"
+                          onClick={() => { setStatusFilter(opt); setStatusFilterOpen(false); }}
+                          style={{
+                            width: "100%",
+                            padding: "6px 12px",
+                            border: "none",
+                            background: statusFilter === opt ? `${color}14` : "transparent",
+                            color: statusFilter === opt ? color : "#334155",
+                            fontFamily: FONT,
+                            fontSize: 12,
+                            textAlign: "left",
+                            cursor: "pointer",
+                            textTransform: "capitalize",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                          }}
+                        >
+                          <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
+                          {opt}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredRows.map((d, ri) => (
+                <tr key={ri} style={{ background: ri % 2 === 0 ? "#fff" : "#FAFBFC" }}>
+                  <td style={{ ...tdStyle, color: "#94a3b8", fontWeight: 600 }}>{ri + 1}</td>
+                  <td style={tdStyle}>{d.time ?? ""}</td>
+                  <td style={tdStyle}>{d.P_DC != null ? Number(d.P_DC).toFixed(4) : ""}</td>
+                  <td style={tdStyle}>{d.PVWatts != null ? Number(d.PVWatts).toFixed(4) : ""}</td>
+                  <td style={tdStyle}>{d.rel_error != null ? (Number(d.rel_error) * 100).toFixed(2) + "%" : ""}</td>
+                  <td style={tdStyle}>{d.status ?? ""}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Column multi-select for chart (Data Filtering only) ──
 const CHART_COLORS_LEFT = ["#2563eb", "#dc2626", "#16a34a"];
 const CHART_COLORS_RIGHT = ["#d97706", "#7c3aed", "#0891b2"];
@@ -1491,7 +2245,7 @@ function FilterCSVChart({ title, color, headers, rows, defaultYHeader }) {
                 margin: { t: 44, r: 60, b: 50, l: 60 },
                 hovermode: "x unified",
                 showlegend: chartData.length > 1,
-                legend: { x: 0, y: 1.02, xanchor: "left", yanchor: "bottom", font: { family: FONT, size: 11 } },
+                legend: { orientation: "h", x: 0.5, y: 1.02, xanchor: "center", yanchor: "bottom", font: { family: FONT, size: 11 } },
                 xaxis: {
                   title: { text: safeHeaders[0] ?? "Index", font: { family: FONT, size: 12, color: "#94a3b8" } },
                   gridcolor: "#F1F5F9",
@@ -1524,6 +2278,9 @@ function FilterCSVChart({ title, color, headers, rows, defaultYHeader }) {
   );
 }
 
+const CACHE_KEY_PV = "pvcopilot_datafiltering_pv_cache";
+const CACHE_KEY_SYSTEM = "pvcopilot_datafiltering_system_cache";
+
 export default function DataFilteringPage() {
   const [pvFile, setPvFile] = useState(null);
   const [pvRawData, setPvRawData] = useState(null);
@@ -1533,9 +2290,42 @@ export default function DataFilteringPage() {
   const [dateFrom, setDateFrom] = useState(null);
   const [dateTo, setDateTo] = useState(null);
   const [resamplingStepMinutes, setResamplingStepMinutes] = useState(10);
+  const [lossFactor, setLossFactor] = useState("0.97");
+  const [filterThreshold, setFilterThreshold] = useState("0.2");
+  const [downloadFilter, setDownloadFilter] = useState("all"); // 'all' | 'valid' | 'removed' for summary card download
 
   const showToast = useCallback((message, type = "success") => {
     setToast({ message, type, key: Date.now() });
+  }, []);
+
+  // Restore PV and system files from cache on mount (after reload)
+  useEffect(() => {
+    try {
+      const pvCached = localStorage.getItem(CACHE_KEY_PV);
+      if (pvCached) {
+        const { name, content } = JSON.parse(pvCached);
+        if (name && content) {
+          const data = parseCSV(content);
+          if (data.headers.length > 0 && data.rows.length > 0) {
+            setPvFile(name);
+            setPvRawData({ headers: data.headers, rows: data.rows });
+          }
+        }
+      }
+      const sysCached = localStorage.getItem(CACHE_KEY_SYSTEM);
+      if (sysCached) {
+        const { name, content } = JSON.parse(sysCached);
+        if (name && content) {
+          const parsed = parseJSON(content);
+          if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+            setSysFile(name);
+            setSysData(parsed);
+          }
+        }
+      }
+    } catch (_) {
+      // Ignore cache parse errors
+    }
   }, []);
 
   const handlePvUpload = useCallback(
@@ -1548,6 +2338,11 @@ export default function DataFilteringPage() {
       }
       setPvFile(file.name);
       setPvRawData({ headers: data.headers, rows: data.rows });
+      try {
+        localStorage.setItem(CACHE_KEY_PV, JSON.stringify({ name: file.name, content: text }));
+      } catch (_) {
+        // Quota or other; ignore
+      }
       showToast(`PV data loaded — ${data.rows.length} rows, ${data.headers.length} columns`);
     },
     [showToast]
@@ -1569,6 +2364,16 @@ export default function DataFilteringPage() {
     () => (pvData ? filterRowsByDateRange(pvData.headers, pvData.rows, dateFrom, dateTo) : []),
     [pvData, dateFrom, dateTo]
   );
+
+  const comparisonData = useMemo(() => {
+    if (!pvData?.headers?.length || !pvFilteredRows.length || !sysData) return null;
+    return computePdcComparison(pvData.headers, pvFilteredRows, sysData, lossFactor);
+  }, [pvData, pvFilteredRows, sysData, lossFactor]);
+
+  const filterResult = useMemo(() => {
+    if (!comparisonData || comparisonData.length === 0) return null;
+    return pvwattsFilterJS(comparisonData, filterThreshold);
+  }, [comparisonData, filterThreshold]);
 
   // Default date range to start and end of loaded PV data
   useEffect(() => {
@@ -1598,6 +2403,11 @@ export default function DataFilteringPage() {
       }
       setSysFile(name);
       setSysData(parsed);
+      try {
+        localStorage.setItem(CACHE_KEY_SYSTEM, JSON.stringify({ name, content: text }));
+      } catch (_) {
+        // Quota or other; ignore
+      }
       showToast(`System info loaded — ${Object.keys(parsed).length} fields`);
     },
     [showToast]
@@ -1721,6 +2531,9 @@ export default function DataFilteringPage() {
             onClear={() => {
               setPvFile(null);
               setPvRawData(null);
+              try {
+                localStorage.removeItem(CACHE_KEY_PV);
+              } catch (_) {}
             }}
             onError={(msg) => showToast(msg, "error")}
           />
@@ -1735,6 +2548,9 @@ export default function DataFilteringPage() {
             onClear={() => {
               setSysFile(null);
               setSysData(null);
+              try {
+                localStorage.removeItem(CACHE_KEY_SYSTEM);
+              } catch (_) {}
             }}
             onError={(msg) => showToast(msg, "error")}
           />
@@ -1808,6 +2624,410 @@ export default function DataFilteringPage() {
                 resampledStepMinutes={pvData.resampledStepMinutes}
               />
               <FilterCSVChart title="PV & Weather Data" color={O} headers={pvData.headers} rows={pvFilteredRows} defaultYHeader="P_DC" />
+
+              {/* Data Filtering card */}
+              <div
+                style={{
+                  background: "#ffffff",
+                  borderRadius: 16,
+                  border: "1px solid #E2E8F0",
+                  boxShadow: "0 18px 45px rgba(15, 23, 42, 0.10)",
+                  padding: "16px 18px 20px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 14,
+                  marginTop: 20,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 2 }}>
+                  <div
+                    style={{
+                      width: 30,
+                      height: 30,
+                      borderRadius: 10,
+                      background: `${DF}12`,
+                      border: `1px solid ${DF}35`,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                    }}
+                  >
+                    <FilterAltOutlined sx={{ fontSize: 18, color: DF }} />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column" }}>
+                    <span style={{ fontFamily: FONT, fontSize: 14, fontWeight: 800, color: "#0F172A" }}>
+                      Data Filtering
+                    </span>
+                    <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>
+                      Filter and clean PV and weather time series for analysis.
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* PVWatts equation card: equation left, loss factor input right */}
+              {pvData && sysData && (
+                <div
+                  style={{
+                    background: "#ffffff",
+                    borderRadius: 16,
+                    border: "1px solid #E2E8F0",
+                    boxShadow: "0 18px 45px rgba(15, 23, 42, 0.10)",
+                    padding: "16px 20px",
+                    marginTop: 20,
+                    display: "flex",
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 24,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div style={{ flex: "1 1 280px", fontFamily: FONT, fontSize: 12, color: "#334155", lineHeight: 1.6 }}>
+                    <div style={{ fontWeight: 700, color: "#0F172A", marginBottom: 6, fontSize: 12 }}>PVWatts formula</div>
+                    <div style={{ color: "#64748B", fontSize: 11 }}>
+                      PVWatts = GTI × tot_power × (1 + (temp_coef/100) × (Tcell − 25)) ×{" "}
+                      <span style={{ color: "#0F172A", fontWeight: 600 }}>loss_factor</span>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 16, flexShrink: 0, flexWrap: "wrap" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <label style={{ fontFamily: FONT, fontSize: 12, fontWeight: 600, color: "#64748B" }} htmlFor="loss-factor-input">
+                        loss_factor
+                      </label>
+                      <input
+                        id="loss-factor-input"
+                        type="number"
+                        min={0}
+                        max={2}
+                        step={0.01}
+                        value={lossFactor}
+                        onChange={(e) => setLossFactor(e.target.value)}
+                        style={{
+                          width: 72,
+                          padding: "8px 10px",
+                          borderRadius: 10,
+                          border: "1.5px solid #E2E8F0",
+                          fontFamily: MONO,
+                          fontSize: 14,
+                          color: "#0F172A",
+                          background: "#FAFBFC",
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <PdcComparisonChart comparisonData={comparisonData} />
+
+              {/* Filter formula logic card (above Measured vs Calculated graph) */}
+              {pvData && sysData && (
+                <div
+                  style={{
+                    background: "#ffffff",
+                    borderRadius: 16,
+                    border: "1px solid #E2E8F0",
+                    boxShadow: "0 18px 45px rgba(15, 23, 42, 0.10)",
+                    padding: "16px 20px",
+                    marginTop: 20,
+                    display: "flex",
+                    flexDirection: "row",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 24,
+                    flexWrap: "wrap",
+                  }}
+                >
+                  <div style={{ flex: "1 1 280px", fontFamily: FONT, fontSize: 12, color: "#334155", lineHeight: 1.6 }}>
+                    <div style={{ fontWeight: 700, color: "#0F172A", marginBottom: 6, fontSize: 12 }}>Filter logic</div>
+                    <div style={{ color: "#64748B", fontSize: 11 }}>
+                      <code style={{ display: "block", marginBottom: 4, fontFamily: FONT, fontSize: 11 }}>
+                        df['rel_error'] = abs((df['P_DC'] − df['PVWatts']) / df['P_DC'])
+                      </code>
+                      <code style={{ display: "block", fontFamily: FONT, fontSize: 11 }}>
+                        df['status'] = df['rel_error'].apply(lambda x: 'valid' if x {"<="} threshold else 'removed')
+                      </code>
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                    <label style={{ fontFamily: FONT, fontSize: 12, fontWeight: 600, color: "#64748B" }} htmlFor="filter-threshold-input">
+                      filter threshold (rel. error)
+                    </label>
+                    <input
+                      id="filter-threshold-input"
+                      type="number"
+                      min={0}
+                      max={2}
+                      step={0.05}
+                      value={filterThreshold}
+                      onChange={(e) => setFilterThreshold(e.target.value)}
+                      style={{
+                        width: 72,
+                        padding: "8px 10px",
+                        borderRadius: 10,
+                        border: "1.5px solid #E2E8F0",
+                        fontFamily: MONO,
+                        fontSize: 14,
+                        color: "#0F172A",
+                        background: "#FAFBFC",
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              <PdcFilterChart
+                comparisonData={comparisonData}
+                filterResult={filterResult}
+                resampleMinutes={resamplingStepMinutes}
+              />
+
+              {/* P_DC vs PVWatts correlation scatter (above Labeled data table) */}
+              {filterResult?.labeled?.length > 0 && (
+                <PdcPvWattsCorrelationChart data={filterResult.labeled} />
+              )}
+
+              {/* Labeled data table (labeled_df: valid + removed with status) */}
+              {filterResult?.labeled?.length > 0 && (
+                <FilteredDataTable data={filterResult.labeled} title="Labeled data" />
+              )}
+
+              {/* Filtered data summary card (bottom) */}
+              {filterResult?.labeled?.length > 0 && (() => {
+                const labeled = filterResult.labeled;
+                const validCount = labeled.filter((d) => d.status === "valid").length;
+                const removedCount = labeled.filter((d) => d.status === "removed").length;
+                const validPct = labeled.length > 0 ? ((validCount / labeled.length) * 100).toFixed(1) : "0";
+                const removedPct = labeled.length > 0 ? ((removedCount / labeled.length) * 100).toFixed(1) : "0";
+                const computeR2 = (arr) => {
+                  const x = [];
+                  const y = [];
+                  for (const d of arr) {
+                    const gti = d.weather_GTI != null ? Number(d.weather_GTI) : NaN;
+                    const pdc = d.P_DC != null ? Number(d.P_DC) : NaN;
+                    if (Number.isFinite(gti) && Number.isFinite(pdc)) {
+                      x.push(gti);
+                      y.push(pdc);
+                    }
+                  }
+                  if (x.length < 2) return null;
+                  return linearRegression(x, y).r2;
+                };
+                const r2All = computeR2(labeled);
+                const r2Valid = computeR2(labeled.filter((d) => d.status === "valid"));
+                const timeRange = labeled.length > 0
+                  ? (() => {
+                      const times = labeled.map((d) => d.time).filter(Boolean);
+                      if (times.length === 0) return "—";
+                      const first = times[0];
+                      const last = times[times.length - 1];
+                      return `${first} → ${last}`;
+                    })()
+                  : "—";
+                const rowsToExport = downloadFilter === "all" ? labeled : labeled.filter((d) => d.status === downloadFilter);
+                const handleDownload = () => {
+                  const headers = ["time", "P_DC", "PVWatts", "weather_GTI", "rel_error", "status"];
+                  const escape = (v) => (v == null ? "" : String(v).includes(",") ? `"${String(v).replace(/"/g, '""')}"` : String(v));
+                  const line = (row) => headers.map((h) => escape(row[h])).join(",");
+                  const csv = [headers.join(","), ...rowsToExport.map(line)].join("\n");
+                  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+                  const url = URL.createObjectURL(blob);
+                  const a = document.createElement("a");
+                  a.href = url;
+                  a.download = `filtered_labeled_data_${downloadFilter}.csv`;
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  URL.revokeObjectURL(url);
+                };
+                return (
+                  <div
+                    style={{
+                      marginTop: 20,
+                      background: "#ffffff",
+                      borderRadius: 16,
+                      border: "1px solid #E2E8F0",
+                      boxShadow: "0 18px 45px rgba(15, 23, 42, 0.10)",
+                      padding: "14px 18px 16px 18px",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 14,
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <div
+                        style={{
+                          width: 26,
+                          height: 26,
+                          borderRadius: 9,
+                          background: `${DF}10`,
+                          border: `1px solid ${DF}26`,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <FilterAltOutlined sx={{ fontSize: 16, color: DF }} />
+                      </div>
+                      <span style={{ fontFamily: FONT, fontSize: 13, fontWeight: 700, color: "#0F172A" }}>
+                        Filtered data summary
+                      </span>
+                      <span style={{ fontFamily: FONT, fontSize: 11, color: "#64748B" }}>
+                        {labeled.length} labeled points
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "stretch", gap: 16, flexWrap: "wrap", width: "100%" }}>
+                        <div style={{ flex: "0 0 auto", width: 260, display: "flex", flexDirection: "column", minWidth: 0 }}>
+                          <span style={{ fontFamily: FONT, fontSize: 12, fontWeight: 700, color: "#0F172A", display: "block", marginBottom: 6 }}>
+                            Correlation R²
+                          </span>
+                          <div
+                            style={{
+                              background: "#fff",
+                              borderRadius: 12,
+                              border: "1px solid #E2E8F0",
+                              overflow: "hidden",
+                            }}
+                          >
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr auto", borderBottom: "1px solid #E2E8F0" }}>
+                              <div style={{ padding: "10px 14px", fontFamily: FONT, fontSize: 12, color: "#64748B", display: "flex", alignItems: "center", gap: 6 }}>
+                                <span>All</span>
+                              </div>
+                              <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+                                <span style={{ fontFamily: FONT, fontSize: 11, fontWeight: 700, color: "#1e40af", background: "#DBEAFE", padding: "4px 12px", borderRadius: 999 }}>
+                                  {r2All != null ? `${(r2All * 100).toFixed(1)}%` : "—"}
+                                </span>
+                              </div>
+                            </div>
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr auto" }}>
+                              <div style={{ padding: "10px 14px", fontFamily: FONT, fontSize: 12, color: "#64748B", display: "flex", alignItems: "center", gap: 6 }}>
+                                <span>Valid</span>
+                              </div>
+                              <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+                                <span style={{ fontFamily: FONT, fontSize: 11, fontWeight: 700, color: "#166534", background: "#E0FDC7", padding: "4px 12px", borderRadius: 999 }}>
+                                  {r2Valid != null ? `${(r2Valid * 100).toFixed(1)}%` : "—"}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div style={{ flex: "0 0 auto", width: 260, display: "flex", flexDirection: "column", minWidth: 0 }}>
+                          <span style={{ fontFamily: FONT, fontSize: 12, fontWeight: 700, color: "#0F172A", display: "block", marginBottom: 6 }}>
+                            Stats
+                          </span>
+                          <div
+                            style={{
+                              background: "#fff",
+                              borderRadius: 12,
+                              border: "1px solid #E2E8F0",
+                              overflow: "hidden",
+                            }}
+                          >
+                            <div style={{ display: "grid", gridTemplateColumns: "1fr auto", borderBottom: "1px solid #E2E8F0" }}>
+                              <div style={{ padding: "10px 14px", fontFamily: FONT, fontSize: 12, color: "#64748B", display: "flex", alignItems: "center", gap: 6 }}>
+                                <span>Valid</span>
+                              </div>
+                            <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+                              <span style={{ fontFamily: FONT, fontSize: 11, fontWeight: 700, color: "#166534", background: "#E0FDC7", padding: "4px 12px", borderRadius: 999 }}>
+                                {validCount} ({validPct}%)
+                              </span>
+                            </div>
+                          </div>
+                          <div style={{ display: "grid", gridTemplateColumns: "1fr auto" }}>
+                            <div style={{ padding: "10px 14px", fontFamily: FONT, fontSize: 12, color: "#64748B", display: "flex", alignItems: "center", gap: 6 }}>
+                              <span>Removed</span>
+                            </div>
+                            <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
+                              <span style={{ fontFamily: FONT, fontSize: 11, fontWeight: 700, color: "#7f1d1d", background: "#F0BFC2", padding: "4px 12px", borderRadius: 999 }}>
+                                {removedCount} ({removedPct}%)
+                              </span>
+                            </div>
+                          </div>
+                          </div>
+                        </div>
+                        <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0 }}>
+                          <span style={{ fontFamily: FONT, fontSize: 12, fontWeight: 700, color: "#0F172A", display: "block", marginBottom: 6 }}>
+                            Data range
+                          </span>
+                          <div
+                            style={{
+                              flex: 1,
+                              background: "#fff",
+                              borderRadius: 12,
+                              border: "1px solid #E2E8F0",
+                              padding: "10px 14px",
+                              fontFamily: MONO,
+                              fontSize: 10,
+                              color: "#64748B",
+                              lineHeight: 1.6,
+                              overflowX: "auto",
+                              minWidth: 0,
+                            }}
+                          >
+                            <div style={{ whiteSpace: "nowrap" }}>Labeled data: {timeRange}</div>
+                            <div style={{ whiteSpace: "nowrap" }}>Threshold (rel. error): {filterThreshold}</div>
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", justifyContent: "center", gap: 10, flexShrink: 0, alignSelf: "center" }}>
+                          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                            {[
+                              { opt: "all", color: B },
+                              { opt: "valid", color: Y },
+                              { opt: "removed", color: DF },
+                            ].map(({ opt, color }) => (
+                              <button
+                                key={opt}
+                                type="button"
+                                onClick={() => setDownloadFilter(opt)}
+                                style={{
+                                  padding: "4px 10px",
+                                  border: `1px solid ${downloadFilter === opt ? color : "#E2E8F0"}`,
+                                  borderRadius: 8,
+                                  background: downloadFilter === opt ? `${color}14` : "#fff",
+                                  color: downloadFilter === opt ? color : "#64748B",
+                                  fontFamily: FONT,
+                                  fontSize: 11,
+                                  fontWeight: 600,
+                                  cursor: "pointer",
+                                  textTransform: "capitalize",
+                                }}
+                              >
+                                {opt}
+                              </button>
+                            ))}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={handleDownload}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 5,
+                              padding: "5px 14px",
+                              borderRadius: 8,
+                              background: "#1F2937",
+                              color: "#fff",
+                              border: "none",
+                              cursor: "pointer",
+                              fontSize: 10,
+                              fontWeight: 600,
+                              fontFamily: FONT,
+                              letterSpacing: ".03em",
+                              transition: "background .15s",
+                              whiteSpace: "nowrap",
+                            }}
+                            onMouseEnter={(e) => (e.currentTarget.style.background = "#374151")}
+                            onMouseLeave={(e) => (e.currentTarget.style.background = "#1F2937")}
+                          >
+                            <FileDownloadOutlined style={{ fontSize: 14 }} />
+                            Download Filtered Data
+                          </button>
+                        </div>
+                      </div>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         )}

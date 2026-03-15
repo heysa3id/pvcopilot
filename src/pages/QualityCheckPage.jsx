@@ -2102,7 +2102,7 @@ function DateFilterBar({ dateFrom, dateTo, onDateFromChange, onDateToChange, onC
 const thStyle = {
   padding: "10px 14px", textAlign: "left", fontWeight: 700,
   color: "#64748B", background: "#F8FAFC", borderBottom: "2px solid #E2E8F0",
-  whiteSpace: "nowrap", position: "sticky", top: 0,
+  whiteSpace: "nowrap", position: "sticky", top: 0, zIndex: 2,
 };
 const tdStyle = {
   padding: "8px 14px", borderBottom: "1px solid #F1F5F9",
@@ -3102,7 +3102,7 @@ export default function QualityCheckPage() {
                                 borderBottom: "1px solid #E2E8F0",
                               }}>
                                 <div style={{ padding: "10px 14px", fontFamily: FONT, fontSize: 12, color: "#64748B", display: "flex", alignItems: "center", gap: 6 }}>
-                                  <span>Correlation before</span>
+                                  <span>Correlation R² before</span>
                                 </div>
                                 <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
                                   <span style={{
@@ -3123,7 +3123,7 @@ export default function QualityCheckPage() {
                                 gridTemplateColumns: "1fr auto",
                               }}>
                                 <div style={{ padding: "10px 14px", fontFamily: FONT, fontSize: 12, color: "#64748B", display: "flex", alignItems: "center", gap: 6 }}>
-                                  <span>Correlation after</span>
+                                  <span>Correlation R²after</span>
                                 </div>
                                 <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
                                   <span style={{

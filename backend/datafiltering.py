@@ -1,7 +1,9 @@
 """
-Data filtering: compute cell temperature (Tcell) and theoretical DC power (P_DC_calculee)
+Data filtering: compute cell temperature (Tcell) and theoretical DC power (PVWatts)
 from weather/PV data using parameters from system_info.json.
 """
+
+from __future__ import annotations
 
 import json
 import os
@@ -65,12 +67,17 @@ def load_system_params(path: str) -> dict:
             out[key] = float(config[key])
         except (TypeError, ValueError) as e:
             raise ValueError(f"Invalid numeric value for '{key}': {config[key]}") from e
+    # Optional loss factor (default 0.97) used in PVWatts formula
+    try:
+        out["loss_factor"] = float(config.get("loss_factor", 0.97))
+    except (TypeError, ValueError):
+        out["loss_factor"] = 0.97
     return out
 
 
 def apply_temperature_and_power(data: pd.DataFrame, system_info_path: str) -> pd.DataFrame:
     """
-    Compute Tcell and P_DC_calculee from weather/PV columns using parameters
+    Compute Tcell and PVWatts from weather/PV columns using parameters
     read from system_info.json.
 
     Temperature module:
@@ -78,8 +85,8 @@ def apply_temperature_and_power(data: pd.DataFrame, system_info_path: str) -> pd
                 + (GTI * delta / 1000)
 
     Power module:
-        P_DC_calculee = (GTI * tot_power * (1 + (temp_coef/100) * (Tcell - 25)) / 1000 * 1000) * 0.97
-                      = GTI * tot_power * (1 + (temp_coef/100) * (Tcell - 25)) * 0.97
+        PVWatts = GTI * tot_power * (1 + (temp_coef/100) * (Tcell - 25)) * loss_factor
+        (loss_factor default 0.97, configurable in system config)
 
     Parameters
     ----------
@@ -93,7 +100,7 @@ def apply_temperature_and_power(data: pd.DataFrame, system_info_path: str) -> pd
     Returns
     -------
     pd.DataFrame
-        Copy of data with added columns 'Tcell' and 'P_DC_calculee'.
+        Copy of data with added columns 'Tcell' and 'PVWatts'.
     """
     data = data.copy()
     system = load_system_params(system_info_path)
@@ -114,6 +121,7 @@ def apply_temperature_and_power(data: pd.DataFrame, system_info_path: str) -> pd
     delta = system["delta"]
     tot_power = system["tot_power"]
     temp_coef = system["temp_coef"]
+    loss_factor = system["loss_factor"]
 
     # Temperature module
     data["Tcell"] = (
@@ -122,14 +130,71 @@ def apply_temperature_and_power(data: pd.DataFrame, system_info_path: str) -> pd
         + (data[gti_col] * delta / 1000)
     )
 
-    # Power module: ((GTI * tot_power * (1 + (temp_coef/100)*(Tcell-25))/1000)*1000)*0.97
-    data["P_DC_calculee"] = (
-        (
-            (data[gti_col] * tot_power * (1 + (temp_coef * 1e-2) * (data["Tcell"] - 25)))
-            / 1000
-            * 1000
-        )
-        * 0.97
-    )
+    # Power module: GTI * tot_power * (1 + (temp_coef/100)*(Tcell-25)) * loss_factor
+    data["PVWatts"] = (
+        data[gti_col] * tot_power * (1 + (temp_coef * 1e-2) * (data["Tcell"] - 25))
+    ) * loss_factor
 
     return data
+
+
+def pvwatts_filter(
+    data: pd.DataFrame,
+    pvwatts_column: str = "PVWatts",
+    threshold: float = 0.5,
+    resample_interval: str | None = "10T",
+) -> tuple[pd.DataFrame, pd.DataFrame, list]:
+    """
+    Filters out rows with high deviation from PVWatts estimates and labels removed rows.
+    Optionally resamples data over a defined time interval.
+
+    Parameters
+    ----------
+    data : pd.DataFrame
+        Input DataFrame with at least ['time', 'P_DC', pvwatts_column].
+    pvwatts_column : str
+        Name of the column containing PVWatts estimates (default 'PVWatts').
+    threshold : float
+        Acceptable relative deviation from PVWatts (e.g. 0.5 = ±50%).
+    resample_interval : str or None
+        Resampling frequency string (e.g. '10T', '1H'). None to skip resampling.
+
+    Returns
+    -------
+    labeled_data : pd.DataFrame
+        Original/resampled data with 'status' column ('valid' or 'removed').
+    filtered_data : pd.DataFrame
+        Only rows where status == 'valid'.
+    removed_times : list
+        List of removed timestamps.
+    """
+    df = data.copy()
+
+    # Clean known extra columns if they exist
+    df = df.drop(columns=["level_0", "index"], errors="ignore")
+
+    # Ensure 'time' is datetime
+    df["time"] = pd.to_datetime(df["time"], errors="coerce")
+    df = df.dropna(subset=["time"])
+
+    if resample_interval:
+        df = df.set_index("time")
+        numeric_cols = df.select_dtypes(include=[np.number]).columns
+        df = df[numeric_cols].resample(resample_interval).mean()
+        df = df.reset_index()
+
+    df["hour"] = df["time"].dt.hour
+
+    # Drop rows with missing or invalid PVWatts
+    df = df[df[pvwatts_column] > 0]
+    df = df.dropna(subset=["P_DC", pvwatts_column])
+
+    # Relative error vs PVWatts (denominator = PVWatts to avoid div by zero when P_DC=0)
+    df["rel_error"] = np.abs((df["P_DC"] - df[pvwatts_column]) / df[pvwatts_column])
+    df["status"] = df["rel_error"].apply(lambda x: "valid" if x <= threshold else "removed")
+
+    filtered_data = df[df["status"] == "valid"].drop(columns=["hour", "rel_error"])
+    removed_times = df[df["status"] == "removed"]["time"].tolist()
+    labeled_data = df.drop(columns=["hour", "rel_error"])
+
+    return labeled_data, filtered_data, removed_times
