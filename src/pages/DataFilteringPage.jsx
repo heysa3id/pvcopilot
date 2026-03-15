@@ -89,7 +89,7 @@ function getColumnIndex(headers, candidates) {
  * Compute Tcell and PVWatts for each row (same formulas as backend datafiltering.py).
  * config: { coef_a, coef_b, delta, tot_power, temp_coef [, loss_factor ] } (numbers).
  * lossFactor: optional multiplier at end of PVWatts formula (default 0.97).
- * Returns array of { time, P_DC, PVWatts } or null if required columns/config missing.
+ * Returns array of objects: all original row columns (by header name) plus PVWatts.
  */
 function computePdcComparison(headers, rows, config, lossFactor = 0.97) {
   if (!headers?.length || !rows?.length || !config || typeof config !== "object") return null;
@@ -120,12 +120,13 @@ function computePdcComparison(headers, rows, config, lossFactor = 0.97) {
     if (!Number.isFinite(gti) || !Number.isFinite(airTemp) || !Number.isFinite(wind)) continue;
     const tcell = airTemp + (gti * Math.exp(coef_a + coef_b * wind)) + (gti * delta / 1000);
     const pvWatts = (gti * tot_power * (1 + (temp_coef * 1e-2) * (tcell - 25))) * factor;
-    result.push({
-      time: row[timeIdx],
-      P_DC: Number.isFinite(pdc) ? pdc : null,
-      PVWatts: Number.isFinite(pvWatts) ? pvWatts : null,
-      weather_GTI: Number.isFinite(gti) ? gti : null,
-    });
+    const rowObj = {};
+    for (let i = 0; i < headers.length; i++) rowObj[headers[i]] = row[i];
+    rowObj.time = row[timeIdx];
+    rowObj.P_DC = Number.isFinite(pdc) ? pdc : null;
+    rowObj.weather_GTI = Number.isFinite(gti) ? gti : null;
+    rowObj.PVWatts = Number.isFinite(pvWatts) ? pvWatts : null;
+    result.push(rowObj);
   }
   return result.length ? result : null;
 }
@@ -2126,7 +2127,7 @@ function FilterColumnMultiSelect({ options, selected, onChange, label }) {
 }
 
 // ── PV Data chart with dual Y-axis (Data Filtering only) ──
-function FilterCSVChart({ title, color, headers, rows, defaultYHeader }) {
+function FilterCSVChart({ title, color, headers, rows, defaultYHeader, defaultRightYHeader }) {
   const [expanded, setExpanded] = useState(true);
   const safeHeaders = Array.isArray(headers) ? headers : [];
   const safeRows = Array.isArray(rows) ? rows : [];
@@ -2157,8 +2158,16 @@ function FilterCSVChart({ title, color, headers, rows, defaultYHeader }) {
     return [plottableCols[0].index];
   }, [safeHeaders, defaultYHeader, plottableCols]);
 
+  const defaultRightIdx = useMemo(() => {
+    if (!defaultRightYHeader || plottableCols.length === 0) return [];
+    const target = String(defaultRightYHeader).trim().toLowerCase();
+    const idx = safeHeaders.findIndex((h, i) => i > 0 && String(h ?? "").trim().toLowerCase() === target);
+    if (idx > 0 && plottableCols.some((c) => c.index === idx)) return [idx];
+    return [];
+  }, [safeHeaders, defaultRightYHeader, plottableCols]);
+
   const [selectedIndicesLeft, setSelectedIndicesLeft] = useState(() => defaultLeftIdx);
-  const [selectedIndicesRight, setSelectedIndicesRight] = useState(() => []);
+  const [selectedIndicesRight, setSelectedIndicesRight] = useState(() => defaultRightIdx);
 
   const xValues = useMemo(() => {
     if (safeRows.length === 0) return [];
@@ -2623,7 +2632,7 @@ export default function DataFilteringPage() {
                 originalRows={pvData.originalRows}
                 resampledStepMinutes={pvData.resampledStepMinutes}
               />
-              <FilterCSVChart title="PV & Weather Data" color={O} headers={pvData.headers} rows={pvFilteredRows} defaultYHeader="P_DC" />
+              <FilterCSVChart title="PV & Weather Data" color={O} headers={pvData.headers} rows={pvFilteredRows} defaultYHeader="P_DC" defaultRightYHeader="weather_GTI" />
 
               {/* Data Filtering card */}
               <div
@@ -2754,25 +2763,35 @@ export default function DataFilteringPage() {
                     <label style={{ fontFamily: FONT, fontSize: 12, fontWeight: 600, color: "#64748B" }} htmlFor="filter-threshold-input">
                       filter threshold (rel. error)
                     </label>
-                    <input
-                      id="filter-threshold-input"
-                      type="number"
-                      min={0}
-                      max={2}
-                      step={0.05}
-                      value={filterThreshold}
-                      onChange={(e) => setFilterThreshold(e.target.value)}
-                      style={{
-                        width: 72,
-                        padding: "8px 10px",
-                        borderRadius: 10,
-                        border: "1.5px solid #E2E8F0",
-                        fontFamily: MONO,
-                        fontSize: 14,
-                        color: "#0F172A",
-                        background: "#FAFBFC",
-                      }}
-                    />
+                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <input
+                        id="filter-threshold-input"
+                        type="number"
+                        min={0}
+                        max={200}
+                        step={5}
+                        value={Number.isFinite(Number(filterThreshold)) ? Math.round(Number(filterThreshold) * 100) : ""}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          if (v === "") setFilterThreshold("");
+                          else {
+                            const pct = Number(v);
+                            if (Number.isFinite(pct)) setFilterThreshold(String(pct / 100));
+                          }
+                        }}
+                        style={{
+                          width: 56,
+                          padding: "8px 10px",
+                          borderRadius: 10,
+                          border: "1.5px solid #E2E8F0",
+                          fontFamily: MONO,
+                          fontSize: 14,
+                          color: "#0F172A",
+                          background: "#FAFBFC",
+                        }}
+                      />
+                      <span style={{ fontFamily: FONT, fontSize: 14, color: "#64748B" }}>%</span>
+                    </div>
                   </div>
                 </div>
               )}
@@ -2826,11 +2845,15 @@ export default function DataFilteringPage() {
                     })()
                   : "—";
                 const rowsToExport = downloadFilter === "all" ? labeled : labeled.filter((d) => d.status === downloadFilter);
+                const exportHeaders = (() => {
+                  const base = Array.isArray(pvData?.headers) ? pvData.headers : [];
+                  const extra = ["PVWatts", "rel_error", "status"].filter((h) => !base.includes(h));
+                  return [...base, ...extra];
+                })();
                 const handleDownload = () => {
-                  const headers = ["time", "P_DC", "PVWatts", "weather_GTI", "rel_error", "status"];
                   const escape = (v) => (v == null ? "" : String(v).includes(",") ? `"${String(v).replace(/"/g, '""')}"` : String(v));
-                  const line = (row) => headers.map((h) => escape(row[h])).join(",");
-                  const csv = [headers.join(","), ...rowsToExport.map(line)].join("\n");
+                  const line = (row) => exportHeaders.map((h) => escape(row[h])).join(",");
+                  const csv = [exportHeaders.join(","), ...rowsToExport.map(line)].join("\n");
                   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement("a");
@@ -2966,7 +2989,7 @@ export default function DataFilteringPage() {
                             }}
                           >
                             <div style={{ whiteSpace: "nowrap" }}>Labeled data: {timeRange}</div>
-                            <div style={{ whiteSpace: "nowrap" }}>Threshold (rel. error): {filterThreshold}</div>
+                            <div style={{ whiteSpace: "nowrap" }}>Threshold (rel. error): {Number.isFinite(Number(filterThreshold)) ? `${(Number(filterThreshold) * 100).toFixed(0)}%` : filterThreshold || "—"}</div>
                           </div>
                         </div>
                         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", justifyContent: "center", gap: 10, flexShrink: 0, alignSelf: "center" }}>
