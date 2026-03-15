@@ -343,7 +343,7 @@ async function readFileAsText(file) {
 }
 
 // ── Upload Zone ──────────────────────────────────────────────────────────────
-function UploadZone({ label, icon, accept, color, file, onLoad, onFileUpload, onClear, onError, templateFile }) {
+function UploadZone({ label, icon, accept, color, file, onLoad, onFileUpload, onClear, onError, onDownloadSuccess, templateFile }) {
   const [drag, setDrag] = useState(false);
   const [loading, setLoading] = useState(false);
   const inputId = useRef(`upload-${Math.random().toString(36).slice(2)}`).current;
@@ -371,6 +371,30 @@ function UploadZone({ label, icon, accept, color, file, onLoad, onFileUpload, on
       setLoading(false);
     }
   }, [templateFile, onFileUpload, onLoad, onError]);
+
+  const downloadTemplate = useCallback(async (e) => {
+    if (e) e.preventDefault();
+    if (!templateFile) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/data_template/${templateFile}`);
+      if (!res.ok) throw new Error(`Template not found: ${templateFile}`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = templateFile;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      onDownloadSuccess?.("Template downloaded successfully");
+    } catch (err) {
+      onError(err.message || "Failed to download template");
+    } finally {
+      setLoading(false);
+    }
+  }, [templateFile, onError, onDownloadSuccess]);
 
   const processFile = useCallback((f) => {
     if (!f) return;
@@ -453,17 +477,35 @@ function UploadZone({ label, icon, accept, color, file, onLoad, onFileUpload, on
               {file}
             </span>
           </div>
-          <button
-            onClick={onClear}
-            style={{
-              background: "none", border: "none", cursor: "pointer",
-              color: "#94a3b8", padding: 4, borderRadius: 6, display: "flex",
-            }}
-            onMouseEnter={e => e.currentTarget.style.color = "#ef4444"}
-            onMouseLeave={e => e.currentTarget.style.color = "#94a3b8"}
-          >
-            <DeleteOutline sx={{ fontSize: 18 }} />
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            {templateFile && (
+              <button
+                type="button"
+                onClick={downloadTemplate}
+                disabled={loading}
+                style={{
+                  background: "none", border: "none", cursor: loading ? "not-allowed" : "pointer",
+                  color: "#94a3b8", padding: 4, borderRadius: 6, display: "flex",
+                }}
+                onMouseEnter={e => { if (!loading) e.currentTarget.style.color = color; }}
+                onMouseLeave={e => (e.currentTarget.style.color = "#94a3b8")}
+                aria-label="Download template"
+              >
+                <FileDownloadOutlinedIcon sx={{ fontSize: 18 }} />
+              </button>
+            )}
+            <button
+              onClick={onClear}
+              style={{
+                background: "none", border: "none", cursor: "pointer",
+                color: "#94a3b8", padding: 4, borderRadius: 6, display: "flex",
+              }}
+              onMouseEnter={e => e.currentTarget.style.color = "#ef4444"}
+              onMouseLeave={e => e.currentTarget.style.color = "#94a3b8"}
+            >
+              <DeleteOutline sx={{ fontSize: 18 }} />
+            </button>
+          </div>
         </div>
       ) : (
         <label htmlFor={inputId} style={{ cursor: "pointer", display: "block" }}>
@@ -2540,6 +2582,7 @@ export default function QualityCheckPage() {
               saveCache(CACHE_PV, null);
             }}
             onError={(msg) => showToast(msg, "error")}
+            onDownloadSuccess={(msg) => showToast(msg, "success")}
           />
           <UploadZone
             label="Weather Data (CSV)"
@@ -2582,9 +2625,10 @@ export default function QualityCheckPage() {
               saveCache(CACHE_WEATHER, null);
             }}
             onError={(msg) => showToast(msg, "error")}
+            onDownloadSuccess={(msg) => showToast(msg, "success")}
           />
           <UploadZone
-            label="System Info (JSON)"
+            label="System Info (.json)"
             icon={<SettingsOutlined sx={{ fontSize: 24, color: O }} />}
             accept=".json"
             color={O}
@@ -2609,6 +2653,7 @@ export default function QualityCheckPage() {
               saveCache(CACHE_SYS, null);
             }}
             onError={(msg) => showToast(msg, "error")}
+            onDownloadSuccess={(msg) => showToast(msg, "success")}
           />
         </div>
 

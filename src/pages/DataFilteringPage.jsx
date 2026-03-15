@@ -15,6 +15,7 @@ import ChevronLeft from "@mui/icons-material/ChevronLeft";
 import ChevronRight from "@mui/icons-material/ChevronRight";
 import CloseOutlined from "@mui/icons-material/CloseOutlined";
 import FileDownloadOutlined from "@mui/icons-material/FileDownloadOutlined";
+import HelpOutline from "@mui/icons-material/HelpOutline";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -387,6 +388,7 @@ function FilterUploadZone({
   onFileUpload,
   onClear,
   onError,
+  onDownloadSuccess,
   templateFile,
 }) {
   const [drag, setDrag] = useState(false);
@@ -420,6 +422,33 @@ function FilterUploadZone({
       }
     },
     [templateFile, onFileUpload, onLoad, onError]
+  );
+
+  const downloadTemplate = useCallback(
+    async (e) => {
+      if (e) e.preventDefault();
+      if (!templateFile) return;
+      setLoading(true);
+      try {
+        const res = await fetch(`/data_template/${templateFile}`);
+        if (!res.ok) throw new Error(`Template not found: ${templateFile}`);
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = templateFile;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        onDownloadSuccess?.("Template downloaded successfully");
+      } catch (err) {
+        onError(err.message || "Failed to download template");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [templateFile, onError, onDownloadSuccess]
   );
 
   const processFile = useCallback(
@@ -511,23 +540,46 @@ function FilterUploadZone({
               {file}
             </span>
           </div>
-          <button
-            type="button"
-            onClick={onClear}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              color: "#94a3b8",
-              padding: 4,
-              borderRadius: 6,
-              display: "flex",
-            }}
-            onMouseEnter={(e) => (e.currentTarget.style.color = "#ef4444")}
-            onMouseLeave={(e) => (e.currentTarget.style.color = "#94a3b8")}
-          >
-            <DeleteOutline sx={{ fontSize: 18 }} />
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            {templateFile && (
+              <button
+                type="button"
+                onClick={downloadTemplate}
+                disabled={loading}
+                style={{
+                  background: "none",
+                  border: "none",
+                  cursor: loading ? "not-allowed" : "pointer",
+                  color: "#94a3b8",
+                  padding: 4,
+                  borderRadius: 6,
+                  display: "flex",
+                }}
+                onMouseEnter={(e) => { if (!loading) e.currentTarget.style.color = color; }}
+                onMouseLeave={(e) => (e.currentTarget.style.color = "#94a3b8")}
+                aria-label="Download template"
+              >
+                <FileDownloadOutlined sx={{ fontSize: 18 }} />
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={onClear}
+              style={{
+                background: "none",
+                border: "none",
+                cursor: "pointer",
+                color: "#94a3b8",
+                padding: 4,
+                borderRadius: 6,
+                display: "flex",
+              }}
+              onMouseEnter={(e) => (e.currentTarget.style.color = "#ef4444")}
+              onMouseLeave={(e) => (e.currentTarget.style.color = "#94a3b8")}
+            >
+              <DeleteOutline sx={{ fontSize: 18 }} />
+            </button>
+          </div>
         </div>
       ) : (
         <label htmlFor={inputId} style={{ cursor: "pointer", display: "block" }}>
@@ -1809,7 +1861,7 @@ function PdcPvWattsCorrelationChart({ data }) {
 }
 
 // ── Labeled data table (labeled_df) below Measured Vs Calculated Power ──
-function FilteredDataTable({ data, title = "Labeled data" }) {
+function FilteredDataTable({ data, title = "Filtered Data" }) {
   const [expanded, setExpanded] = useState(false);
   const [statusFilterOpen, setStatusFilterOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState("all"); // 'all' | 'valid' | 'removed'
@@ -2302,6 +2354,16 @@ export default function DataFilteringPage() {
   const [lossFactor, setLossFactor] = useState("0.97");
   const [filterThreshold, setFilterThreshold] = useState("0.2");
   const [downloadFilter, setDownloadFilter] = useState("all"); // 'all' | 'valid' | 'removed' for summary card download
+  const [thresholdHelpOpen, setThresholdHelpOpen] = useState(false);
+  const thresholdHelpRef = useRef(null);
+  const thresholdHelpTriggerRef = useRef(null);
+  const [lossFactorHelpOpen, setLossFactorHelpOpen] = useState(false);
+  const lossFactorHelpRef = useRef(null);
+  const lossFactorHelpTriggerRef = useRef(null);
+  const [pvwattsFormulaHelpOpen, setPvwattsFormulaHelpOpen] = useState(false);
+  const pvwattsFormulaHelpRef = useRef(null);
+  const pvwattsFormulaHelpTriggerRef = useRef(null);
+  const [filterOverviewOpen, setFilterOverviewOpen] = useState(false);
 
   const showToast = useCallback((message, type = "success") => {
     setToast({ message, type, key: Date.now() });
@@ -2399,6 +2461,36 @@ export default function DataFilteringPage() {
     setDateTo(toYMD(new Date(maxMs)));
   }, [pvRawData]);
 
+  useEffect(() => {
+    if (!thresholdHelpOpen) return;
+    const onDown = (e) => {
+      if (thresholdHelpTriggerRef.current?.contains(e.target) || thresholdHelpRef.current?.contains(e.target)) return;
+      setThresholdHelpOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [thresholdHelpOpen]);
+
+  useEffect(() => {
+    if (!lossFactorHelpOpen) return;
+    const onDown = (e) => {
+      if (lossFactorHelpTriggerRef.current?.contains(e.target) || lossFactorHelpRef.current?.contains(e.target)) return;
+      setLossFactorHelpOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [lossFactorHelpOpen]);
+
+  useEffect(() => {
+    if (!pvwattsFormulaHelpOpen) return;
+    const onDown = (e) => {
+      if (pvwattsFormulaHelpTriggerRef.current?.contains(e.target) || pvwattsFormulaHelpRef.current?.contains(e.target)) return;
+      setPvwattsFormulaHelpOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [pvwattsFormulaHelpOpen]);
+
   const handleSysLoad = useCallback(
     (name, text) => {
       const parsed = parseJSON(text);
@@ -2441,7 +2533,7 @@ export default function DataFilteringPage() {
       )}
 
       <div style={{ maxWidth: 1200, margin: "0 auto" }}>
-        {/* ──────────── Data Filtering overview ──────────── */}
+        {/* ──────────── Data Filtering (collapsible) ──────────── */}
         <div
           style={{
             background: "#FFFFFF",
@@ -2452,31 +2544,93 @@ export default function DataFilteringPage() {
             marginBottom: 20,
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <div
-              style={{
-                width: 44,
-                height: 44,
-                borderRadius: 12,
-                background: `${DF}14`,
-                border: `1.5px solid ${DF}30`,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0,
-              }}
-            >
-              <FilterAltOutlined sx={{ fontSize: 24, color: DF }} />
+          <div
+            style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", cursor: "pointer", gap: 16 }}
+            onClick={() => setFilterOverviewOpen((o) => !o)}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+              <div
+                style={{
+                  width: 44,
+                  height: 44,
+                  borderRadius: 12,
+                  background: `${DF}14`,
+                  border: `1.5px solid ${DF}30`,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}
+              >
+                <FilterAltOutlined sx={{ fontSize: 24, color: DF }} />
+              </div>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 800, color: "#0F172A" }}>
+                  Data Filtering
+                </div>
+                <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>
+                  Upload PV data, weather data, and system configuration to filter, cleanse, and prepare datasets.
+                </div>
+              </div>
             </div>
-            <div>
-              <div style={{ fontSize: 18, fontWeight: 800, color: "#0F172A" }}>
-                Data Filtering
-              </div>
-              <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>
-                Upload PV data, weather data, and system configuration to filter, cleanse, and prepare datasets.
-              </div>
+            <div style={{ marginLeft: "auto", borderRadius: "999px", background: "#F8FAFC", border: "1px solid #E2E8F0", padding: 4, display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {filterOverviewOpen ? (
+                <ExpandLessIcon sx={{ fontSize: 18, color: "#94a3b8" }} />
+              ) : (
+                <ExpandMoreIcon sx={{ fontSize: 18, color: "#94a3b8" }} />
+              )}
             </div>
           </div>
+          {filterOverviewOpen && (
+            <>
+              <div style={{ marginTop: 20, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+                {/* PVWatts model & comparison */}
+                <div style={{ background: "#FFFBEB", borderRadius: 12, padding: 18, border: "1px solid #FDE68A" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#0F172A", letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 4 }}>
+                    PVWatts Model & Comparison
+                  </div>
+                  <p style={{ fontSize: 12, color: "#475569", lineHeight: 1.7, marginBottom: 10 }}>
+                    Compute cell temperature (Tcell) and theoretical DC power (PVWatts) from weather and PV data using system parameters. Adjust the loss factor to account for model error, soiling, or degradation. Compare measured P_DC to PVWatts at each timestamp.
+                  </p>
+                  <ul style={{ fontSize: 12, color: "#64748B", lineHeight: 1.6, paddingLeft: 18, margin: 0 }}>
+                    <li>Tcell from air temp, GTI, wind speed, and system coefficients.</li>
+                    <li>PVWatts = GTI × tot_power × (1 + temp_coef×(Tcell−25)/100) × loss_factor.</li>
+                    <li>Configurable loss factor (default 0.97); next version will auto-compute it.</li>
+                  </ul>
+                </div>
+
+                {/* Filter logic */}
+                <div style={{ background: "#FFFBEB", borderRadius: 12, padding: 18, border: "1px solid #FDE68A" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#0F172A", letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 4 }}>
+                    Filter Logic
+                  </div>
+                  <p style={{ fontSize: 12, color: "#475569", lineHeight: 1.7, marginBottom: 10 }}>
+                    Relative error is |P_DC − PVWatts| / PVWatts per row. Rows with relative error ≤ the threshold are labeled valid; the rest are removed. Set the threshold (e.g. 20%) to control how strict the filter is.
+                  </p>
+                  <ul style={{ fontSize: 12, color: "#64748B", lineHeight: 1.6, paddingLeft: 18, margin: 0 }}>
+                    <li>Configurable threshold (rel. error) as a percentage.</li>
+                    <li>Labeled dataset: each row has status &quot;valid&quot; or &quot;removed&quot;.</li>
+                    <li>Filtered dataset: only &quot;valid&quot; rows for downstream use.</li>
+                  </ul>
+                </div>
+
+                {/* Visualization & export */}
+                <div style={{ background: "#FFFBEB", borderRadius: 12, padding: 18, border: "1px solid #FDE68A" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#0F172A", letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 4 }}>
+                    Visualization & Export
+                  </div>
+                  <p style={{ fontSize: 12, color: "#475569", lineHeight: 1.7, marginBottom: 10 }}>
+                    Time-series and scatter charts show P_DC vs PVWatts and correlation. A labeled data table lists valid and removed rows. Export the full labeled dataset or only valid/removed rows as CSV.
+                  </p>
+                  <ul style={{ fontSize: 12, color: "#64748B", lineHeight: 1.6, paddingLeft: 18, margin: 0 }}>
+                    <li>Measured vs calculated time-series and filter result chart.</li>
+                    <li>Scatter plot with linear regression and R².</li>
+                    <li>One-click CSV export (all, valid only, or removed only).</li>
+                  </ul>
+                </div>
+              </div>
+            </>
+          )}
         </div>
 
         {/* Data Visualization card */}
@@ -2530,13 +2684,14 @@ export default function DataFilteringPage() {
           }}
         >
           <FilterUploadZone
-            label="PV Data : Load PV & Weather Synced Data"
+            label="Load PV & Weather Synced Data (.csv)"
             icon={<SolarPowerOutlined sx={{ fontSize: 24, color: O }} />}
             accept=".csv"
             color={O}
             file={pvFile}
             templateFile="pv_weather_synced_pvcopilot.csv"
             onFileUpload={handlePvUpload}
+            onDownloadSuccess={(msg) => showToast(msg, "success")}
             onClear={() => {
               setPvFile(null);
               setPvRawData(null);
@@ -2547,13 +2702,14 @@ export default function DataFilteringPage() {
             onError={(msg) => showToast(msg, "error")}
           />
           <FilterUploadZone
-            label="System Info (JSON)"
+            label="System Info (.json)"
             icon={<SettingsOutlined sx={{ fontSize: 24, color: O }} />}
             accept=".json"
             color={O}
             file={sysFile}
             templateFile="system_info.json"
             onLoad={handleSysLoad}
+            onDownloadSuccess={(msg) => showToast(msg, "success")}
             onClear={() => {
               setSysFile(null);
               setSysData(null);
@@ -2692,18 +2848,130 @@ export default function DataFilteringPage() {
                     flexWrap: "wrap",
                   }}
                 >
-                  <div style={{ flex: "1 1 280px", fontFamily: FONT, fontSize: 12, color: "#334155", lineHeight: 1.6 }}>
-                    <div style={{ fontWeight: 700, color: "#0F172A", marginBottom: 6, fontSize: 12 }}>PVWatts formula</div>
+                  <div style={{ flex: "1 1 280px", fontFamily: FONT, fontSize: 12, color: "#334155", lineHeight: 1.6, position: "relative" }}>
+                    <div style={{ display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                      <span style={{ fontWeight: 700, color: "#0F172A", fontSize: 12 }}>PVWatts formula</span>
+                      <span
+                        ref={pvwattsFormulaHelpTriggerRef}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setPvwattsFormulaHelpOpen((v) => !v)}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setPvwattsFormulaHelpOpen((v) => !v); }}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          width: 20,
+                          height: 20,
+                          borderRadius: "50%",
+                          color: "#64748B",
+                          cursor: "pointer",
+                          outline: "none",
+                        }}
+                        aria-label="Explain PVWatts model"
+                      >
+                        <HelpOutline sx={{ fontSize: 18 }} />
+                      </span>
+                      {pvwattsFormulaHelpOpen && (
+                        <div
+                          ref={pvwattsFormulaHelpRef}
+                          style={{
+                            position: "absolute",
+                            top: "100%",
+                            left: 0,
+                            marginTop: 8,
+                            zIndex: 1001,
+                            background: "#fff",
+                            borderRadius: 12,
+                            border: "1px solid #E2E8F0",
+                            boxShadow: "0 10px 40px rgba(0,0,0,0.12)",
+                            padding: 14,
+                            maxWidth: 380,
+                            fontFamily: FONT,
+                            fontSize: 12,
+                            color: "#334155",
+                            lineHeight: 1.55,
+                          }}
+                        >
+                          <div style={{ fontWeight: 700, color: "#0F172A", marginBottom: 6 }}>PVWatts model</div>
+                          <p style={{ margin: "0 0 8px 0" }}>
+                            PVWatts is an NREL point-value model that predicts DC power from <strong>effective irradiance</strong> (e.g. GTI) and <strong>cell temperature</strong>. The power equation scales reference power by irradiance and applies a temperature coefficient; at low irradiance (≤125 W/m²) a different scaling is used. Cell temperature is estimated from ambient air temperature, plane-of-array irradiance, and wind speed (e.g. Sandia-style module temperature model).
+                          </p>
+                          <p style={{ margin: "0 0 8px 0" }}>
+                            <strong>References:</strong>
+                          </p>
+                          <ul style={{ margin: 0, paddingLeft: 18 }}>
+                            <li>
+                              <a href="https://pvpmc.sandia.gov/modeling-guide/2-dc-module-iv/point-value-models/pvwatts/" target="_blank" rel="noopener noreferrer" style={{ color: DF, textDecoration: "underline" }}>PVWatts (power equation)</a>
+                            </li>
+                            <li>
+                              <a href="https://pvpmc.sandia.gov/modeling-guide/2-dc-module-iv/module-temperature/sandia-module-temperature-model/" target="_blank" rel="noopener noreferrer" style={{ color: DF, textDecoration: "underline" }}>Sandia module temperature model</a>
+                            </li>
+                          </ul>
+                        </div>
+                      )}
+                    </div>
                     <div style={{ color: "#64748B", fontSize: 11 }}>
                       PVWatts = GTI × tot_power × (1 + (temp_coef/100) × (Tcell − 25)) ×{" "}
                       <span style={{ color: "#0F172A", fontWeight: 600 }}>loss_factor</span>
                     </div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 16, flexShrink: 0, flexWrap: "wrap" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, position: "relative" }}>
                       <label style={{ fontFamily: FONT, fontSize: 12, fontWeight: 600, color: "#64748B" }} htmlFor="loss-factor-input">
                         loss_factor
                       </label>
+                      <span
+                        ref={lossFactorHelpTriggerRef}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => setLossFactorHelpOpen((v) => !v)}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setLossFactorHelpOpen((v) => !v); }}
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          width: 20,
+                          height: 20,
+                          borderRadius: "50%",
+                          color: "#64748B",
+                          cursor: "pointer",
+                          outline: "none",
+                        }}
+                        aria-label="Explain loss factor"
+                      >
+                        <HelpOutline sx={{ fontSize: 18 }} />
+                      </span>
+                      {lossFactorHelpOpen && (
+                        <div
+                          ref={lossFactorHelpRef}
+                          style={{
+                            position: "absolute",
+                            top: "100%",
+                            left: 0,
+                            marginTop: 8,
+                            zIndex: 1001,
+                            background: "#fff",
+                            borderRadius: 12,
+                            border: "1px solid #E2E8F0",
+                            boxShadow: "0 10px 40px rgba(0,0,0,0.12)",
+                            padding: 14,
+                            maxWidth: 340,
+                            fontFamily: FONT,
+                            fontSize: 12,
+                            color: "#334155",
+                            lineHeight: 1.55,
+                          }}
+                        >
+                          <div style={{ fontWeight: 700, color: "#0F172A", marginBottom: 6 }}>What is loss factor?</div>
+                          <p style={{ margin: "0 0 8px 0" }}>
+                            The loss factor is a multiplier applied at the end of the PVWatts formula. It can represent <strong>calculation error of the PVWatts model</strong>, <strong>soiling conditions</strong> of the system, or <strong>degradation</strong>. Typical values are around 0.95–1.0 (e.g. 0.97 = 3% losses).
+                          </p>
+                          <p style={{ margin: 0 }}>
+                            The next version of PVCopilot will compute this value automatically.
+                          </p>
+                        </div>
+                      )}
                       <input
                         id="loss-factor-input"
                         type="number"
@@ -2759,10 +3027,61 @@ export default function DataFilteringPage() {
                       </code>
                     </div>
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0, position: "relative" }}>
                     <label style={{ fontFamily: FONT, fontSize: 12, fontWeight: 600, color: "#64748B" }} htmlFor="filter-threshold-input">
                       filter threshold (rel. error)
                     </label>
+                    <span
+                      ref={thresholdHelpTriggerRef}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => setThresholdHelpOpen((v) => !v)}
+                      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setThresholdHelpOpen((v) => !v); }}
+                      style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        width: 20,
+                        height: 20,
+                        borderRadius: "50%",
+                        color: "#64748B",
+                        cursor: "pointer",
+                        outline: "none",
+                      }}
+                      aria-label="Explain filter threshold"
+                    >
+                      <HelpOutline sx={{ fontSize: 18 }} />
+                    </span>
+                    {thresholdHelpOpen && (
+                      <div
+                        ref={thresholdHelpRef}
+                        style={{
+                          position: "absolute",
+                          top: "100%",
+                          right: 0,
+                          marginTop: 8,
+                          zIndex: 1001,
+                          background: "#fff",
+                          borderRadius: 12,
+                          border: "1px solid #E2E8F0",
+                          boxShadow: "0 10px 40px rgba(0,0,0,0.12)",
+                          padding: 14,
+                          maxWidth: 340,
+                          fontFamily: FONT,
+                          fontSize: 12,
+                          color: "#334155",
+                          lineHeight: 1.55,
+                        }}
+                      >
+                        <div style={{ fontWeight: 700, color: "#0F172A", marginBottom: 6 }}>How the filter works</div>
+                        <p style={{ margin: "0 0 8px 0" }}>
+                          Relative error is computed as <code style={{ fontFamily: MONO, fontSize: 11, background: "#F1F5F9", padding: "1px 4px", borderRadius: 4 }}>|P_DC − PVWatts| / PVWatts</code> for each row. Rows where this value is <strong>≤</strong> the threshold (as a fraction, e.g. 0.2 = 20%) are kept as <strong>valid</strong>; rows above the threshold are marked <strong>removed</strong> and excluded from the filtered dataset.
+                        </p>
+                        <p style={{ margin: 0 }}>
+                          Lower thresholds keep only points very close to the PVWatts model; higher thresholds allow more deviation (e.g. 50% keeps points within 50% relative error).
+                        </p>
+                      </div>
+                    )}
                     <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
                       <input
                         id="filter-threshold-input"
@@ -2809,10 +3128,10 @@ export default function DataFilteringPage() {
 
               {/* Labeled data table (labeled_df: valid + removed with status) */}
               {filterResult?.labeled?.length > 0 && (
-                <FilteredDataTable data={filterResult.labeled} title="Labeled data" />
+                <FilteredDataTable data={filterResult.labeled} title="Filtered Data" />
               )}
 
-              {/* Filtered data summary card (bottom) */}
+              {/* Filtered Data Summary card (bottom) */}
               {filterResult?.labeled?.length > 0 && (() => {
                 const labeled = filterResult.labeled;
                 const validCount = labeled.filter((d) => d.status === "valid").length;
@@ -2894,7 +3213,7 @@ export default function DataFilteringPage() {
                         <FilterAltOutlined sx={{ fontSize: 16, color: DF }} />
                       </div>
                       <span style={{ fontFamily: FONT, fontSize: 13, fontWeight: 700, color: "#0F172A" }}>
-                        Filtered data summary
+                        Filtered Data Summary
                       </span>
                       <span style={{ fontFamily: FONT, fontSize: 11, color: "#64748B" }}>
                         {labeled.length} labeled points
