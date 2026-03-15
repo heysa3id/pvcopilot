@@ -8,10 +8,10 @@ import LandingPage from './pages/LandingPage'
 import LcoeTool from './pages/LcoeTool'
 import PlaceholderPage from './pages/PlaceholderPage'
 import DataIngestionPage from './pages/QualityCheckPage'
+import DataFilteringPage from './pages/DataFilteringPage'
 import QueryStats from '@mui/icons-material/QueryStats'
 import AutoFixHigh from '@mui/icons-material/AutoFixHigh'
 import ElectricBolt from '@mui/icons-material/ElectricBolt'
-import FilterAltOutlined from '@mui/icons-material/FilterAltOutlined'
 
 const ICON_COLOR = "#FFB800";
 function KpiAnalysisPage() {
@@ -38,15 +38,6 @@ function PowerPredictionPage() {
       icon={<ElectricBolt sx={{ fontSize: 40, color: ICON_COLOR }} />}
       title="Power Prediction" color="#ff7a45"
       desc="Physical + ML energy forecasting with performance comparison and loss analysis."
-    />
-  )
-}
-function DataFilteringPage() {
-  return (
-    <PlaceholderPage
-      icon={<FilterAltOutlined sx={{ fontSize: 40, color: ICON_COLOR }} />}
-      title="Data Filtering" color="#e11d48"
-      desc="Module under development."
     />
   )
 }
