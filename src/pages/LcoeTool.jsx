@@ -5,6 +5,8 @@ import DialogTitle from "@mui/material/DialogTitle";
 import DialogContent from "@mui/material/DialogContent";
 import DialogActions from "@mui/material/DialogActions";
 import Button from "@mui/material/Button";
+import Snackbar from "@mui/material/Snackbar";
+import Alert from "@mui/material/Alert";
 import DescriptionOutlinedIcon from "@mui/icons-material/DescriptionOutlined";
 import AutorenewOutlinedIcon from "@mui/icons-material/AutorenewOutlined";
 import CheckCircleOutlineIcon from "@mui/icons-material/CheckCircleOutline";
@@ -356,6 +358,13 @@ export default function LcoeTool() {
   const [tempRate, setTempRate] = useState(1);
   const [showLcoeThresholdsPopup, setShowLcoeThresholdsPopup] = useState(false);
   const [showLcoeStatusHelpPopup, setShowLcoeStatusHelpPopup] = useState(false);
+  const [showSimplePaybackHelpPopup, setShowSimplePaybackHelpPopup] = useState(false);
+  const [showDiscPaybackHelpPopup, setShowDiscPaybackHelpPopup] = useState(false);
+  const [showTotalCapexHelpPopup, setShowTotalCapexHelpPopup] = useState(false);
+  const [showCapacityFactorHelpPopup, setShowCapacityFactorHelpPopup] = useState(false);
+  const [showIrrHelpPopup, setShowIrrHelpPopup] = useState(false);
+  const [showProjectNpvHelpPopup, setShowProjectNpvHelpPopup] = useState(false);
+  const [reportDownloadedOpen, setReportDownloadedOpen] = useState(false);
   const [lcoeExcellentMaxKwh, setLcoeExcellentMaxKwh] = useState(0.034);
   const [lcoeLowMinKwh, setLcoeLowMinKwh] = useState(0.045);
 
@@ -554,6 +563,126 @@ export default function LcoeTool() {
           </Button>
         </DialogActions>
       </Dialog>
+
+      {/* Simple Payback help popup */}
+      <Dialog open={showSimplePaybackHelpPopup} onClose={() => setShowSimplePaybackHelpPopup(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontSize: 16 }}>What is Simple Payback?</DialogTitle>
+        <DialogContent>
+          <p style={{ fontSize: 13, color: "#334155", lineHeight: 1.6, margin: 0 }}>
+            <strong>Simple Payback</strong> is how many years it takes to recover your initial investment (CAPEX) from the project&apos;s net income. No discounting is applied.
+          </p>
+          <p style={{ fontSize: 12, color: "#475569", lineHeight: 1.5, marginTop: 10, marginBottom: 0, fontFamily: "inherit" }}>
+            <strong>Equation:</strong><br />
+            Year 1 revenue = Annual energy (kWh) × First-year factor × Tariff (per kWh)<br />
+            Simple Payback (years) = Total CAPEX ÷ (Year 1 revenue − Annual O&M)
+          </p>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setShowSimplePaybackHelpPopup(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Disc. Payback (TRI) help popup */}
+      <Dialog open={showDiscPaybackHelpPopup} onClose={() => setShowDiscPaybackHelpPopup(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontSize: 16 }}>What is Disc. Payback (TRI)?</DialogTitle>
+        <DialogContent>
+          <p style={{ fontSize: 13, color: "#334155", lineHeight: 1.6, margin: 0 }}>
+            <strong>Discounted Payback</strong> is how many years it takes for the project&apos;s cumulative discounted net cash flow to reach zero (the green line crossing zero on the Cash Flow chart).
+          </p>
+          <p style={{ fontSize: 12, color: "#475569", lineHeight: 1.5, marginTop: 10, marginBottom: 0 }}>
+            <strong>Equation:</strong><br />
+            Discount factor in year t: DF_t = (1 + r)^(t−1), with r = discount rate<br />
+            Discounted net CF in year t = (Revenue_t − O&M_t) ÷ DF_t (and −CAPEX in year 1 only)<br />
+            Discounted payback = time when cumulative Σ Discounted net CF = 0
+          </p>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setShowDiscPaybackHelpPopup(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Total CAPEX help popup */}
+      <Dialog open={showTotalCapexHelpPopup} onClose={() => setShowTotalCapexHelpPopup(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontSize: 16 }}>What is Total CAPEX?</DialogTitle>
+        <DialogContent>
+          <p style={{ fontSize: 13, color: "#334155", lineHeight: 1.6, margin: 0 }}>
+            <strong>Total CAPEX</strong> (capital expenditure) is the full upfront cost to build the PV system (modules, inverters, BOS, installation, soft costs).
+          </p>
+          <p style={{ fontSize: 12, color: "#475569", lineHeight: 1.5, marginTop: 10, marginBottom: 0 }}>
+            <strong>Equation:</strong><br />
+            Total CAPEX = Σ (each CAPEX item per kWp) × System capacity (kWp)<br />
+            Cost per kWp = Total CAPEX ÷ System capacity (kWp)
+          </p>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setShowTotalCapexHelpPopup(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Capacity Factor help popup */}
+      <Dialog open={showCapacityFactorHelpPopup} onClose={() => setShowCapacityFactorHelpPopup(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontSize: 16 }}>What is Capacity Factor?</DialogTitle>
+        <DialogContent>
+          <p style={{ fontSize: 13, color: "#334155", lineHeight: 1.6, margin: 0 }}>
+            <strong>Capacity Factor</strong> is the ratio of actual energy produced to the energy the system would produce at full nameplate power 24/7. Expressed as %; typical PV is about 15–25%.
+          </p>
+          <p style={{ fontSize: 12, color: "#475569", lineHeight: 1.5, marginTop: 10, marginBottom: 0 }}>
+            <strong>Equation:</strong><br />
+            Capacity Factor (%) = [Annual energy (kWh) ÷ (System capacity (kWp) × 8760 h)] × 100
+          </p>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setShowCapacityFactorHelpPopup(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* IRR / Project IRR help popup */}
+      <Dialog open={showIrrHelpPopup} onClose={() => setShowIrrHelpPopup(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontSize: 16 }}>What is IRR (Project IRR)?</DialogTitle>
+        <DialogContent>
+          <p style={{ fontSize: 13, color: "#334155", lineHeight: 1.6, margin: 0 }}>
+            <strong>IRR</strong> (Internal Rate of Return) is the discount rate at which the project&apos;s NPV equals zero—the &quot;effective&quot; annual return. If IRR &gt; your cost of capital (WACC), the project is attractive.
+          </p>
+          <p style={{ fontSize: 12, color: "#475569", lineHeight: 1.5, marginTop: 10, marginBottom: 0 }}>
+            <strong>Equation:</strong><br />
+            IRR is the rate r such that: −CAPEX + Σ_t [(Revenue_t − O&M_t) ÷ (1 + r)^t] = 0<br />
+            where Revenue_t = Annual energy × degradation factor in year t × Tariff.
+          </p>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setShowIrrHelpPopup(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Project NPV help popup */}
+      <Dialog open={showProjectNpvHelpPopup} onClose={() => setShowProjectNpvHelpPopup(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontSize: 16 }}>What is Project NPV?</DialogTitle>
+        <DialogContent>
+          <p style={{ fontSize: 13, color: "#334155", lineHeight: 1.6, margin: 0 }}>
+            <strong>NPV</strong> (Net Present Value) is the value of all future cash flows discounted to today, minus the initial CAPEX. A positive NPV means the project adds value at your discount rate (WACC).
+          </p>
+          <p style={{ fontSize: 12, color: "#475569", lineHeight: 1.5, marginTop: 10, marginBottom: 0 }}>
+            <strong>Equation:</strong><br />
+            NPV = −CAPEX + Σ_t [(Revenue_t − O&M_t) ÷ (1 + r)^t]<br />
+            where r = discount rate (WACC), Revenue_t = Annual energy × degradation factor_t × Tariff, and the sum runs over the project lifetime.
+          </p>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setShowProjectNpvHelpPopup(false)}>Close</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Report downloaded success popup */}
+      <Snackbar
+        open={reportDownloadedOpen}
+        autoHideDuration={4000}
+        onClose={() => setReportDownloadedOpen(false)}
+        anchorOrigin={{ vertical: "bottom", horizontal: "center" }}
+      >
+        <Alert onClose={() => setReportDownloadedOpen(false)} severity="success" sx={{ width: "100%" }}>
+          Report downloaded successfully.
+        </Alert>
+      </Snackbar>
 
       {/* Parse failed: recommend Chrome or Opera */}
       <Dialog open={showBrowserRecommendDialog} onClose={() => setShowBrowserRecommendDialog(false)}>
@@ -1185,7 +1314,9 @@ export default function LcoeTool() {
                   </span>
                 </div>
                 <button
-                  onClick={() => generateLcoeReport(p, R, sens, CAPEX_CATS, { currency, exchangeRate, currSym }).catch(err => console.error("PDF generation failed:", err))}
+                  onClick={() => generateLcoeReport(p, R, sens, CAPEX_CATS, { currency, exchangeRate, currSym })
+                    .then(() => setReportDownloadedOpen(true))
+                    .catch(err => console.error("PDF generation failed:", err))}
                   style={{
                     display:"flex", alignItems:"center", gap:5,
                     padding:"5px 14px", borderRadius:8,
@@ -1222,7 +1353,50 @@ export default function LcoeTool() {
             ].map(({label,value,sub,color})=>(
               <Card key={label} style={{ border:`1px solid ${color}1e` }}>
                 <div style={{ fontSize:9, color:"#94a3b8", fontWeight:700, letterSpacing:".1em",
-                  textTransform:"uppercase", marginBottom:8 }}>{label}</div>
+                  textTransform:"uppercase", marginBottom:8, display:"flex", alignItems:"center", gap:4 }}>
+                  {label}
+                  {label === "Total CAPEX" && (
+                    <button type="button" onClick={() => setShowTotalCapexHelpPopup(true)} title="What is Total CAPEX?"
+                      style={{ display:"inline-flex", alignItems:"center", justifyContent:"center", width:18, height:18, padding:0, border:"none", borderRadius:"50%", background:"#E2E8F0", color:"#64748B", cursor:"pointer", flexShrink:0 }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "#CBD5E1"; e.currentTarget.style.color = "#475569"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "#E2E8F0"; e.currentTarget.style.color = "#64748B"; }}>
+                      <HelpOutlineIcon sx={{ fontSize: 14 }} />
+                    </button>
+                  )}
+                  {label === "Capacity Factor" && (
+                    <button type="button" onClick={() => setShowCapacityFactorHelpPopup(true)} title="What is Capacity Factor?"
+                      style={{ display:"inline-flex", alignItems:"center", justifyContent:"center", width:18, height:18, padding:0, border:"none", borderRadius:"50%", background:"#E2E8F0", color:"#64748B", cursor:"pointer", flexShrink:0 }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "#CBD5E1"; e.currentTarget.style.color = "#475569"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "#E2E8F0"; e.currentTarget.style.color = "#64748B"; }}>
+                      <HelpOutlineIcon sx={{ fontSize: 14 }} />
+                    </button>
+                  )}
+                  {label === "Payback (TRI)" && (
+                    <button
+                      type="button"
+                      onClick={() => setShowSimplePaybackHelpPopup(true)}
+                      title="What is Simple Payback?"
+                      style={{
+                        display:"inline-flex", alignItems:"center", justifyContent:"center",
+                        width:18, height:18, padding:0, border:"none", borderRadius:"50%",
+                        background:"#E2E8F0", color:"#64748B", cursor:"pointer",
+                        flexShrink:0,
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "#CBD5E1"; e.currentTarget.style.color = "#475569"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "#E2E8F0"; e.currentTarget.style.color = "#64748B"; }}
+                    >
+                      <HelpOutlineIcon sx={{ fontSize: 14 }} />
+                    </button>
+                  )}
+                  {label === "IRR" && (
+                    <button type="button" onClick={() => setShowIrrHelpPopup(true)} title="What is IRR?"
+                      style={{ display:"inline-flex", alignItems:"center", justifyContent:"center", width:18, height:18, padding:0, border:"none", borderRadius:"50%", background:"#E2E8F0", color:"#64748B", cursor:"pointer", flexShrink:0 }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "#CBD5E1"; e.currentTarget.style.color = "#475569"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "#E2E8F0"; e.currentTarget.style.color = "#64748B"; }}>
+                      <HelpOutlineIcon sx={{ fontSize: 14 }} />
+                    </button>
+                  )}
+                </div>
                 <div style={{ fontFamily:"'JetBrains Mono'", fontSize:"clamp(16px,2vw,22px)", color, marginBottom:4, fontWeight:600 }}>{value}</div>
                 <div style={{ fontSize:10, color:"#94a3b8" }}>{sub}</div>
               </Card>
@@ -1366,7 +1540,59 @@ export default function LcoeTool() {
                     { label:"Project NPV",          v: `${R.projectNpv>=0?"+":""}${currSym}${fmtK(cx(R.projectNpv))}`, color: R.projectNpv>=0?"#16a34a":"#f97316" },
                   ].map(({label,v,color})=>(
                     <div key={label} style={{ background:"#fffdf7", borderRadius:7, padding:"9px 12px", border:"1px solid #E2E8F0" }}>
-                      <div style={{ fontSize:9, color:"#94a3b8", fontWeight:700, letterSpacing:".07em", textTransform:"uppercase", marginBottom:4 }}>{label}</div>
+                      <div style={{ fontSize:9, color:"#94a3b8", fontWeight:700, letterSpacing:".07em", textTransform:"uppercase", marginBottom:4, display:"flex", alignItems:"center", gap:4 }}>
+                        {label}
+                        {label === "Disc. Payback (TRI)" && (
+                          <button
+                            type="button"
+                            onClick={() => setShowDiscPaybackHelpPopup(true)}
+                            title="What is Disc. Payback (TRI)?"
+                            style={{
+                              display:"inline-flex", alignItems:"center", justifyContent:"center",
+                              width:16, height:16, padding:0, border:"none", borderRadius:"50%",
+                              background:"#E2E8F0", color:"#64748B", cursor:"pointer",
+                              flexShrink:0,
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.background = "#CBD5E1"; e.currentTarget.style.color = "#475569"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "#E2E8F0"; e.currentTarget.style.color = "#64748B"; }}
+                          >
+                            <HelpOutlineIcon sx={{ fontSize: 12 }} />
+                          </button>
+                        )}
+                        {label === "Simple Payback" && (
+                          <button
+                            type="button"
+                            onClick={() => setShowSimplePaybackHelpPopup(true)}
+                            title="What is Simple Payback?"
+                            style={{
+                              display:"inline-flex", alignItems:"center", justifyContent:"center",
+                              width:16, height:16, padding:0, border:"none", borderRadius:"50%",
+                              background:"#E2E8F0", color:"#64748B", cursor:"pointer",
+                              flexShrink:0,
+                            }}
+                            onMouseEnter={e => { e.currentTarget.style.background = "#CBD5E1"; e.currentTarget.style.color = "#475569"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "#E2E8F0"; e.currentTarget.style.color = "#64748B"; }}
+                          >
+                            <HelpOutlineIcon sx={{ fontSize: 12 }} />
+                          </button>
+                        )}
+                        {label === "Project IRR" && (
+                          <button type="button" onClick={() => setShowIrrHelpPopup(true)} title="What is IRR?"
+                            style={{ display:"inline-flex", alignItems:"center", justifyContent:"center", width:16, height:16, padding:0, border:"none", borderRadius:"50%", background:"#E2E8F0", color:"#64748B", cursor:"pointer", flexShrink:0 }}
+                            onMouseEnter={e => { e.currentTarget.style.background = "#CBD5E1"; e.currentTarget.style.color = "#475569"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "#E2E8F0"; e.currentTarget.style.color = "#64748B"; }}>
+                            <HelpOutlineIcon sx={{ fontSize: 12 }} />
+                          </button>
+                        )}
+                        {label === "Project NPV" && (
+                          <button type="button" onClick={() => setShowProjectNpvHelpPopup(true)} title="What is Project NPV?"
+                            style={{ display:"inline-flex", alignItems:"center", justifyContent:"center", width:16, height:16, padding:0, border:"none", borderRadius:"50%", background:"#E2E8F0", color:"#64748B", cursor:"pointer", flexShrink:0 }}
+                            onMouseEnter={e => { e.currentTarget.style.background = "#CBD5E1"; e.currentTarget.style.color = "#475569"; }}
+                            onMouseLeave={e => { e.currentTarget.style.background = "#E2E8F0"; e.currentTarget.style.color = "#64748B"; }}>
+                            <HelpOutlineIcon sx={{ fontSize: 12 }} />
+                          </button>
+                        )}
+                      </div>
                       <div style={{ fontFamily:"'JetBrains Mono'", fontSize:14, fontWeight:600, color }}>{v}</div>
                     </div>
                   ))}
