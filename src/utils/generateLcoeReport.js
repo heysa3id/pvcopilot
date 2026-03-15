@@ -473,7 +473,7 @@ export async function generateLcoeReport(p, R, sens, CAPEX_CATS, currOpts = {}) 
   y += 2;
   const lcoeMwh = R.lcoe * 1000;
   const lcoeColor = lcoeMwh > 45 ? RED : lcoeMwh < 34 ? GREEN : GOLD;
-  const lcoeRating = lcoeMwh > 45 ? "Low" : lcoeMwh < 34 ? "Excellent" : "Rentable";
+  const lcoeRating = lcoeMwh > 45 ? "Low" : lcoeMwh < 34 ? "Excellent" : "Acceptable";
 
   // Background box
   doc.setFillColor(...LIGHT_BG);

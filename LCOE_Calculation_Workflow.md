@@ -91,7 +91,7 @@ LCOE ($/MWh) = LCOE × 1000
 
 **Rating thresholds** (based on $/MWh):
 - LCOE < 34 $/MWh → **Excellent**
-- 34 ≤ LCOE ≤ 45 $/MWh → **Rentable**
+- 34 ≤ LCOE ≤ 45 $/MWh → **Acceptable**
 - LCOE > 45 $/MWh → **Low**
 
 ### Step 5 — Financial Indicators

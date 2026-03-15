@@ -21,6 +21,7 @@ import { parsePvsystPdfClient } from "../utils/parsePvsystPdfClient";
 import { generateLcoeReport } from "../utils/generateLcoeReport";
 import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
 import CurrencyExchangeIcon from "@mui/icons-material/CurrencyExchange";
+import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
 
 // ── Currency data ─────────────────────────────────────────────────────────────
 const CURRENCIES = [
@@ -353,6 +354,10 @@ export default function LcoeTool() {
   const [exchangeRate, setExchangeRate] = useState(1);
   const [tempCurrency, setTempCurrency] = useState("USD");
   const [tempRate, setTempRate] = useState(1);
+  const [showLcoeThresholdsPopup, setShowLcoeThresholdsPopup] = useState(false);
+  const [showLcoeStatusHelpPopup, setShowLcoeStatusHelpPopup] = useState(false);
+  const [lcoeExcellentMaxKwh, setLcoeExcellentMaxKwh] = useState(0.034);
+  const [lcoeLowMinKwh, setLcoeLowMinKwh] = useState(0.045);
 
   const currObj = CURRENCIES.find(c => c.code === currency) || CURRENCIES[0];
   const currSym = currObj.symbol;
@@ -463,14 +468,92 @@ export default function LcoeTool() {
 
   const R   = useMemo(() => calcAll(p), [p]);
   const sens = useMemo(() => sensitivity(p, R), [p, R]);
-  // LCOE thresholds based on $/MWh (R.lcoe is $/kWh)
   const lcoeMwh = R.lcoe * 1000;
-  const lcoeColor  = lcoeMwh > 45 ? "#dc2626" : lcoeMwh < 34 ? Y : G;
-  const lcoeRating = lcoeMwh > 45 ? "Low" : lcoeMwh < 34 ? "Excellent" : "Rentable";
+  const excellentMaxKwh = lcoeExcellentMaxKwh;
+  const lowMinKwh = lcoeLowMinKwh;
+  const lcoeColor  = R.lcoe > lowMinKwh ? "#dc2626" : R.lcoe < excellentMaxKwh ? Y : G;
+  const lcoeRating = R.lcoe > lowMinKwh ? "Low" : R.lcoe < excellentMaxKwh ? "Excellent" : "Acceptable";
 
   return (
     <div style={{ minHeight:"100vh", background:"#FFFFFF", fontFamily:"Inter, Arial, sans-serif",
       color:"#0F172A", padding:"28px 20px" }}>
+
+      {/* LCOE status thresholds popup */}
+      <Dialog open={showLcoeThresholdsPopup} onClose={() => setShowLcoeThresholdsPopup(false)} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ display: "flex", alignItems: "center", gap: 1, fontSize: 16 }}>
+          LCOE status thresholds ({currSym}/kWh)
+        </DialogTitle>
+        <DialogContent>
+          <p style={{ fontSize: 12, color: "#64748B", marginBottom: 16 }}>
+            Set the {currSym}/kWh limits used to label LCOE as Excellent, Acceptable, or Low.
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "#475569", display: "block", marginBottom: 6 }}>
+                Excellent (max)
+              </label>
+              <input
+                type="number"
+                value={lcoeExcellentMaxKwh}
+                min={0}
+                max={1}
+                step={0.001}
+                onChange={e => setLcoeExcellentMaxKwh(parseFloat(e.target.value) || 0)}
+                style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #E2E8F0", fontFamily: "'JetBrains Mono', monospace", fontSize: 13 }}
+              />
+              <span style={{ fontSize: 11, color: "#94a3b8", marginLeft: 8 }}>{currSym}/kWh — LCOE below this = Excellent</span>
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "#475569", display: "block", marginBottom: 6 }}>
+                Low (min)
+              </label>
+              <input
+                type="number"
+                value={lcoeLowMinKwh}
+                min={0}
+                max={1}
+                step={0.001}
+                onChange={e => setLcoeLowMinKwh(parseFloat(e.target.value) || 0)}
+                style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid #E2E8F0", fontFamily: "'JetBrains Mono', monospace", fontSize: 13 }}
+              />
+              <span style={{ fontSize: 11, color: "#94a3b8", marginLeft: 8 }}>{currSym}/kWh — LCOE above this = Low</span>
+            </div>
+            <div style={{ fontSize: 11, color: "#64748B", marginTop: 4 }}>
+              Between these two = Acceptable.
+            </div>
+          </div>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setShowLcoeThresholdsPopup(false)}>Close</Button>
+          <Button onClick={() => setShowLcoeThresholdsPopup(false)} variant="contained" sx={{ bgcolor: G, "&:hover": { bgcolor: "#e6a200" } }}>
+            Apply
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* LCOE status logic help popup */}
+      <Dialog open={showLcoeStatusHelpPopup} onClose={() => setShowLcoeStatusHelpPopup(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontSize: 16 }}>LCOE status logic</DialogTitle>
+        <DialogContent>
+          <p style={{ fontSize: 13, color: "#334155", lineHeight: 1.6, marginBottom: 12 }}>
+            The status (Excellent, Acceptable, Low) is based on your LCOE compared to two thresholds in {currSym}/kWh:
+          </p>
+          <ul style={{ fontSize: 13, color: "#475569", lineHeight: 1.8, paddingLeft: 20, margin: "0 0 16px" }}>
+            <li><strong>Excellent</strong> — LCOE below the &quot;Excellent (max)&quot; threshold</li>
+            <li><strong>Acceptable</strong> — LCOE between the two thresholds</li>
+            <li><strong>Low</strong> — LCOE above the &quot;Low (min)&quot; threshold</li>
+          </ul>
+          <p style={{ fontSize: 13, color: "#334155", lineHeight: 1.6, margin: 0 }}>
+            <strong>Click the status badge</strong> (Excellent / Acceptable / Low) next to the LCOE value to open the thresholds popup and input or change these values.
+          </p>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setShowLcoeStatusHelpPopup(false)}>Close</Button>
+          <Button onClick={() => { setShowLcoeStatusHelpPopup(false); setShowLcoeThresholdsPopup(true); }} variant="contained" sx={{ bgcolor: G, "&:hover": { bgcolor: "#e6a200" } }}>
+            Open thresholds
+          </Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Parse failed: recommend Chrome or Opera */}
       <Dialog open={showBrowserRecommendDialog} onClose={() => setShowBrowserRecommendDialog(false)}>
@@ -1060,22 +1143,45 @@ export default function LcoeTool() {
               </div>
               <div style={{ display:"flex", alignItems:"center", gap:8, justifyContent:"space-between" }}>
                 <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                  <span style={{
-                    fontSize:10,
-                    fontWeight:700,
-                    letterSpacing:".08em",
-                    textTransform:"uppercase",
-                    padding:"3px 10px",
-                    borderRadius:9999,
-                    background:lcoeColor+"15",
-                    border:`1px solid ${lcoeColor}33`,
-                    color:lcoeColor,
-                    fontFamily:"Inter, Arial, sans-serif"
-                  }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowLcoeThresholdsPopup(true)}
+                    title="Click to set LCOE status thresholds"
+                    style={{
+                      fontSize:10,
+                      fontWeight:700,
+                      letterSpacing:".08em",
+                      textTransform:"uppercase",
+                      padding:"3px 10px",
+                      borderRadius:9999,
+                      background:lcoeColor+"15",
+                      border:`1px solid ${lcoeColor}33`,
+                      color:lcoeColor,
+                      fontFamily:"Inter, Arial, sans-serif",
+                      cursor:"pointer",
+                    }}
+                    onMouseEnter={e => { e.currentTarget.style.opacity = "0.9"; e.currentTarget.style.transform = "scale(1.02)"; }}
+                    onMouseLeave={e => { e.currentTarget.style.opacity = "1"; e.currentTarget.style.transform = "scale(1)"; }}
+                  >
                     {lcoeRating}
-                  </span>
-                  <span style={{ fontSize:10, color:"#94a3b8", fontFamily:"'JetBrains Mono'" }}>
+                  </button>
+                  <span style={{ fontSize:10, color:"#94a3b8", fontFamily:"'JetBrains Mono'", display:"inline-flex", alignItems:"center", gap:4 }}>
                     {fmt(cx(R.lcoe*1000),2)} {currSym}/MWh
+                    <button
+                      type="button"
+                      onClick={() => setShowLcoeStatusHelpPopup(true)}
+                      title="How is LCOE status determined?"
+                      style={{
+                        display:"inline-flex", alignItems:"center", justifyContent:"center",
+                        width:18, height:18, padding:0, border:"none", borderRadius:"50%",
+                        background:"#E2E8F0", color:"#64748B", cursor:"pointer",
+                        flexShrink:0,
+                      }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "#CBD5E1"; e.currentTarget.style.color = "#475569"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "#E2E8F0"; e.currentTarget.style.color = "#64748B"; }}
+                    >
+                      <HelpOutlineIcon sx={{ fontSize: 14 }} />
+                    </button>
                   </span>
                 </div>
                 <button
