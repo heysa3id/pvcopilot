@@ -187,6 +187,32 @@ function resampleRowsTo10Min(headers, rows) {
   return resampleRowsToStep(headers, rows, 10);
 }
 
+/** Get min and max timestamp (ms) from rows using date column. Returns { minMs, maxMs } or null if no valid dates. */
+function getDateRangeFromRows(headers, rows) {
+  if (!headers?.length || !Array.isArray(rows) || rows.length === 0) return null;
+  const dateCol = getDateColumnIndex(headers);
+  let minMs = Infinity, maxMs = -Infinity;
+  for (const row of rows) {
+    if (!Array.isArray(row)) continue;
+    const ms = parseDateCell(row[dateCol]);
+    if (!Number.isNaN(ms) && Number.isFinite(ms)) {
+      if (ms < minMs) minMs = ms;
+      if (ms > maxMs) maxMs = ms;
+    }
+  }
+  if (minMs === Infinity || maxMs === -Infinity) return null;
+  return { minMs, maxMs };
+}
+
+/** Format ms as YYYY-MM-DD for date inputs. */
+function formatDateOnly(ms) {
+  const d = new Date(ms);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 /** Filter rows by optional date range (inclusive). Uses first column or detected date column. */
 function filterRowsByDateRange(headers, rows, dateFrom, dateTo) {
   if (!Array.isArray(rows) || rows.length === 0) return [];
@@ -208,7 +234,7 @@ function filterRowsByDateRange(headers, rows, dateFrom, dateTo) {
 // ── Toast Notification ───────────────────────────────────────────────────────
 function Toast({ message, type, onClose }) {
   useEffect(() => {
-    const t = setTimeout(onClose, 5000);
+    const t = setTimeout(onClose, 2000);
     return () => clearTimeout(t);
   }, [onClose]);
 
@@ -2379,6 +2405,31 @@ export default function QualityCheckPage() {
       resampledStepMinutes: resamplingStepMinutes,
     };
   }, [weatherRawData, resamplingStepMinutes]);
+
+  // Default date range: start = min of PV and weather start; end = max of PV and weather end
+  const defaultDateRange = useMemo(() => {
+    const pvRange = pvData ? getDateRangeFromRows(pvData.headers, pvData.rows) : null;
+    const weatherRange = weatherData ? getDateRangeFromRows(weatherData.headers, weatherData.rows) : null;
+    if (!pvRange && !weatherRange) return null;
+    let minMs = Infinity, maxMs = -Infinity;
+    if (pvRange) {
+      if (pvRange.minMs < minMs) minMs = pvRange.minMs;
+      if (pvRange.maxMs > maxMs) maxMs = pvRange.maxMs;
+    }
+    if (weatherRange) {
+      if (weatherRange.minMs < minMs) minMs = weatherRange.minMs;
+      if (weatherRange.maxMs > maxMs) maxMs = weatherRange.maxMs;
+    }
+    if (minMs === Infinity || maxMs === -Infinity) return null;
+    return { dateFrom: formatDateOnly(minMs), dateTo: formatDateOnly(maxMs) };
+  }, [pvData, weatherData]);
+
+  useEffect(() => {
+    if (defaultDateRange) {
+      setDateFrom(defaultDateRange.dateFrom);
+      setDateTo(defaultDateRange.dateTo);
+    }
+  }, [defaultDateRange]);
 
   useEffect(() => {
     const pv = loadCached(CACHE_PV, { requireResampleVersion: true });

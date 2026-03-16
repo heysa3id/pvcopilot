@@ -367,6 +367,10 @@ function Spinner({ color, size = 20 }) {
 
 // ── Toast (minimal, self-contained) ──
 function Toast({ message, type, onClose }) {
+  useEffect(() => {
+    const t = setTimeout(onClose, 2000);
+    return () => clearTimeout(t);
+  }, [onClose]);
   return (
     <div
       style={{

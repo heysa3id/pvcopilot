@@ -12,6 +12,7 @@ import ExpandMoreIcon from "@mui/icons-material/ExpandMore";
 import FileDownloadOutlined from "@mui/icons-material/FileDownloadOutlined";
 import CalendarMonthOutlined from "@mui/icons-material/CalendarMonthOutlined";
 import TimelineOutlined from "@mui/icons-material/TimelineOutlined";
+import BarChart from "@mui/icons-material/BarChart";
 import ChevronLeft from "@mui/icons-material/ChevronLeft";
 import ChevronRight from "@mui/icons-material/ChevronRight";
 import CloseOutlined from "@mui/icons-material/CloseOutlined";
@@ -373,6 +374,10 @@ function toYMD(d) {
 
 // ── Toast (self-contained for KPI page) ──
 function Toast({ message, type, onClose }) {
+  useEffect(() => {
+    const t = setTimeout(onClose, 2000);
+    return () => clearTimeout(t);
+  }, [onClose]);
   return (
     <div
       style={{
@@ -1094,8 +1099,8 @@ function KpiCSVTable({ title, icon, color, headers, rows, resampled, originalRow
 }
 
 // ── Chart column multi-select + dual Y-axis chart (KPI page only) ──
-const KPI_CHART_COLORS_LEFT = ["#2563eb", "#dc2626", "#16a34a"];
-const KPI_CHART_COLORS_RIGHT = ["#d97706", "#7c3aed", "#0891b2"];
+const KPI_CHART_COLORS_LEFT = ["#1f77b4", "#dc2626", "#16a34a"];
+const KPI_CHART_COLORS_RIGHT = ["#ff7f0e", "#7c3aed", "#0891b2"];
 
 function KpiColumnMultiSelect({ options, selected, onChange, label }) {
   const [open, setOpen] = useState(false);
@@ -1140,8 +1145,23 @@ function KpiColumnMultiSelect({ options, selected, onChange, label }) {
   );
 }
 
-function KpiCSVChart({ title, color, headers, rows, fullRowsForGaps, defaultYHeader, defaultRightYHeader, singleYAxis = false, traceMode = "lines" }) {
+/** Parse min/max strings into a valid [min, max] range or null. Ignores empty, invalid, or min > max. */
+function parseAxisRange(minStr, maxStr) {
+  const a = String(minStr ?? "").trim();
+  const b = String(maxStr ?? "").trim();
+  if (a === "" || b === "") return null;
+  const min = Number(a);
+  const max = Number(b);
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min > max) return null;
+  return [min, max];
+}
+
+function KpiCSVChart({ title, color, headers, rows, fullRowsForGaps, defaultYHeader, defaultRightYHeader, singleYAxis = false, traceMode = "lines", enableAxisRangeControls = false }) {
   const [expanded, setExpanded] = useState(true);
+  const [leftYMinInput, setLeftYMinInput] = useState("");
+  const [leftYMaxInput, setLeftYMaxInput] = useState("");
+  const [rightYMinInput, setRightYMinInput] = useState("");
+  const [rightYMaxInput, setRightYMaxInput] = useState("");
   const safeHeaders = Array.isArray(headers) ? headers : [];
   const safeRows = Array.isArray(rows) ? rows : [];
   const safeFullRows = Array.isArray(fullRowsForGaps) ? fullRowsForGaps : [];
@@ -1220,8 +1240,18 @@ function KpiCSVChart({ title, color, headers, rows, fullRowsForGaps, defaultYHea
   const hasRight = !singleYAxis && selectedIndicesRight.length > 0;
   const leftTitle = hasLeft && selectedIndicesLeft.length === 1 ? (safeHeaders[selectedIndicesLeft[0]] ?? "Left") : "Left Y-axis";
   const rightTitle = hasRight && selectedIndicesRight.length === 1 ? (safeHeaders[selectedIndicesRight[0]] ?? "Right") : "Right Y-axis";
-  const yaxisLayout = { title: { text: leftTitle, font: { family: FONT, size: 12, color: "#94a3b8" } }, gridcolor: "#F1F5F9", tickfont: { family: MONO, size: 10, color: "#94a3b8" }, side: "left" };
-  const yaxis2Layout = hasRight ? { title: { text: rightTitle, font: { family: FONT, size: 12, color: "#94a3b8" } }, gridcolor: "transparent", tickfont: { family: MONO, size: 10, color: "#94a3b8" }, overlaying: "y", side: "right" } : undefined;
+  const leftRange = enableAxisRangeControls ? parseAxisRange(leftYMinInput, leftYMaxInput) : null;
+  const rightRange = enableAxisRangeControls && hasRight ? parseAxisRange(rightYMinInput, rightYMaxInput) : null;
+  const yaxisLayout = {
+    ...{ title: { text: leftTitle, font: { family: FONT, size: 12, color: "#94a3b8" } }, gridcolor: "#F1F5F9", tickfont: { family: MONO, size: 10, color: "#94a3b8" }, side: "left" },
+    ...(leftRange ? { autorange: false, range: leftRange } : { autorange: true }),
+  };
+  const yaxis2Layout = hasRight
+    ? {
+        ...{ title: { text: rightTitle, font: { family: FONT, size: 12, color: "#94a3b8" } }, gridcolor: "transparent", tickfont: { family: MONO, size: 10, color: "#94a3b8" }, overlaying: "y", side: "right" },
+        ...(rightRange ? { autorange: false, range: rightRange } : { autorange: true }),
+      }
+    : undefined;
   if (plottableCols.length === 0) return null;
   return (
     <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #E2E8F0", overflow: "hidden" }}>
@@ -1241,12 +1271,34 @@ function KpiCSVChart({ title, color, headers, rows, fullRowsForGaps, defaultYHea
           {chartData.length === 0 ? (
             <div style={{ height: 200, display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", fontFamily: FONT }}>{singleYAxis ? "Select a column for Y-axis" : "Select at least one column from Left or Right Y-axis"}</div>
           ) : (
-            <Plot
-              data={chartData}
-              layout={{ height: 340, margin: { t: 44, r: singleYAxis ? 50 : 60, b: 50, l: 60 }, hovermode: "x unified", showlegend: chartData.length > 1, legend: { orientation: "h", x: 0.5, y: 1.02, xanchor: "center", yanchor: "bottom", font: { family: FONT, size: 11 } }, xaxis: { title: { text: safeHeaders[0] ?? "Index", font: { family: FONT, size: 12, color: "#94a3b8" } }, gridcolor: "#F1F5F9", tickfont: { family: MONO, size: 10, color: "#94a3b8" }, rangeslider: { visible: false } }, yaxis: yaxisLayout, ...(yaxis2Layout && { yaxis2: yaxis2Layout }), plot_bgcolor: "#fff", paper_bgcolor: "#fff", font: { family: FONT } }}
-              config={{ displaylogo: false, responsive: true, modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d"] }}
-              style={{ width: "100%" }}
-            />
+            <>
+              {enableAxisRangeControls && (
+                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginBottom: 10, padding: "8px 10px", background: "#F8FAFC", borderRadius: 10, border: "1px solid #E2E8F0" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontFamily: FONT, fontSize: 11, fontWeight: 500, color: "#64748B", whiteSpace: "nowrap" }}>Left Y-axis Min</span>
+                    <input type="text" value={leftYMinInput} onChange={(e) => setLeftYMinInput(e.target.value)} placeholder="auto" style={{ width: 64, padding: "4px 6px", fontFamily: MONO, fontSize: 11, color: "#0F172A", border: "1px solid #E2E8F0", borderRadius: 6, background: "#fff" }} />
+                    <span style={{ fontFamily: FONT, fontSize: 11, fontWeight: 500, color: "#64748B" }}>Max</span>
+                    <input type="text" value={leftYMaxInput} onChange={(e) => setLeftYMaxInput(e.target.value)} placeholder="auto" style={{ width: 64, padding: "4px 6px", fontFamily: MONO, fontSize: 11, color: "#0F172A", border: "1px solid #E2E8F0", borderRadius: 6, background: "#fff" }} />
+                    <button type="button" onClick={() => { setLeftYMinInput(""); setLeftYMaxInput(""); }} style={{ padding: "4px 8px", fontFamily: FONT, fontSize: 10, fontWeight: 600, color: "#64748B", background: "#fff", border: "1px solid #E2E8F0", borderRadius: 6, cursor: "pointer" }} title="Reset to automatic scaling">Reset</button>
+                  </div>
+                  {hasRight && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontFamily: FONT, fontSize: 11, fontWeight: 500, color: "#64748B", whiteSpace: "nowrap" }}>Right Y-axis Min</span>
+                      <input type="text" value={rightYMinInput} onChange={(e) => setRightYMinInput(e.target.value)} placeholder="auto" style={{ width: 64, padding: "4px 6px", fontFamily: MONO, fontSize: 11, color: "#0F172A", border: "1px solid #E2E8F0", borderRadius: 6, background: "#fff" }} />
+                      <span style={{ fontFamily: FONT, fontSize: 11, fontWeight: 500, color: "#64748B" }}>Max</span>
+                      <input type="text" value={rightYMaxInput} onChange={(e) => setRightYMaxInput(e.target.value)} placeholder="auto" style={{ width: 64, padding: "4px 6px", fontFamily: MONO, fontSize: 11, color: "#0F172A", border: "1px solid #E2E8F0", borderRadius: 6, background: "#fff" }} />
+                      <button type="button" onClick={() => { setRightYMinInput(""); setRightYMaxInput(""); }} style={{ padding: "4px 8px", fontFamily: FONT, fontSize: 10, fontWeight: 600, color: "#64748B", background: "#fff", border: "1px solid #E2E8F0", borderRadius: 6, cursor: "pointer" }} title="Reset to automatic scaling">Reset</button>
+                    </div>
+                  )}
+                </div>
+              )}
+              <Plot
+                data={chartData}
+                layout={{ height: 340, margin: { t: 44, r: singleYAxis ? 50 : 60, b: 50, l: 60 }, hovermode: "x unified", showlegend: chartData.length > 1, legend: { orientation: "h", x: 0.5, y: 1.02, xanchor: "center", yanchor: "bottom", font: { family: FONT, size: 11 } }, xaxis: { title: { text: safeHeaders[0] ?? "Index", font: { family: FONT, size: 12, color: "#94a3b8" } }, gridcolor: "#F1F5F9", tickfont: { family: MONO, size: 10, color: "#94a3b8" }, rangeslider: { visible: false } }, yaxis: yaxisLayout, ...(yaxis2Layout && { yaxis2: yaxis2Layout }), plot_bgcolor: "#fff", paper_bgcolor: "#fff", font: { family: FONT } }}
+                config={{ displaylogo: false, responsive: true, modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d"] }}
+                style={{ width: "100%" }}
+              />
+            </>
           )}
         </div>
       )}
@@ -1255,7 +1307,7 @@ function KpiCSVChart({ title, color, headers, rows, fullRowsForGaps, defaultYHea
 }
 
 // ── Ya / Yr grouped bar chart (same card style as Daily KPI — Chart) ──
-const YA_YR_BAR_COLORS = { Yr: "#0891b2", Ya: "#7c3aed" }; // teal, violet
+const YA_YR_BAR_COLORS = { Yr: "#fb8500", Ya: "#0077b6" }; 
 
 function KpiYaYrBarChart({ title, color, x, ya, yr, xAxisTitle }) {
   const [expanded, setExpanded] = useState(true);
@@ -1263,7 +1315,7 @@ function KpiYaYrBarChart({ title, color, x, ya, yr, xAxisTitle }) {
     <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #E2E8F0", overflow: "hidden" }}>
       <div onClick={() => setExpanded(!expanded)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", cursor: "pointer", userSelect: "none", borderBottom: expanded ? "1px solid #E2E8F0" : "none" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <TimelineOutlined sx={{ fontSize: 20, color }} />
+          <BarChart sx={{ fontSize: 20, color }} />
           <span style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: FONT }}>{title} — Chart</span>
         </div>
         {expanded ? <ExpandLessIcon sx={{ fontSize: 20, color: "#94a3b8" }} /> : <ExpandMoreIcon sx={{ fontSize: 20, color: "#94a3b8" }} />}
