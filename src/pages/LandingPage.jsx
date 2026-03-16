@@ -13,6 +13,7 @@ import {
   AutoFixHigh,
   ElectricBolt,
   FilterAltOutlined,
+  AccountTree,
   LinkedIn,
   GitHub,
   YouTube,
@@ -37,6 +38,7 @@ const TOOL_ICONS = {
   quality: <SearchOutlined sx={{ fontSize: 22, color: ICON_COLOR }} />,
   kpi: <QueryStats sx={{ fontSize: 22, color: ICON_COLOR }} />,
   gap: <AutoFixHigh sx={{ fontSize: 22, color: ICON_COLOR }} />,
+  pipeline: <AccountTree sx={{ fontSize: 22, color: ICON_COLOR }} />,
   predict: <ElectricBolt sx={{ fontSize: 22, color: ICON_COLOR }} />,
   lcoe: <CurrencyExchangeIcon sx={{ fontSize: 22, color: ICON_COLOR }} />,
   filter: <FilterAltOutlined sx={{ fontSize: 22, color: ICON_COLOR }} />,
@@ -543,6 +545,7 @@ const PLATFORM_MODULES = [
   { number: "05", icon: TOOL_ICONS.predict, title: "Power Prediction", subtitle: "Energy forecast & performance model", path: "/power-prediction", desc: "Combines a single-diode physical model with weather inputs (GHI, Tamb, wind) to predict expected power. Flags under-performance and estimates energy losses.", tags: ["Physical model", "Weather correlation", "Loss analysis", "Scenarios"] },
   { number: "06", icon: TOOL_ICONS.lcoe, title: "LCOE Calculator", subtitle: "Financial analysis & PVsyst integration", path: "/lcoe-tool", desc: "Industry-standard Levelized Cost of Energy with 20+ itemized CAPEX line items, linear degradation, DCF analysis, IRR, NPV, payback, and tornado sensitivity charts.", tags: ["LCOE $/kWh", "CAPEX breakdown", "Cash flow", "IRR / NPV"] },
   { number: "07", icon: <LinkOutlined sx={{ fontSize: 22, color: "#fff" }} />, title: "Series Workflows", subtitle: "Chain tools on the same dataset", path: "/data-ingestion", desc: "Execute multiple modules in sequence: QC → Gap Fill → KPI → Prediction → Report. Each stage consumes corrected output from the previous one, ensuring full data consistency.", tags: ["QC", "Gap Fill", "KPI", "Predict", "LCOE", "Report"], isWorkflow: true },
+  { number: "08", icon: TOOL_ICONS.pipeline, title: "Pipeline", subtitle: "End-to-end data and model orchestration", path: "/pipeline", desc: "End-to-end data and model pipeline orchestration with configurable steps and monitoring.", tags: ["Orchestration", "Configurable steps", "Monitoring", "Workflows"] },
 ];
 
 export default function LandingPage() {
@@ -1361,6 +1364,7 @@ export default function LandingPage() {
               { label: "Gap Filling", path: "/gap-filling" },
               { label: "Power Prediction", path: "/power-prediction" },
               { label: "LCOE Calculator", path: "/lcoe-tool" },
+              { label: "Pipeline", path: "/pipeline" },
             ].map(l => (
               <Link key={l.path} to={l.path} style={{
                 display: "block", fontSize: 13, color: "#64748B",

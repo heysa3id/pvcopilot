@@ -6,6 +6,7 @@ import {
   AutoFixHigh,
   ElectricBolt,
   FilterAltOutlined,
+  AccountTree,
 } from "@mui/icons-material";
 import CurrencyExchangeIcon from "@mui/icons-material/CurrencyExchange";
 
@@ -18,6 +19,7 @@ const TOOLS = [
   { path: "/gap-filling",      label: "Gap Filling",         icon: <AutoFixHigh sx={{ fontSize: 18, color: ICON_COLOR }} />, color: "#059669" },
   { path: "/power-prediction", label: "Power Prediction",    icon: <ElectricBolt sx={{ fontSize: 18, color: ICON_COLOR }} />, color: "#ff7a45" },
   { path: "/lcoe-tool",        label: "LCOE Tool",           icon: <CurrencyExchangeIcon sx={{ fontSize: 18, color: ICON_COLOR }} />, color: "#1d9bf0" },
+  { path: "/pipeline",        label: "Pipeline",            icon: <AccountTree sx={{ fontSize: 18, color: ICON_COLOR }} />, color: "#0ea5e9" },
 ];
 
 export default function Navbar() {
