@@ -16,6 +16,10 @@ import ChevronRight from "@mui/icons-material/ChevronRight";
 import CloseOutlined from "@mui/icons-material/CloseOutlined";
 import FileDownloadOutlined from "@mui/icons-material/FileDownloadOutlined";
 import HelpOutline from "@mui/icons-material/HelpOutline";
+import BookmarkAddedOutlinedIcon from "@mui/icons-material/BookmarkAddedOutlined";
+import RotateLeftOutlinedIcon from "@mui/icons-material/RotateLeftOutlined";
+import Button from "@mui/material/Button";
+import TableColumnSelector from "../components/TableColumnSelector";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -1315,44 +1319,60 @@ function FilterDateFilterBar({
                       }}
                     />
                     <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                      <button
-                        type="button"
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<RotateLeftOutlinedIcon />}
                         onClick={() => { setStepDraftValue(String(resamplingStepMinutes)); setStepPopoverOpen(false); }}
-                        style={{
-                          padding: "6px 14px",
-                          borderRadius: 8,
-                          border: "1.5px solid #E2E8F0",
-                          background: "#fff",
-                          fontFamily: FONT,
-                          fontSize: 12,
-                          fontWeight: 600,
+                        sx={{
+                          borderRadius: 2,
+                          textTransform: "none",
+                          border: "1px solid #E2E8F0",
                           color: "#64748B",
-                          cursor: "pointer",
+                          backgroundColor: "#F1F5F9",
+                          "&:hover": {
+                            border: "1px solid #ff4d6d",
+                            color: "#ff4d6d",
+                            backgroundColor: "rgba(255,77,109,0.08)",
+                          },
+                          "&:active": {
+                            border: "1px solid #ff4d6d",
+                            color: "#ff4d6d",
+                            backgroundColor: "rgba(255,77,109,0.15)",
+                          },
                         }}
                       >
-                        Reset
-                      </button>
-                      <button
-                        type="button"
+                        Cancel
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<BookmarkAddedOutlinedIcon />}
                         onClick={handleValidateStep}
                         disabled={(() => {
                           const v = parseInt(stepDraftValue, 10);
                           return Number.isNaN(v) || v < 1 || v > 1440;
                         })()}
-                        style={{
-                          padding: "6px 14px",
-                          borderRadius: 8,
-                          border: "none",
-                          background: accentColor,
-                          fontFamily: FONT,
-                          fontSize: 12,
-                          fontWeight: 600,
-                          color: "#fff",
-                          cursor: "pointer",
+                        sx={{
+                          borderRadius: 2,
+                          textTransform: "none",
+                          border: "1px solid #E2E8F0",
+                          color: "#64748B",
+                          backgroundColor: "#F1F5F9",
+                          "&:hover": {
+                            border: "1px solid #52b788",
+                            color: "#52b788",
+                            backgroundColor: "rgba(82,183,136,0.08)",
+                          },
+                          "&:active": {
+                            border: "1px solid #52b788",
+                            color: "#52b788",
+                            backgroundColor: "rgba(82,183,136,0.15)",
+                          },
                         }}
                       >
-                        Validate
-                      </button>
+                        Apply
+                      </Button>
                     </div>
                   </>
                 )}
@@ -1381,10 +1401,22 @@ function FilterDateFilterBar({
 }
 
 // ── PV Data table (Data Filtering only) ──
+const ROW_NUM_ID = "_rowNum";
+
 function FilterCSVTable({ title, icon, color, headers, rows, resampled, originalRows, resampledStepMinutes = 10 }) {
   const [expanded, setExpanded] = useState(false);
   const safeHeaders = Array.isArray(headers) ? headers : [];
   const safeRows = Array.isArray(rows) ? rows : [];
+  const columns = useMemo(
+    () => [
+      { id: ROW_NUM_ID, label: "#" },
+      ...safeHeaders.map((h, i) => ({ id: i, label: String(h ?? "").trim() || `Column ${i + 1}` })),
+    ],
+    [safeHeaders]
+  );
+  const defaultVisibleIds = useMemo(() => columns.map((c) => c.id), [columns]);
+  const [visibleIds, setVisibleIds] = useState(() => defaultVisibleIds);
+  const visibleColumns = useMemo(() => columns.filter((c) => visibleIds.includes(c.id)), [columns, visibleIds]);
 
   return (
     <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #E2E8F0", overflow: "hidden" }}>
@@ -1404,7 +1436,7 @@ function FilterCSVTable({ title, icon, color, headers, rows, resampled, original
           {icon}
           <span style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: FONT }}>{title}</span>
           <span style={{ fontSize: 11, fontWeight: 600, color, background: `${color}14`, padding: "2px 10px", borderRadius: 20, fontFamily: MONO }}>
-            {safeRows.length} rows × {safeHeaders.length} cols
+            {safeRows.length} rows × {visibleColumns.length} cols
           </span>
           {resampled && (
             <span style={{ fontSize: 11, fontWeight: 600, color: Y, background: `${Y}14`, padding: "2px 10px", borderRadius: 20, fontFamily: MONO }}>
@@ -1412,25 +1444,28 @@ function FilterCSVTable({ title, icon, color, headers, rows, resampled, original
             </span>
           )}
         </div>
-        {expanded ? <ExpandLessIcon sx={{ fontSize: 20, color: "#94a3b8" }} /> : <ExpandMoreIcon sx={{ fontSize: 20, color: "#94a3b8" }} />}
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }} onClick={(e) => e.stopPropagation()}>
+          <TableColumnSelector columns={columns} visibleIds={visibleIds} onVisibleChange={setVisibleIds} defaultVisibleIds={defaultVisibleIds} />
+          {expanded ? <ExpandLessIcon sx={{ fontSize: 20, color: "#94a3b8" }} /> : <ExpandMoreIcon sx={{ fontSize: 20, color: "#94a3b8" }} />}
+        </div>
       </div>
       {expanded && (
         <div style={{ overflowX: "auto", maxHeight: 370, overflowY: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, fontFamily: MONO }}>
             <thead>
               <tr>
-                <th style={thStyle}>#</th>
-                {safeHeaders.map((h, i) => (
-                  <th key={i} style={thStyle}>{h}</th>
+                {visibleColumns.map((c) => (
+                  <th key={c.id} style={thStyle}>{c.label}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {safeRows.map((row, ri) => (
                 <tr key={ri} style={{ background: ri % 2 === 0 ? "#fff" : "#FAFBFC" }}>
-                  <td style={{ ...tdStyle, color: "#94a3b8", fontWeight: 600 }}>{ri + 1}</td>
-                  {safeHeaders.map((_, ci) => (
-                    <td key={ci} style={tdStyle}>{Array.isArray(row) ? (row[ci] ?? "") : ""}</td>
+                  {visibleColumns.map((c) => (
+                    <td key={c.id} style={c.id === ROW_NUM_ID ? { ...tdStyle, color: "#94a3b8", fontWeight: 600 } : tdStyle}>
+                      {c.id === ROW_NUM_ID ? ri + 1 : (Array.isArray(row) ? (row[c.id] ?? "") : "")}
+                    </td>
                   ))}
                 </tr>
               ))}
@@ -1883,12 +1918,25 @@ function PdcPvWattsCorrelationChart({ data }) {
 }
 
 // ── Labeled data table (labeled_df) below Measured Vs Calculated Power ──
+const FILTERED_TABLE_COLUMNS = [
+  { id: "rowNum", label: "#" },
+  { id: "time", label: "Time" },
+  { id: "P_DC", label: "P_DC" },
+  { id: "PVWatts", label: "PVWatts" },
+  { id: "rel_error", label: "rel_error" },
+  { id: "status", label: "Status" },
+];
+
 function FilteredDataTable({ data, title = "Filtered Data" }) {
   const [expanded, setExpanded] = useState(false);
   const [statusFilterOpen, setStatusFilterOpen] = useState(false);
   const [statusFilter, setStatusFilter] = useState("all"); // 'all' | 'valid' | 'removed'
   const statusFilterRef = useRef(null);
   const statusPopoverRef = useRef(null);
+
+  const defaultVisibleIds = useMemo(() => FILTERED_TABLE_COLUMNS.map((c) => c.id), []);
+  const [visibleIds, setVisibleIds] = useState(() => defaultVisibleIds);
+  const visibleColumns = useMemo(() => FILTERED_TABLE_COLUMNS.filter((c) => visibleIds.includes(c.id)), [visibleIds]);
 
   const rows = Array.isArray(data) ? data : [];
   const filteredRows = useMemo(() => {
@@ -1905,6 +1953,16 @@ function FilteredDataTable({ data, title = "Filtered Data" }) {
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [statusFilterOpen]);
+
+  const renderCell = (colId, d, ri) => {
+    if (colId === "rowNum") return ri + 1;
+    if (colId === "time") return d.time ?? "";
+    if (colId === "P_DC") return d.P_DC != null ? Number(d.P_DC).toFixed(4) : "";
+    if (colId === "PVWatts") return d.PVWatts != null ? Number(d.PVWatts).toFixed(4) : "";
+    if (colId === "rel_error") return d.rel_error != null ? (Number(d.rel_error) * 100).toFixed(2) + "%" : "";
+    if (colId === "status") return d.status ?? "";
+    return "";
+  };
 
   return (
     <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #E2E8F0", overflow: "hidden", marginTop: 20 }}>
@@ -1925,9 +1983,13 @@ function FilteredDataTable({ data, title = "Filtered Data" }) {
           <span style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: FONT }}>{title}</span>
           <span style={{ fontSize: 11, fontWeight: 600, color: DF, background: `${DF}14`, padding: "2px 10px", borderRadius: 20, fontFamily: FONT }}>
             {statusFilter === "all" ? `${rows.length} rows` : `${filteredRows.length} of ${rows.length} rows`}
+            {visibleColumns.length < FILTERED_TABLE_COLUMNS.length ? ` × ${visibleColumns.length} cols` : ""}
           </span>
         </div>
-        {expanded ? <ExpandLessIcon sx={{ fontSize: 20, color: "#94a3b8" }} /> : <ExpandMoreIcon sx={{ fontSize: 20, color: "#94a3b8" }} />}
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }} onClick={(e) => e.stopPropagation()}>
+          <TableColumnSelector columns={FILTERED_TABLE_COLUMNS} visibleIds={visibleIds} onVisibleChange={setVisibleIds} defaultVisibleIds={defaultVisibleIds} />
+          {expanded ? <ExpandLessIcon sx={{ fontSize: 20, color: "#94a3b8" }} /> : <ExpandMoreIcon sx={{ fontSize: 20, color: "#94a3b8" }} />}
+        </div>
       </div>
       {expanded && (
         <>
@@ -1970,91 +2032,93 @@ function FilteredDataTable({ data, title = "Filtered Data" }) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, fontFamily: FONT }}>
             <thead>
               <tr>
-                <th style={thStyle}>#</th>
-                <th style={thStyle}>Time</th>
-                <th style={thStyle}>P_DC</th>
-                <th style={thStyle}>PVWatts</th>
-                <th style={thStyle}>rel_error</th>
-                <th style={thStyle}>
-                  <span>status</span>
-                  <button
-                    ref={statusFilterRef}
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); setStatusFilterOpen((v) => !v); }}
-                    style={{
-                      marginLeft: 6,
-                      padding: 2,
-                      border: "none",
-                      background: "transparent",
-                      cursor: "pointer",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      verticalAlign: "middle",
-                    }}
-                    title="Filter by status"
-                  >
-                    <FilterAltOutlined sx={{ fontSize: 14, color: statusFilter !== "all" ? DF : "#94a3b8" }} />
-                  </button>
-                  {statusFilterOpen && (
-                    <div
-                      ref={statusPopoverRef}
-                      style={{
-                        position: "absolute",
-                        top: "100%",
-                        left: 0,
-                        marginTop: 4,
-                        background: "#fff",
-                        border: "1px solid #E2E8F0",
-                        borderRadius: 10,
-                        boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
-                        zIndex: 50,
-                        minWidth: 120,
-                        padding: "6px 0",
-                      }}
-                    >
-                      {[
-                        { opt: "all", color: B },
-                        { opt: "valid", color: Y },
-                        { opt: "removed", color: DF },
-                      ].map(({ opt, color }) => (
+                {visibleColumns.map((c) => (
+                  <th key={c.id} style={thStyle}>
+                    {c.id === "status" ? (
+                      <>
+                        <span>Status</span>
                         <button
-                          key={opt}
+                          ref={statusFilterRef}
                           type="button"
-                          onClick={() => { setStatusFilter(opt); setStatusFilterOpen(false); }}
+                          onClick={(e) => { e.stopPropagation(); setStatusFilterOpen((v) => !v); }}
                           style={{
-                            width: "100%",
-                            padding: "6px 12px",
+                            marginLeft: 6,
+                            padding: 2,
                             border: "none",
-                            background: statusFilter === opt ? `${color}14` : "transparent",
-                            color: statusFilter === opt ? color : "#334155",
-                            fontFamily: FONT,
-                            fontSize: 12,
-                            textAlign: "left",
+                            background: "transparent",
                             cursor: "pointer",
-                            textTransform: "capitalize",
-                            display: "flex",
+                            display: "inline-flex",
                             alignItems: "center",
-                            gap: 8,
+                            verticalAlign: "middle",
                           }}
+                          title="Filter by status"
                         >
-                          <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
-                          {opt}
+                          <FilterAltOutlined sx={{ fontSize: 14, color: statusFilter !== "all" ? DF : "#94a3b8" }} />
                         </button>
-                      ))}
-                    </div>
-                  )}
-                </th>
+                        {statusFilterOpen && (
+                          <div
+                            ref={statusPopoverRef}
+                            style={{
+                              position: "absolute",
+                              top: "100%",
+                              left: 0,
+                              marginTop: 4,
+                              background: "#fff",
+                              border: "1px solid #E2E8F0",
+                              borderRadius: 10,
+                              boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
+                              zIndex: 50,
+                              minWidth: 120,
+                              padding: "6px 0",
+                            }}
+                          >
+                            {[
+                              { opt: "all", color: B },
+                              { opt: "valid", color: Y },
+                              { opt: "removed", color: DF },
+                            ].map(({ opt, color }) => (
+                              <button
+                                key={opt}
+                                type="button"
+                                onClick={() => { setStatusFilter(opt); setStatusFilterOpen(false); }}
+                                style={{
+                                  width: "100%",
+                                  padding: "6px 12px",
+                                  border: "none",
+                                  background: statusFilter === opt ? `${color}14` : "transparent",
+                                  color: statusFilter === opt ? color : "#334155",
+                                  fontFamily: FONT,
+                                  fontSize: 12,
+                                  textAlign: "left",
+                                  cursor: "pointer",
+                                  textTransform: "capitalize",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  gap: 8,
+                                }}
+                              >
+                                <span style={{ width: 8, height: 8, borderRadius: "50%", background: color, flexShrink: 0 }} />
+                                {opt}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </>
+                    ) : (
+                      c.label
+                    )}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
               {filteredRows.map((d, ri) => (
                 <tr key={ri} style={{ background: ri % 2 === 0 ? "#fff" : "#FAFBFC" }}>
-                  <td style={{ ...tdStyle, color: "#94a3b8", fontWeight: 600 }}>{ri + 1}</td>
-                  <td style={tdStyle}>{d.time ?? ""}</td>
-                  <td style={tdStyle}>{d.P_DC != null ? Number(d.P_DC).toFixed(4) : ""}</td>
-                  <td style={tdStyle}>{d.PVWatts != null ? Number(d.PVWatts).toFixed(4) : ""}</td>
-                  <td style={tdStyle}>{d.rel_error != null ? (Number(d.rel_error) * 100).toFixed(2) + "%" : ""}</td>
-                  <td style={tdStyle}>{d.status ?? ""}</td>
+                  {visibleColumns.map((c) => (
+                    <td key={c.id} style={c.id === "rowNum" ? { ...tdStyle, color: "#94a3b8", fontWeight: 600 } : tdStyle}>
+                      {renderCell(c.id, d, ri)}
+                    </td>
+                  ))}
                 </tr>
               ))}
             </tbody>
@@ -2093,9 +2157,9 @@ function FilterColumnMultiSelect({ options, selected, onChange, label }) {
   const buttonText = selectedLabels.length === 0 ? (label ? `${label} (select)` : "Select columns") : selectedLabels.slice(0, 2).join(", ") + (selectedLabels.length > 2 ? ` +${selectedLabels.length - 2}` : "");
 
   return (
-    <div style={{ position: "relative", minWidth: 180 }}>
+    <div style={{ position: "relative", minWidth: 126 }}>
       {label && (
-        <div style={{ fontFamily: FONT, fontSize: 11, fontWeight: 700, color: "#64748B", marginBottom: 4 }}>{label}</div>
+        <div style={{ fontFamily: FONT, fontSize: 11, fontWeight: 500, color: "#94a3b8", marginBottom: 2 }}>{label}</div>
       )}
       <button
         ref={btnRef}
@@ -2106,16 +2170,16 @@ function FilterColumnMultiSelect({ options, selected, onChange, label }) {
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          gap: 10,
-          padding: "8px 10px",
-          borderRadius: 10,
-          border: "1.5px solid #E2E8F0",
+          gap: 6,
+          padding: "5px 8px",
+          borderRadius: 8,
+          border: "1px solid #E2E8F0",
           background: "#FAFBFC",
           cursor: "pointer",
           fontFamily: FONT,
-          color: "#0F172A",
-          fontSize: 13,
-          fontWeight: 650,
+          color: "#475569",
+          fontSize: 11,
+          fontWeight: 500,
         }}
         title={label || "Select columns"}
       >
@@ -2123,7 +2187,7 @@ function FilterColumnMultiSelect({ options, selected, onChange, label }) {
           {buttonText}
         </span>
         <span style={{ display: "flex", alignItems: "center", color: "#94a3b8" }}>
-          {open ? <ExpandLessIcon sx={{ fontSize: 18 }} /> : <ExpandMoreIcon sx={{ fontSize: 18 }} />}
+          {open ? <ExpandLessIcon sx={{ fontSize: 14 }} /> : <ExpandMoreIcon sx={{ fontSize: 14 }} />}
         </span>
       </button>
       {open && (
@@ -2131,20 +2195,20 @@ function FilterColumnMultiSelect({ options, selected, onChange, label }) {
           ref={popRef}
           style={{
             position: "absolute",
-            top: "calc(100% + 8px)",
+            top: "calc(100% + 4px)",
             right: 0,
             zIndex: 20,
-            width: 340,
-            maxHeight: 320,
+            width: 280,
+            maxHeight: 280,
             overflow: "auto",
             background: "#fff",
             border: "1px solid #E2E8F0",
-            borderRadius: 12,
-            boxShadow: "0 10px 30px rgba(2, 6, 23, 0.14)",
-            padding: 10,
+            borderRadius: 10,
+            boxShadow: "0 8px 24px rgba(2, 6, 23, 0.1)",
+            padding: 8,
           }}
         >
-          <div style={{ fontFamily: FONT, fontSize: 12, fontWeight: 700, color: "#64748B", padding: "2px 6px 8px" }}>{label ? `${label} — columns` : "Columns"}</div>
+          <div style={{ fontFamily: FONT, fontSize: 11, fontWeight: 500, color: "#94a3b8", padding: "2px 6px 4px" }}>{label ? `${label} — columns` : "Columns"}</div>
           {options.map((opt) => {
             const checked = selected.includes(opt.index);
             return (
@@ -2161,22 +2225,25 @@ function FilterColumnMultiSelect({ options, selected, onChange, label }) {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
-                  gap: 10,
-                  padding: "9px 10px",
+                  gap: 8,
+                  padding: "6px 8px",
                   border: "none",
                   background: checked ? "#EEF2FF" : "transparent",
-                  borderRadius: 10,
+                  borderRadius: 8,
                   cursor: "pointer",
                   textAlign: "left",
+                  fontFamily: FONT,
+                  fontSize: 11,
+                  fontWeight: 500,
                 }}
               >
-                <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                   <span
                     style={{
-                      width: 18,
-                      height: 18,
-                      borderRadius: 6,
-                      border: checked ? "none" : "1.5px solid #CBD5E1",
+                      width: 14,
+                      height: 14,
+                      borderRadius: 4,
+                      border: checked ? "none" : "1px solid #CBD5E1",
                       background: checked ? DF : "#fff",
                       display: "inline-flex",
                       alignItems: "center",
@@ -2184,13 +2251,13 @@ function FilterColumnMultiSelect({ options, selected, onChange, label }) {
                       flexShrink: 0,
                     }}
                   >
-                    {checked && <CheckCircleOutline sx={{ fontSize: 14, color: "#fff" }} />}
+                    {checked && <CheckCircleOutline sx={{ fontSize: 10, color: "#fff" }} />}
                   </span>
-                  <span style={{ fontFamily: FONT, fontSize: 13, fontWeight: 650, color: "#0F172A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <span style={{ fontFamily: FONT, fontSize: 11, fontWeight: 500, color: "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {opt.header}
                   </span>
                 </span>
-                <span style={{ fontFamily: MONO, fontSize: 11, color: "#94a3b8" }}>#{opt.index}</span>
+                <span style={{ fontFamily: FONT, fontSize: 10, fontWeight: 500, color: "#94a3b8" }}>#{opt.index}</span>
               </button>
             );
           })}
@@ -2933,12 +3000,12 @@ export default function DataFilteringPage() {
                             background: "#fff",
                             borderRadius: 12,
                             border: "1px solid #E2E8F0",
-                            boxShadow: "0 10px 40px rgba(0,0,0,0.12)",
+                            boxShadow: "0 12px 40px rgba(0,0,0,0.15)",
                             padding: 14,
                             maxWidth: 380,
                             fontFamily: FONT,
-                            fontSize: 12,
-                            color: "#334155",
+                            fontSize: 11,
+                            color: "#475569",
                             lineHeight: 1.55,
                           }}
                         >
@@ -3003,12 +3070,12 @@ export default function DataFilteringPage() {
                             background: "#fff",
                             borderRadius: 12,
                             border: "1px solid #E2E8F0",
-                            boxShadow: "0 10px 40px rgba(0,0,0,0.12)",
+                            boxShadow: "0 12px 40px rgba(0,0,0,0.15)",
                             padding: 14,
                             maxWidth: 340,
                             fontFamily: FONT,
-                            fontSize: 12,
-                            color: "#334155",
+                            fontSize: 11,
+                            color: "#475569",
                             lineHeight: 1.55,
                           }}
                         >
@@ -3113,12 +3180,12 @@ export default function DataFilteringPage() {
                           background: "#fff",
                           borderRadius: 12,
                           border: "1px solid #E2E8F0",
-                          boxShadow: "0 10px 40px rgba(0,0,0,0.12)",
+                          boxShadow: "0 12px 40px rgba(0,0,0,0.15)",
                           padding: 14,
                           maxWidth: 340,
                           fontFamily: FONT,
-                          fontSize: 12,
-                          color: "#334155",
+                          fontSize: 11,
+                          color: "#475569",
                           lineHeight: 1.55,
                         }}
                       >

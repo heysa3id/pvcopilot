@@ -24,6 +24,8 @@ import { generateLcoeReport } from "../utils/generateLcoeReport";
 import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
 import CurrencyExchangeIcon from "@mui/icons-material/CurrencyExchange";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
+import BookmarkAddedOutlinedIcon from "@mui/icons-material/BookmarkAddedOutlined";
+import RotateLeftOutlinedIcon from "@mui/icons-material/RotateLeftOutlined";
 
 // ── Currency data ─────────────────────────────────────────────────────────────
 const CURRENCIES = [
@@ -1800,41 +1802,65 @@ export default function LcoeTool() {
               }}
             />
 
-            <div style={{ display:"flex", gap:8 }}>
-              <button
-                onClick={() => {
-                  setCurrency(tempCurrency);
-                  setExchangeRate(tempCurrency === "USD" ? 1 : tempRate);
-                  setShowCurrencyPopup(false);
-                }}
-                style={{
-                  flex:1, padding:"8px 0", borderRadius:7,
-                  background:"#1F2937", color:"#fff",
-                  border:"none", cursor:"pointer",
-                  fontSize:11, fontWeight:600,
-                  fontFamily:"Inter, Arial, sans-serif",
-                  transition:"background .15s",
-                }}
-                onMouseEnter={e => e.currentTarget.style.background="#374151"}
-                onMouseLeave={e => e.currentTarget.style.background="#1F2937"}
-              >Validate</button>
-              <button
+            <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<RotateLeftOutlinedIcon />}
                 onClick={() => {
                   setCurrency("USD"); setExchangeRate(1);
                   setTempCurrency("USD"); setTempRate(1);
                   setShowCurrencyPopup(false);
                 }}
-                style={{
-                  flex:1, padding:"8px 0", borderRadius:7,
-                  background:"#F1F5F9", color:"#64748B",
-                  border:"1.5px solid #E2E8F0", cursor:"pointer",
-                  fontSize:11, fontWeight:600,
-                  fontFamily:"Inter, Arial, sans-serif",
-                  transition:"all .15s",
+                sx={{
+                  borderRadius: 2,
+                  textTransform: "none",
+                  border: "1px solid #E2E8F0",
+                  color: "#64748B",
+                  backgroundColor: "#F1F5F9",
+                  "&:hover": {
+                    border: "1px solid #ff4d6d",
+                    color: "#ff4d6d",
+                    backgroundColor: "rgba(255,77,109,0.08)",
+                  },
+                  "&:active": {
+                    border: "1px solid #ff4d6d",
+                    color: "#ff4d6d",
+                    backgroundColor: "rgba(255,77,109,0.15)",
+                  },
                 }}
-                onMouseEnter={e => { e.currentTarget.style.background="#E2E8F0"; }}
-                onMouseLeave={e => { e.currentTarget.style.background="#F1F5F9"; }}
-              >Reset to USD</button>
+              >
+                Cancel
+              </Button>
+              <Button
+                size="small"
+                variant="outlined"
+                startIcon={<BookmarkAddedOutlinedIcon />}
+                onClick={() => {
+                  setCurrency(tempCurrency);
+                  setExchangeRate(tempCurrency === "USD" ? 1 : tempRate);
+                  setShowCurrencyPopup(false);
+                }}
+                sx={{
+                  borderRadius: 2,
+                  textTransform: "none",
+                  border: "1px solid #E2E8F0",
+                  color: "#64748B",
+                  backgroundColor: "#F1F5F9",
+                  "&:hover": {
+                    border: "1px solid #52b788",
+                    color: "#52b788",
+                    backgroundColor: "rgba(82,183,136,0.08)",
+                  },
+                  "&:active": {
+                    border: "1px solid #52b788",
+                    color: "#52b788",
+                    backgroundColor: "rgba(82,183,136,0.15)",
+                  },
+                }}
+              >
+                Apply
+              </Button>
             </div>
           </div>
         </div>

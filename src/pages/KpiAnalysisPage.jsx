@@ -18,6 +18,10 @@ import CloseOutlined from "@mui/icons-material/CloseOutlined";
 import FilterAltOutlined from "@mui/icons-material/FilterAltOutlined";
 import FilterListOutlined from "@mui/icons-material/FilterListOutlined";
 import HelpOutline from "@mui/icons-material/HelpOutline";
+import BookmarkAddedOutlinedIcon from "@mui/icons-material/BookmarkAddedOutlined";
+import RotateLeftOutlinedIcon from "@mui/icons-material/RotateLeftOutlined";
+import Button from "@mui/material/Button";
+import TableColumnSelector from "../components/TableColumnSelector";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -953,8 +957,57 @@ function KpiDateFilterBar({ dateFrom, dateTo, onDateFromChange, onDateToChange, 
                     <div style={{ fontSize: 13, fontWeight: 700, color: "#0F172A", marginBottom: 10, fontFamily: FONT }}>Resampling step (minutes)</div>
                     <input type="text" value={stepDraftValue} onChange={(e) => setStepDraftValue(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleValidateStep()} placeholder="e.g. 10" autoFocus style={{ width: "100%", padding: "8px 10px", borderRadius: 8, border: "1.5px solid #E2E8F0", fontFamily: MONO, fontSize: 13, color: "#0F172A", background: "#fff", outline: "none", marginBottom: 12, boxSizing: "border-box" }} />
                     <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                      <button type="button" onClick={() => { setStepDraftValue(String(resamplingStepMinutes)); setStepPopoverOpen(false); }} style={{ padding: "6px 14px", borderRadius: 8, border: "1.5px solid #E2E8F0", background: "#fff", fontFamily: FONT, fontSize: 12, fontWeight: 600, color: "#64748B", cursor: "pointer" }}>Reset</button>
-                      <button type="button" onClick={handleValidateStep} disabled={(() => { const v = parseInt(stepDraftValue, 10); return Number.isNaN(v) || v < 1 || v > 1440; })()} style={{ padding: "6px 14px", borderRadius: 8, border: "none", background: accentColor, fontFamily: FONT, fontSize: 12, fontWeight: 600, color: "#fff", cursor: "pointer" }}>Validate</button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<RotateLeftOutlinedIcon />}
+                        onClick={() => { setStepDraftValue(String(resamplingStepMinutes)); setStepPopoverOpen(false); }}
+                        sx={{
+                          borderRadius: 2,
+                          textTransform: "none",
+                          border: "1px solid #E2E8F0",
+                          color: "#64748B",
+                          backgroundColor: "#F1F5F9",
+                          "&:hover": {
+                            border: "1px solid #ff4d6d",
+                            color: "#ff4d6d",
+                            backgroundColor: "rgba(255,77,109,0.08)",
+                          },
+                          "&:active": {
+                            border: "1px solid #ff4d6d",
+                            color: "#ff4d6d",
+                            backgroundColor: "rgba(255,77,109,0.15)",
+                          },
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<BookmarkAddedOutlinedIcon />}
+                        onClick={handleValidateStep}
+                        disabled={(() => { const v = parseInt(stepDraftValue, 10); return Number.isNaN(v) || v < 1 || v > 1440; })()}
+                        sx={{
+                          borderRadius: 2,
+                          textTransform: "none",
+                          border: "1px solid #E2E8F0",
+                          color: "#64748B",
+                          backgroundColor: "#F1F5F9",
+                          "&:hover": {
+                            border: "1px solid #52b788",
+                            color: "#52b788",
+                            backgroundColor: "rgba(82,183,136,0.08)",
+                          },
+                          "&:active": {
+                            border: "1px solid #52b788",
+                            color: "#52b788",
+                            backgroundColor: "rgba(82,183,136,0.15)",
+                          },
+                        }}
+                      >
+                        Apply
+                      </Button>
                     </div>
                   </>
                 )}
@@ -976,32 +1029,57 @@ function KpiDateFilterBar({ dateFrom, dateTo, onDateFromChange, onDateToChange, 
 const kpiThStyle = { padding: "8px 14px", borderBottom: "1px solid #F1F5F9", color: "#0F172A", whiteSpace: "nowrap", textAlign: "left", fontWeight: 700, fontSize: 11, fontFamily: MONO, background: "#F8FAFC", position: "sticky", top: 0, zIndex: 2 };
 const kpiTdStyle = { padding: "8px 14px", borderBottom: "1px solid #F1F5F9", color: "#0F172A", whiteSpace: "nowrap", fontFamily: MONO };
 
+const ROW_NUM_ID = "_rowNum";
+
 function KpiCSVTable({ title, icon, color, headers, rows, resampled, originalRows, resampledStepMinutes = 10 }) {
   const [expanded, setExpanded] = useState(false);
   const safeHeaders = Array.isArray(headers) ? headers : [];
   const safeRows = Array.isArray(rows) ? rows : [];
+  const columns = useMemo(
+    () => [
+      { id: ROW_NUM_ID, label: "#" },
+      ...safeHeaders.map((h, i) => ({ id: i, label: String(h ?? "").trim() || `Column ${i + 1}` })),
+    ],
+    [safeHeaders]
+  );
+  const defaultVisibleIds = useMemo(() => columns.map((c) => c.id), [columns]);
+  const [visibleIds, setVisibleIds] = useState(() => defaultVisibleIds);
+  const visibleColumns = useMemo(() => columns.filter((c) => visibleIds.includes(c.id)), [columns, visibleIds]);
+
   return (
     <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #E2E8F0", overflow: "hidden" }}>
       <div onClick={() => setExpanded(!expanded)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", cursor: "pointer", userSelect: "none", borderBottom: expanded ? "1px solid #E2E8F0" : "none" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {icon}
           <span style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: FONT }}>{title}</span>
-          <span style={{ fontSize: 11, fontWeight: 600, color, background: `${color}14`, padding: "2px 10px", borderRadius: 20, fontFamily: MONO }}>{safeRows.length} rows × {safeHeaders.length} cols</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color, background: `${color}14`, padding: "2px 10px", borderRadius: 20, fontFamily: MONO }}>{safeRows.length} rows × {visibleColumns.length} cols</span>
           {resampled && (
             <span style={{ fontSize: 11, fontWeight: 600, color: Y, background: `${Y}14`, padding: "2px 10px", borderRadius: 20, fontFamily: MONO }}>{resampledStepMinutes === "D" || resampledStepMinutes === "daily" ? "Daily resampled" : `${resampledStepMinutes} min resampled`}{originalRows ? ` (from ${originalRows})` : ""}</span>
           )}
         </div>
-        {expanded ? <ExpandLessIcon sx={{ fontSize: 20, color: "#94a3b8" }} /> : <ExpandMoreIcon sx={{ fontSize: 20, color: "#94a3b8" }} />}
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }} onClick={(e) => e.stopPropagation()}>
+          <TableColumnSelector columns={columns} visibleIds={visibleIds} onVisibleChange={setVisibleIds} defaultVisibleIds={defaultVisibleIds} />
+          {expanded ? <ExpandLessIcon sx={{ fontSize: 20, color: "#94a3b8" }} /> : <ExpandMoreIcon sx={{ fontSize: 20, color: "#94a3b8" }} />}
+        </div>
       </div>
       {expanded && (
         <div style={{ overflowX: "auto", maxHeight: 370, overflowY: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12, fontFamily: MONO }}>
-            <thead><tr><th style={kpiThStyle}>#</th>{safeHeaders.map((h, i) => (<th key={i} style={kpiThStyle}>{h}</th>))}</tr></thead>
+            <thead>
+              <tr>
+                {visibleColumns.map((c) => (
+                  <th key={c.id} style={kpiThStyle}>{c.label}</th>
+                ))}
+              </tr>
+            </thead>
             <tbody>
               {safeRows.map((row, ri) => (
                 <tr key={ri} style={{ background: ri % 2 === 0 ? "#fff" : "#FAFBFC" }}>
-                  <td style={{ ...kpiTdStyle, color: "#94a3b8", fontWeight: 600 }}>{ri + 1}</td>
-                  {safeHeaders.map((_, ci) => (<td key={ci} style={kpiTdStyle}>{Array.isArray(row) ? (row[ci] ?? "") : ""}</td>))}
+                  {visibleColumns.map((c) => (
+                    <td key={c.id} style={c.id === ROW_NUM_ID ? { ...kpiTdStyle, color: "#94a3b8", fontWeight: 600 } : kpiTdStyle}>
+                      {c.id === ROW_NUM_ID ? ri + 1 : (Array.isArray(row) ? (row[c.id] ?? "") : "")}
+                    </td>
+                  ))}
                 </tr>
               ))}
             </tbody>
@@ -1035,24 +1113,24 @@ function KpiColumnMultiSelect({ options, selected, onChange, label }) {
   }, [options, selected]);
   const buttonText = selectedLabels.length === 0 ? (label ? `${label} (select)` : "Select columns") : selectedLabels.slice(0, 2).join(", ") + (selectedLabels.length > 2 ? ` +${selectedLabels.length - 2}` : "");
   return (
-    <div style={{ position: "relative", minWidth: 180 }}>
-      {label && <div style={{ fontFamily: FONT, fontSize: 11, fontWeight: 700, color: "#64748B", marginBottom: 4 }}>{label}</div>}
-      <button ref={btnRef} type="button" onClick={() => setOpen((v) => !v)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "8px 10px", borderRadius: 10, border: "1.5px solid #E2E8F0", background: "#FAFBFC", cursor: "pointer", fontFamily: FONT, color: "#0F172A", fontSize: 13, fontWeight: 650 }} title={label || "Select columns"}>
+    <div style={{ position: "relative", minWidth: 126 }}>
+      {label && <div style={{ fontFamily: FONT, fontSize: 11, fontWeight: 500, color: "#94a3b8", marginBottom: 2 }}>{label}</div>}
+      <button ref={btnRef} type="button" onClick={() => setOpen((v) => !v)} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 6, padding: "5px 8px", borderRadius: 8, border: "1px solid #E2E8F0", background: "#FAFBFC", cursor: "pointer", fontFamily: FONT, color: "#475569", fontSize: 11, fontWeight: 500 }} title={label || "Select columns"}>
         <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{buttonText}</span>
-        <span style={{ display: "flex", alignItems: "center", color: "#94a3b8" }}>{open ? <ExpandLessIcon sx={{ fontSize: 18 }} /> : <ExpandMoreIcon sx={{ fontSize: 18 }} />}</span>
+        <span style={{ display: "flex", alignItems: "center", color: "#94a3b8" }}>{open ? <ExpandLessIcon sx={{ fontSize: 14 }} /> : <ExpandMoreIcon sx={{ fontSize: 14 }} />}</span>
       </button>
       {open && (
-        <div ref={popRef} style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 20, width: 340, maxHeight: 320, overflow: "auto", background: "#fff", border: "1px solid #E2E8F0", borderRadius: 12, boxShadow: "0 10px 30px rgba(2, 6, 23, 0.14)", padding: 10 }}>
-          <div style={{ fontFamily: FONT, fontSize: 12, fontWeight: 700, color: "#64748B", padding: "2px 6px 8px" }}>{label ? `${label} — columns` : "Columns"}</div>
+        <div ref={popRef} style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 20, width: 280, maxHeight: 280, overflow: "auto", background: "#fff", border: "1px solid #E2E8F0", borderRadius: 10, boxShadow: "0 8px 24px rgba(2, 6, 23, 0.1)", padding: 8 }}>
+          <div style={{ fontFamily: FONT, fontSize: 11, fontWeight: 500, color: "#94a3b8", padding: "2px 6px 4px" }}>{label ? `${label} — columns` : "Columns"}</div>
           {options.map((opt) => {
             const checked = selected.includes(opt.index);
             return (
-              <button key={opt.index} type="button" onClick={() => { const next = checked ? selected.filter((i) => i !== opt.index) : [...selected, opt.index]; onChange(next.length ? next : [options[0]?.index ?? 0]); setOpen(false); }} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, padding: "9px 10px", border: "none", background: checked ? "#EEF2FF" : "transparent", borderRadius: 10, cursor: "pointer", textAlign: "left" }}>
-                <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                  <span style={{ width: 18, height: 18, borderRadius: 6, border: checked ? "none" : "1.5px solid #CBD5E1", background: checked ? KPI : "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{checked && <CheckCircleOutline sx={{ fontSize: 14, color: "#fff" }} />}</span>
-                  <span style={{ fontFamily: FONT, fontSize: 13, fontWeight: 650, color: "#0F172A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{opt.header}</span>
+              <button key={opt.index} type="button" onClick={() => { const next = checked ? selected.filter((i) => i !== opt.index) : [...selected, opt.index]; onChange(next.length ? next : [options[0]?.index ?? 0]); setOpen(false); }} style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "6px 8px", border: "none", background: checked ? "#EEF2FF" : "transparent", borderRadius: 8, cursor: "pointer", textAlign: "left", fontFamily: FONT, fontSize: 11, fontWeight: 500 }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                  <span style={{ width: 14, height: 14, borderRadius: 4, border: checked ? "none" : "1px solid #CBD5E1", background: checked ? KPI : "#fff", display: "inline-flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{checked && <CheckCircleOutline sx={{ fontSize: 10, color: "#fff" }} />}</span>
+                  <span style={{ fontFamily: FONT, fontSize: 11, fontWeight: 500, color: "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{opt.header}</span>
                 </span>
-                <span style={{ fontFamily: MONO, fontSize: 11, color: "#94a3b8" }}>#{opt.index}</span>
+                <span style={{ fontFamily: FONT, fontSize: 10, fontWeight: 500, color: "#94a3b8" }}>#{opt.index}</span>
               </button>
             );
           })}
@@ -1911,7 +1989,7 @@ export default function KpiAnalysisPage() {
                           >
                             <div style={{ fontWeight: 700, color: "#0F172A", marginBottom: 6 }}>IEC-61724 Filters</div>
                             <p style={{ margin: "0 0 10px 0" }}>
-                              IEC61724 filters are used to improve PV monitoring data quality by excluding weather measurements outside realistic operating ranges. The filtering step screens <strong>global horizontal irradiance (GHI)</strong>, <strong>ambient temperature</strong>, and <strong>wind speed</strong> to remove implausible values, sensor faults, and abnormal spikes before KPI calculation and performance analysis. These variables are commonly checked because they directly influence PV performance interpretation and downstream diagnostics.
+                              IEC61724 filters are used to improve PV monitoring data quality by excluding weather measurements outside realistic operating ranges. The filtering step screens global horizontal irradiance (GHI), ambient temperature, and wind speed to remove implausible values, sensor faults, and abnormal spikes before KPI calculation and performance analysis. These variables are commonly checked because they directly influence PV performance interpretation and downstream diagnostics.
                             </p>
                             <p style={{ margin: "0 0 8px 0" }}>
                               <strong>References:</strong>
@@ -1943,51 +2021,64 @@ export default function KpiAnalysisPage() {
                   </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
-                  <button
-                    type="button"
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<RotateLeftOutlinedIcon />}
                     onClick={handleIecReset}
-                    style={{
-                      fontFamily: FONT,
-                      fontSize: 12,
-                      fontWeight: 600,
-                      color: "#64748B",
-                      background: "#F1F5F9",
+                    sx={{
+                      borderRadius: 2,
+                      textTransform: "none",
                       border: "1px solid #E2E8F0",
-                      borderRadius: 8,
-                      padding: "8px 14px",
-                      cursor: "pointer",
+                      color: "#64748B",
+                      backgroundColor: "#F1F5F9",
+                      "&:hover": {
+                        border: "1px solid #ff4d6d",
+                        color: "#ff4d6d",
+                        backgroundColor: "rgba(255,77,109,0.08)",
+                      },
+                      "&:active": {
+                        border: "1px solid #ff4d6d",
+                        color: "#ff4d6d",
+                        backgroundColor: "rgba(255,77,109,0.15)",
+                      },
                     }}
                   >
-                    Reset
-                  </button>
-                  <button
-                    type="button"
+                    Cancel
+                  </Button>
+                  <Button
+                    size="small"
+                    variant="outlined"
+                    startIcon={<BookmarkAddedOutlinedIcon />}
                     onClick={handleIecApply}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = KPI; e.currentTarget.style.borderColor = KPI; e.currentTarget.style.color = "#fff"; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = "#F1F5F9"; e.currentTarget.style.borderColor = "#E2E8F0"; e.currentTarget.style.color = "#64748B"; }}
-                    onMouseDown={(e) => { e.currentTarget.style.background = KPI; e.currentTarget.style.borderColor = KPI; e.currentTarget.style.color = "#fff"; }}
-                    onMouseUp={(e) => { e.currentTarget.style.background = KPI; e.currentTarget.style.borderColor = KPI; e.currentTarget.style.color = "#fff"; }}
-                    style={{
-                      fontFamily: FONT,
-                      fontSize: 12,
-                      fontWeight: 600,
-                      color: "#64748B",
-                      background: "#F1F5F9",
+                    sx={{
+                      borderRadius: 2,
+                      textTransform: "none",
                       border: "1px solid #E2E8F0",
-                      borderRadius: 8,
-                      padding: "8px 14px",
-                      cursor: "pointer",
+                      color: "#64748B",
+                      backgroundColor: "#F1F5F9",
+                      "&:hover": {
+                        border: "1px solid #52b788",
+                        color: "#52b788",
+                        backgroundColor: "rgba(82,183,136,0.08)",
+                      },
+                      "&:active": {
+                        border: "1px solid #52b788",
+                        color: "#52b788",
+                        backgroundColor: "rgba(82,183,136,0.15)",
+                      },
                     }}
                   >
                     Apply
-                  </button>
+                  </Button>
                 </div>
               </div>
               <div style={{ marginTop: 4, paddingTop: 14, borderTop: "1px solid #E2E8F0", display: "flex", flexDirection: "column", gap: 10, width: "100%" }}>
                 <div style={{ display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "flex-start", gap: 16, flexWrap: "nowrap", width: "100%", minWidth: 0 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 4, alignItems: "stretch", flex: "1 1 auto", minWidth: 0 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, alignItems: "stretch", flex: "1 1 auto", minWidth: 0 }}>
                   {/* GHI */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "3px 4px", background: "#fff", borderRadius: 6, border: "1px solid #E2E8F0", minWidth: 0 }}>
+                  <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "3px 4px", background: "#fff", borderRadius: 6, border: "1px solid #E2E8F0", minWidth: 0, width: "92%", maxWidth: "100%", boxSizing: "border-box" }}>
                     <span style={{ fontFamily: FONT, fontSize: 7, fontWeight: 600, color: "#64748B", letterSpacing: "0.02em" }}>GHI (W/m²)</span>
                     <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
                       <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
@@ -2001,8 +2092,10 @@ export default function KpiAnalysisPage() {
                       </div>
                     </div>
                   </div>
+                  </div>
                   {/* T_amb */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "3px 4px", background: "#fff", borderRadius: 6, border: "1px solid #E2E8F0", minWidth: 0 }}>
+                  <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "3px 4px", background: "#fff", borderRadius: 6, border: "1px solid #E2E8F0", minWidth: 0, width: "92%", maxWidth: "100%", boxSizing: "border-box" }}>
                     <span style={{ fontFamily: FONT, fontSize: 7, fontWeight: 600, color: "#64748B", letterSpacing: "0.02em" }}>T_amb (°C)</span>
                     <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
                       <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
@@ -2016,8 +2109,10 @@ export default function KpiAnalysisPage() {
                       </div>
                     </div>
                   </div>
+                  </div>
                   {/* Wind */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "3px 4px", background: "#fff", borderRadius: 6, border: "1px solid #E2E8F0", minWidth: 0 }}>
+                  <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "3px 4px", background: "#fff", borderRadius: 6, border: "1px solid #E2E8F0", minWidth: 0, width: "92%", maxWidth: "100%", boxSizing: "border-box" }}>
                     <span style={{ fontFamily: FONT, fontSize: 7, fontWeight: 600, color: "#64748B", letterSpacing: "0.02em" }}>Wind (m/s)</span>
                     <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
                       <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
@@ -2031,8 +2126,10 @@ export default function KpiAnalysisPage() {
                       </div>
                     </div>
                   </div>
+                  </div>
                   {/* Power (kW) — P_DC */}
-                  <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "3px 4px", background: "#fff", borderRadius: 6, border: "1px solid #E2E8F0", minWidth: 0 }}>
+                  <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "3px 4px", background: "#fff", borderRadius: 6, border: "1px solid #E2E8F0", minWidth: 0, width: "92%", maxWidth: "100%", boxSizing: "border-box" }}>
                     <span style={{ fontFamily: FONT, fontSize: 7, fontWeight: 600, color: "#64748B", letterSpacing: "0.02em" }}>Power (kW)</span>
                     <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
                       <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
@@ -2045,6 +2142,7 @@ export default function KpiAnalysisPage() {
                         <input type="text" inputMode="decimal" className="kpi-iec-num-input" value={iecPowerMax !== "" ? iecPowerMax : (maxPdcInData != null ? String(maxPdcInData) : "")} onChange={(e) => setIecPowerMax(e.target.value)} placeholder={maxPdcInData != null ? String(maxPdcInData) : "—"} style={{ width: "100%", height: 26, padding: "10px 4px 2px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box" }} />
                       </div>
                     </div>
+                  </div>
                   </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
@@ -2088,7 +2186,7 @@ export default function KpiAnalysisPage() {
                   </button>
                 </div>
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
                   <span style={{ fontSize: 10, color: "#64748B", fontFamily: FONT }}>Rows outside ranges excluded.</span>
                   <span style={{ fontSize: 10, fontWeight: 600, color: KPI, background: `${KPI}14`, padding: "2px 8px", borderRadius: 6, fontFamily: MONO }}>
                     {pvStatusFilteredRows.length} / {pvFilteredRows.length} rows

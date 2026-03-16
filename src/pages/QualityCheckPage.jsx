@@ -19,6 +19,10 @@ import ChevronRight from "@mui/icons-material/ChevronRight";
 import SyncAltOutlined from "@mui/icons-material/SyncAltOutlined";
 import ShowChartOutlined from "@mui/icons-material/ShowChartOutlined";
 import FileDownloadOutlinedIcon from "@mui/icons-material/FileDownloadOutlined";
+import BookmarkAddedOutlinedIcon from "@mui/icons-material/BookmarkAddedOutlined";
+import RotateLeftOutlinedIcon from "@mui/icons-material/RotateLeftOutlined";
+import Button from "@mui/material/Button";
+import TableColumnSelector from "../components/TableColumnSelector";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -555,10 +559,23 @@ function UploadZone({ label, icon, accept, color, file, onLoad, onFileUpload, on
 }
 
 // ── CSV Table (scrollable, 10 visible rows) ─────────────────────────────────
+const ROW_NUM_ID = "_rowNum";
+
 function CSVTable({ title, icon, color, headers, rows, resampled, originalRows, resampledStepMinutes = 10 }) {
   const [expanded, setExpanded] = useState(false);
   const safeHeaders = Array.isArray(headers) ? headers : [];
   const safeRows = Array.isArray(rows) ? rows : [];
+
+  const columns = useMemo(
+    () => [
+      { id: ROW_NUM_ID, label: "#" },
+      ...safeHeaders.map((h, i) => ({ id: i, label: String(h ?? "").trim() || `Column ${i + 1}` })),
+    ],
+    [safeHeaders]
+  );
+  const defaultVisibleIds = useMemo(() => columns.map((c) => c.id), [columns]);
+  const [visibleIds, setVisibleIds] = useState(() => defaultVisibleIds);
+  const visibleColumns = useMemo(() => columns.filter((c) => visibleIds.includes(c.id)), [columns, visibleIds]);
 
   return (
     <div style={{
@@ -581,7 +598,7 @@ function CSVTable({ title, icon, color, headers, rows, resampled, originalRows, 
             fontSize: 11, fontWeight: 600, color, background: `${color}14`,
             padding: "2px 10px", borderRadius: 20, fontFamily: MONO,
           }}>
-            {safeRows.length} rows × {safeHeaders.length} cols
+            {safeRows.length} rows × {visibleColumns.length} cols
           </span>
           {resampled && (
             <span style={{
@@ -592,10 +609,13 @@ function CSVTable({ title, icon, color, headers, rows, resampled, originalRows, 
             </span>
           )}
         </div>
-        {expanded
-          ? <ExpandLessIcon sx={{ fontSize: 20, color: "#94a3b8" }} />
-          : <ExpandMoreIcon sx={{ fontSize: 20, color: "#94a3b8" }} />
-        }
+        <div style={{ display: "flex", alignItems: "center", gap: 4 }} onClick={(e) => e.stopPropagation()}>
+          <TableColumnSelector columns={columns} visibleIds={visibleIds} onVisibleChange={setVisibleIds} defaultVisibleIds={defaultVisibleIds} />
+          {expanded
+            ? <ExpandLessIcon sx={{ fontSize: 20, color: "#94a3b8" }} />
+            : <ExpandMoreIcon sx={{ fontSize: 20, color: "#94a3b8" }} />
+          }
+        </div>
       </div>
       {/* Scrollable Table */}
       {expanded && (
@@ -605,18 +625,18 @@ function CSVTable({ title, icon, color, headers, rows, resampled, originalRows, 
           }}>
             <thead>
               <tr>
-                <th style={thStyle}>#</th>
-                {safeHeaders.map((h, i) => (
-                  <th key={i} style={thStyle}>{h}</th>
+                {visibleColumns.map((c) => (
+                  <th key={c.id} style={thStyle}>{c.label}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {safeRows.map((row, ri) => (
                 <tr key={ri} style={{ background: ri % 2 === 0 ? "#fff" : "#FAFBFC" }}>
-                  <td style={{ ...tdStyle, color: "#94a3b8", fontWeight: 600 }}>{ri + 1}</td>
-                  {safeHeaders.map((_, ci) => (
-                    <td key={ci} style={tdStyle}>{Array.isArray(row) ? (row[ci] ?? "") : ""}</td>
+                  {visibleColumns.map((c) => (
+                    <td key={c.id} style={c.id === ROW_NUM_ID ? { ...tdStyle, color: "#94a3b8", fontWeight: 600 } : tdStyle}>
+                      {c.id === ROW_NUM_ID ? ri + 1 : (Array.isArray(row) ? (row[c.id] ?? "") : "")}
+                    </td>
                   ))}
                 </tr>
               ))}
@@ -1324,7 +1344,7 @@ function ColumnMultiSelect({ options, selected, onChange }) {
   }, [options, selected]);
 
   return (
-    <div style={{ position: "relative", minWidth: 260 }}>
+    <div style={{ position: "relative", minWidth: 182 }}>
       <button
         ref={btnRef}
         type="button"
@@ -1334,16 +1354,16 @@ function ColumnMultiSelect({ options, selected, onChange }) {
           display: "flex",
           alignItems: "center",
           justifyContent: "space-between",
-          gap: 10,
-          padding: "8px 10px",
-          borderRadius: 10,
-          border: "1.5px solid #E2E8F0",
+          gap: 6,
+          padding: "5px 8px",
+          borderRadius: 8,
+          border: "1px solid #E2E8F0",
           background: "#FAFBFC",
           cursor: "pointer",
           fontFamily: FONT,
-          color: "#0F172A",
-          fontSize: 13,
-          fontWeight: 650,
+          color: "#475569",
+          fontSize: 11,
+          fontWeight: 500,
         }}
         title="Select columns"
       >
@@ -1352,7 +1372,7 @@ function ColumnMultiSelect({ options, selected, onChange }) {
           {selectedLabels.length > 2 ? ` +${selectedLabels.length - 2}` : ""}
         </span>
         <span style={{ display: "flex", alignItems: "center", color: "#94a3b8" }}>
-          {open ? <ExpandLessIcon sx={{ fontSize: 18 }} /> : <ExpandMoreIcon sx={{ fontSize: 18 }} />}
+          {open ? <ExpandLessIcon sx={{ fontSize: 14 }} /> : <ExpandMoreIcon sx={{ fontSize: 14 }} />}
         </span>
       </button>
 
@@ -1361,20 +1381,20 @@ function ColumnMultiSelect({ options, selected, onChange }) {
           ref={popRef}
           style={{
             position: "absolute",
-            top: "calc(100% + 8px)",
+            top: "calc(100% + 4px)",
             right: 0,
             zIndex: 20,
-            width: 340,
-            maxHeight: 320,
+            width: 280,
+            maxHeight: 280,
             overflow: "auto",
             background: "#fff",
             border: "1px solid #E2E8F0",
-            borderRadius: 12,
-            boxShadow: "0 10px 30px rgba(2, 6, 23, 0.14)",
-            padding: 10,
+            borderRadius: 10,
+            boxShadow: "0 8px 24px rgba(2, 6, 23, 0.1)",
+            padding: 8,
           }}
         >
-          <div style={{ fontFamily: FONT, fontSize: 12, fontWeight: 700, color: "#64748B", padding: "2px 6px 8px" }}>
+          <div style={{ fontFamily: FONT, fontSize: 11, fontWeight: 500, color: "#94a3b8", padding: "2px 6px 4px" }}>
             Columns
           </div>
           {options.map((opt) => {
@@ -1393,22 +1413,25 @@ function ColumnMultiSelect({ options, selected, onChange }) {
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
-                  gap: 10,
-                  padding: "9px 10px",
+                  gap: 8,
+                  padding: "6px 8px",
                   border: "none",
                   background: checked ? "#EEF2FF" : "transparent",
-                  borderRadius: 10,
+                  borderRadius: 8,
                   cursor: "pointer",
                   textAlign: "left",
+                  fontFamily: FONT,
+                  fontSize: 11,
+                  fontWeight: 500,
                 }}
               >
-                <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+                <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
                   <span
                     style={{
-                      width: 18,
-                      height: 18,
-                      borderRadius: 6,
-                      border: checked ? "none" : "1.5px solid #CBD5E1",
+                      width: 14,
+                      height: 14,
+                      borderRadius: 4,
+                      border: checked ? "none" : "1px solid #CBD5E1",
                       background: checked ? "#8b5cf6" : "#fff",
                       display: "inline-flex",
                       alignItems: "center",
@@ -1416,13 +1439,13 @@ function ColumnMultiSelect({ options, selected, onChange }) {
                       flexShrink: 0,
                     }}
                   >
-                    {checked && <CheckCircleOutline sx={{ fontSize: 14, color: "#fff" }} />}
+                    {checked && <CheckCircleOutline sx={{ fontSize: 10, color: "#fff" }} />}
                   </span>
-                  <span style={{ fontFamily: FONT, fontSize: 13, fontWeight: 650, color: "#0F172A", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <span style={{ fontFamily: FONT, fontSize: 11, fontWeight: 500, color: "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {opt.header}
                   </span>
                 </span>
-                <span style={{ fontFamily: MONO, fontSize: 11, color: "#94a3b8" }}>
+                <span style={{ fontFamily: FONT, fontSize: 10, fontWeight: 500, color: "#94a3b8" }}>
                   #{opt.index}
                 </span>
               </button>
@@ -2067,44 +2090,60 @@ function DateFilterBar({ dateFrom, dateTo, onDateFromChange, onDateToChange, onC
                       }}
                     />
                     <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                      <button
-                        type="button"
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<RotateLeftOutlinedIcon />}
                         onClick={handleResetStep}
-                        style={{
-                          padding: "6px 14px",
-                          borderRadius: 8,
-                          border: "1.5px solid #E2E8F0",
-                          background: "#fff",
-                          fontFamily: FONT,
-                          fontSize: 12,
-                          fontWeight: 600,
+                        sx={{
+                          borderRadius: 2,
+                          textTransform: "none",
+                          border: "1px solid #E2E8F0",
                           color: "#64748B",
-                          cursor: "pointer",
+                          backgroundColor: "#F1F5F9",
+                          "&:hover": {
+                            border: "1px solid #ff4d6d",
+                            color: "#ff4d6d",
+                            backgroundColor: "rgba(255,77,109,0.08)",
+                          },
+                          "&:active": {
+                            border: "1px solid #ff4d6d",
+                            color: "#ff4d6d",
+                            backgroundColor: "rgba(255,77,109,0.15)",
+                          },
                         }}
                       >
-                        Reset
-                      </button>
-                      <button
-                        type="button"
+                        Cancel
+                      </Button>
+                      <Button
+                        size="small"
+                        variant="outlined"
+                        startIcon={<BookmarkAddedOutlinedIcon />}
                         onClick={handleValidateStep}
                         disabled={(() => {
                           const v = parseInt(stepDraftValue, 10);
                           return Number.isNaN(v) || v < 1 || v > 1440;
                         })()}
-                        style={{
-                          padding: "6px 14px",
-                          borderRadius: 8,
-                          border: "none",
-                          background: accentColor,
-                          fontFamily: FONT,
-                          fontSize: 12,
-                          fontWeight: 600,
-                          color: "#fff",
-                          cursor: "pointer",
+                        sx={{
+                          borderRadius: 2,
+                          textTransform: "none",
+                          border: "1px solid #E2E8F0",
+                          color: "#64748B",
+                          backgroundColor: "#F1F5F9",
+                          "&:hover": {
+                            border: "1px solid #52b788",
+                            color: "#52b788",
+                            backgroundColor: "rgba(82,183,136,0.08)",
+                          },
+                          "&:active": {
+                            border: "1px solid #52b788",
+                            color: "#52b788",
+                            backgroundColor: "rgba(82,183,136,0.15)",
+                          },
                         }}
                       >
-                        Validate
-                      </button>
+                        Apply
+                      </Button>
                     </div>
                   </>
                 )}
