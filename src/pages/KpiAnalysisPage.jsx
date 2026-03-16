@@ -1157,7 +1157,20 @@ function parseAxisRange(minStr, maxStr) {
   return [min, max];
 }
 
-function KpiCSVChart({ title, color, headers, rows, fullRowsForGaps, defaultYHeader, defaultRightYHeader, singleYAxis = false, traceMode = "lines", enableAxisRangeControls = false }) {
+function KpiCSVChart({
+  title,
+  color,
+  headers,
+  rows,
+  fullRowsForGaps,
+  defaultYHeader,
+  defaultRightYHeader,
+  singleYAxis = false,
+  traceMode = "lines",
+  enableAxisRangeControls = false,
+  fixedYHeader = null,
+  fixedYAsPercent = false,
+}) {
   const [expanded, setExpanded] = useState(true);
   const [leftYMinInput, setLeftYMinInput] = useState("");
   const [leftYMaxInput, setLeftYMaxInput] = useState("");
@@ -1187,13 +1200,18 @@ function KpiCSVChart({ title, color, headers, rows, fullRowsForGaps, defaultYHea
   }, [safeHeaders, safeRows, safeFullRows, useGaps]);
   const defaultLeftIdx = useMemo(() => {
     if (plottableCols.length === 0) return [];
+    if (fixedYHeader && safeHeaders.length > 1) {
+      const target = String(fixedYHeader).trim().toLowerCase();
+      const idx = safeHeaders.findIndex((h, i) => i > 0 && String(h ?? "").trim().toLowerCase() === target);
+      if (idx > 0 && plottableCols.some((c) => c.index === idx)) return [idx];
+    }
     if (defaultYHeader && safeHeaders.length > 1) {
       const target = String(defaultYHeader).trim().toLowerCase();
       const idx = safeHeaders.findIndex((h, i) => i > 0 && String(h ?? "").trim().toLowerCase() === target);
       if (idx > 0 && plottableCols.some((c) => c.index === idx)) return [idx];
     }
     return [plottableCols[0].index];
-  }, [safeHeaders, defaultYHeader, plottableCols]);
+  }, [safeHeaders, defaultYHeader, fixedYHeader, plottableCols]);
   const defaultRightIdx = useMemo(() => {
     if (singleYAxis || !defaultRightYHeader || plottableCols.length === 0) return [];
     const target = String(defaultRightYHeader).trim().toLowerCase();
@@ -1215,16 +1233,41 @@ function KpiCSVChart({ title, color, headers, rows, fullRowsForGaps, defaultYHea
         return safeFullRows.map((r) => {
           const key = String(Array.isArray(r) ? r[0] : "");
           if (!keptTimeSet.has(key)) return null;
-          const v = parseFloat(Array.isArray(r) ? r[colIndex] : "");
-          return isNaN(v) ? null : v;
+          const raw = Array.isArray(r) ? r[colIndex] : "";
+          const v = parseFloat(raw);
+          if (isNaN(v)) return null;
+          if (fixedYAsPercent && fixedYHeader && String(safeHeaders[colIndex] ?? "").trim().toLowerCase() === String(fixedYHeader).trim().toLowerCase()) {
+            return v * 100;
+          }
+          return v;
         });
       }
-      return safeRows.map((r) => { const v = parseFloat(Array.isArray(r) ? r[colIndex] : ""); return isNaN(v) ? null : v; });
+      return safeRows.map((r) => {
+        const raw = Array.isArray(r) ? r[colIndex] : "";
+        const v = parseFloat(raw);
+        if (isNaN(v)) return null;
+        if (fixedYAsPercent && fixedYHeader && String(safeHeaders[colIndex] ?? "").trim().toLowerCase() === String(fixedYHeader).trim().toLowerCase()) {
+          return v * 100;
+        }
+        return v;
+      });
     };
     selectedIndicesLeft.forEach((colIndex, i) => {
       const yValues = getYValues(colIndex);
       const name = safeHeaders[colIndex] ?? `Col ${colIndex}`;
-      const trace = { x: xValues, y: yValues, type: "scatter", mode, connectgaps: false, name: singleYAxis ? name : name + " (L)", line: { color: KPI_CHART_COLORS_LEFT[i % KPI_CHART_COLORS_LEFT.length], width: 1.5, shape: "spline", smoothing: 1.2 }, hovertemplate: "<b>%{fullData.name}</b>: %{y}<extra></extra>", yaxis: "y" };
+      const isPercentTrace = fixedYAsPercent && fixedYHeader && String(safeHeaders[colIndex] ?? "").trim().toLowerCase() === String(fixedYHeader).trim().toLowerCase();
+      const hoverTemplate = isPercentTrace ? "<b>%{fullData.name}</b>: %{y:.2f}%<extra></extra>" : "<b>%{fullData.name}</b>: %{y}<extra></extra>";
+      const trace = {
+        x: xValues,
+        y: yValues,
+        type: "scatter",
+        mode,
+        connectgaps: false,
+        name: singleYAxis ? name : name + " (L)",
+        line: { color: KPI_CHART_COLORS_LEFT[i % KPI_CHART_COLORS_LEFT.length], width: 1.5, shape: "spline", smoothing: 1.2 },
+        hovertemplate: hoverTemplate,
+        yaxis: "y",
+      };
       if (mode.includes("markers")) trace.marker = { size: 6 };
       traces.push(trace);
     });
@@ -1239,63 +1282,154 @@ function KpiCSVChart({ title, color, headers, rows, fullRowsForGaps, defaultYHea
   }, [safeRows, safeFullRows, safeHeaders, selectedIndicesLeft, selectedIndicesRight, xValues, useGaps, keptTimeSet, singleYAxis, traceMode]);
   const hasLeft = selectedIndicesLeft.length > 0;
   const hasRight = !singleYAxis && selectedIndicesRight.length > 0;
-  const leftTitle = hasLeft && selectedIndicesLeft.length === 1 ? (safeHeaders[selectedIndicesLeft[0]] ?? "Left") : "Left Y-axis";
+  const leftTitle =
+    fixedYAsPercent && fixedYHeader
+      ? "Performance Ratio (%)"
+      : hasLeft && selectedIndicesLeft.length === 1
+      ? safeHeaders[selectedIndicesLeft[0]] ?? "Left"
+      : "Left Y-axis";
   const rightTitle = hasRight && selectedIndicesRight.length === 1 ? (safeHeaders[selectedIndicesRight[0]] ?? "Right") : "Right Y-axis";
   const leftRange = enableAxisRangeControls ? parseAxisRange(leftYMinInput, leftYMaxInput) : null;
   const rightRange = enableAxisRangeControls && hasRight ? parseAxisRange(rightYMinInput, rightYMaxInput) : null;
   const yaxisLayout = {
-    ...{ title: { text: leftTitle, font: { family: FONT, size: 12, color: "#94a3b8" } }, gridcolor: "#F1F5F9", tickfont: { family: MONO, size: 10, color: "#94a3b8" }, side: "left" },
+    ...{
+      title: { text: leftTitle, font: { family: CHART_FONT, size: 11, color: "#94a3b8", weight: 500 } },
+      showgrid: true,
+      gridcolor: "#e5e7eb",
+      griddash: "dot",
+      gridwidth: 1,
+      zeroline: false,
+      showline: false,
+      tickfont: { family: CHART_FONT, size: 12, color: "#94a3b8" },
+      ticklen: 0,
+      tickcolor: "rgba(0,0,0,0)",
+      side: "left",
+    },
     ...(leftRange ? { autorange: false, range: leftRange } : { autorange: true }),
   };
   const yaxis2Layout = hasRight
     ? {
-        ...{ title: { text: rightTitle, font: { family: FONT, size: 12, color: "#94a3b8" } }, gridcolor: "transparent", tickfont: { family: MONO, size: 10, color: "#94a3b8" }, overlaying: "y", side: "right" },
+        ...{
+          title: { text: rightTitle, font: { family: CHART_FONT, size: 11, color: "#94a3b8", weight: 500 } },
+          gridcolor: "transparent",
+          zeroline: false,
+          showline: false,
+          tickfont: { family: CHART_FONT, size: 12, color: "#94a3b8" },
+          ticklen: 0,
+          tickcolor: "rgba(0,0,0,0)",
+          overlaying: "y",
+          side: "right",
+        },
         ...(rightRange ? { autorange: false, range: rightRange } : { autorange: true }),
       }
     : undefined;
   if (plottableCols.length === 0) return null;
   return (
-    <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #E2E8F0", overflow: "hidden" }}>
-      <div onClick={() => setExpanded(!expanded)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", cursor: "pointer", userSelect: "none", borderBottom: expanded ? "1px solid #E2E8F0" : "none" }}>
+    <div
+      style={{
+        background: "#fff",
+        borderRadius: 26,
+        border: "1px solid #e2e8f0",
+        boxShadow: "0 8px 30px rgba(15,23,42,0.06)",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        onClick={() => setExpanded(!expanded)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "14px 20px",
+          cursor: "pointer",
+          userSelect: "none",
+          borderBottom: expanded ? "1px solid #e2e8f0" : "none",
+        }}
+      >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <TimelineOutlined sx={{ fontSize: 20, color }} />
           <span style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: FONT }}>{title} — Chart</span>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 16 }} onClick={(e) => e.stopPropagation()}>
-          <KpiColumnMultiSelect label={singleYAxis ? "Y-axis" : "Left Y-axis"} options={plottableCols} selected={selectedIndicesLeft} onChange={setSelectedIndicesLeft} />
-          {!singleYAxis && <KpiColumnMultiSelect label="Right Y-axis" options={plottableCols} selected={selectedIndicesRight} onChange={setSelectedIndicesRight} />}
-          {expanded ? <ExpandLessIcon sx={{ fontSize: 20, color: "#94a3b8" }} /> : <ExpandMoreIcon sx={{ fontSize: 20, color: "#94a3b8" }} />}
-        </div>
+        {!fixedYHeader && (
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }} onClick={(e) => e.stopPropagation()}>
+            <KpiColumnMultiSelect label={singleYAxis ? "Y-axis" : "Left Y-axis"} options={plottableCols} selected={selectedIndicesLeft} onChange={setSelectedIndicesLeft} />
+            {!singleYAxis && <KpiColumnMultiSelect label="Right Y-axis" options={plottableCols} selected={selectedIndicesRight} onChange={setSelectedIndicesRight} />}
+            {expanded ? <ExpandLessIcon sx={{ fontSize: 20, color: "#94a3b8" }} /> : <ExpandMoreIcon sx={{ fontSize: 20, color: "#94a3b8" }} />}
+          </div>
+        )}
+        {fixedYHeader && (expanded ? <ExpandLessIcon sx={{ fontSize: 20, color: "#94a3b8" }} /> : <ExpandMoreIcon sx={{ fontSize: 20, color: "#94a3b8" }} />)}
       </div>
       {expanded && (
-        <div style={{ padding: "8px 12px 12px" }}>
+        <div
+          style={{
+            padding: "16px 16px 20px",
+            margin: "0 12px 12px 12px",
+            background: "#fff",
+            borderRadius: 16,
+          }}
+        >
           {chartData.length === 0 ? (
             <div style={{ height: 200, display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", fontFamily: FONT }}>{singleYAxis ? "Select a column for Y-axis" : "Select at least one column from Left or Right Y-axis"}</div>
           ) : (
             <>
               {enableAxisRangeControls && (
-                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginBottom: 10, padding: "8px 10px", background: "#F8FAFC", borderRadius: 10, border: "1px solid #E2E8F0" }}>
+                <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginBottom: 10, padding: "8px 10px", background: "#F8FAFC", borderRadius: 10, border: "1px solid #e2e8f0" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     <span style={{ fontFamily: FONT, fontSize: 11, fontWeight: 500, color: "#64748B", whiteSpace: "nowrap" }}>Left Y-axis Min</span>
-                    <input type="text" value={leftYMinInput} onChange={(e) => setLeftYMinInput(e.target.value)} placeholder="auto" style={{ width: 64, padding: "4px 6px", fontFamily: MONO, fontSize: 11, color: "#0F172A", border: "1px solid #E2E8F0", borderRadius: 6, background: "#fff" }} />
+                    <input type="text" value={leftYMinInput} onChange={(e) => setLeftYMinInput(e.target.value)} placeholder="auto" style={{ width: 64, padding: "4px 6px", fontFamily: MONO, fontSize: 11, color: "#0F172A", border: "1px solid #e2e8f0", borderRadius: 6, background: "#fff" }} />
                     <span style={{ fontFamily: FONT, fontSize: 11, fontWeight: 500, color: "#64748B" }}>Max</span>
-                    <input type="text" value={leftYMaxInput} onChange={(e) => setLeftYMaxInput(e.target.value)} placeholder="auto" style={{ width: 64, padding: "4px 6px", fontFamily: MONO, fontSize: 11, color: "#0F172A", border: "1px solid #E2E8F0", borderRadius: 6, background: "#fff" }} />
-                    <button type="button" onClick={() => { setLeftYMinInput(""); setLeftYMaxInput(""); }} style={{ padding: "4px 8px", fontFamily: FONT, fontSize: 10, fontWeight: 600, color: "#64748B", background: "#fff", border: "1px solid #E2E8F0", borderRadius: 6, cursor: "pointer" }} title="Reset to automatic scaling">Reset</button>
+                    <input type="text" value={leftYMaxInput} onChange={(e) => setLeftYMaxInput(e.target.value)} placeholder="auto" style={{ width: 64, padding: "4px 6px", fontFamily: MONO, fontSize: 11, color: "#0F172A", border: "1px solid #e2e8f0", borderRadius: 6, background: "#fff" }} />
+                    <button type="button" onClick={() => { setLeftYMinInput(""); setLeftYMaxInput(""); }} style={{ padding: "4px 8px", fontFamily: FONT, fontSize: 10, fontWeight: 600, color: "#64748B", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 6, cursor: "pointer" }} title="Reset to automatic scaling">Reset</button>
                   </div>
                   {hasRight && (
                     <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                       <span style={{ fontFamily: FONT, fontSize: 11, fontWeight: 500, color: "#64748B", whiteSpace: "nowrap" }}>Right Y-axis Min</span>
-                      <input type="text" value={rightYMinInput} onChange={(e) => setRightYMinInput(e.target.value)} placeholder="auto" style={{ width: 64, padding: "4px 6px", fontFamily: MONO, fontSize: 11, color: "#0F172A", border: "1px solid #E2E8F0", borderRadius: 6, background: "#fff" }} />
+                      <input type="text" value={rightYMinInput} onChange={(e) => setRightYMinInput(e.target.value)} placeholder="auto" style={{ width: 64, padding: "4px 6px", fontFamily: MONO, fontSize: 11, color: "#0F172A", border: "1px solid #e2e8f0", borderRadius: 6, background: "#fff" }} />
                       <span style={{ fontFamily: FONT, fontSize: 11, fontWeight: 500, color: "#64748B" }}>Max</span>
-                      <input type="text" value={rightYMaxInput} onChange={(e) => setRightYMaxInput(e.target.value)} placeholder="auto" style={{ width: 64, padding: "4px 6px", fontFamily: MONO, fontSize: 11, color: "#0F172A", border: "1px solid #E2E8F0", borderRadius: 6, background: "#fff" }} />
-                      <button type="button" onClick={() => { setRightYMinInput(""); setRightYMaxInput(""); }} style={{ padding: "4px 8px", fontFamily: FONT, fontSize: 10, fontWeight: 600, color: "#64748B", background: "#fff", border: "1px solid #E2E8F0", borderRadius: 6, cursor: "pointer" }} title="Reset to automatic scaling">Reset</button>
+                      <input type="text" value={rightYMaxInput} onChange={(e) => setRightYMaxInput(e.target.value)} placeholder="auto" style={{ width: 64, padding: "4px 6px", fontFamily: MONO, fontSize: 11, color: "#0F172A", border: "1px solid #e2e8f0", borderRadius: 6, background: "#fff" }} />
+                      <button type="button" onClick={() => { setRightYMinInput(""); setRightYMaxInput(""); }} style={{ padding: "4px 8px", fontFamily: FONT, fontSize: 10, fontWeight: 600, color: "#64748B", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 6, cursor: "pointer" }} title="Reset to automatic scaling">Reset</button>
                     </div>
                   )}
                 </div>
               )}
               <Plot
                 data={chartData}
-                layout={{ height: 340, margin: { t: 44, r: singleYAxis ? 50 : 60, b: 50, l: 60 }, hovermode: "x unified", showlegend: chartData.length > 1, legend: { orientation: "h", x: 0.5, y: 1.02, xanchor: "center", yanchor: "bottom", font: { family: FONT, size: 11 } }, xaxis: { title: { text: safeHeaders[0] ?? "Index", font: { family: FONT, size: 12, color: "#94a3b8" } }, gridcolor: "#F1F5F9", tickfont: { family: MONO, size: 10, color: "#94a3b8" }, rangeslider: { visible: false } }, yaxis: yaxisLayout, ...(yaxis2Layout && { yaxis2: yaxis2Layout }), plot_bgcolor: "#fff", paper_bgcolor: "#fff", font: { family: FONT } }}
+                layout={{
+                  height: 340,
+                  margin: { t: 52, r: singleYAxis ? 50 : 60, b: 50, l: 60 },
+                  hovermode: "x unified",
+                  showlegend: chartData.length > 1,
+                  legend: {
+                    orientation: "h",
+                    x: 0.5,
+                    y: 1.02,
+                    xanchor: "center",
+                    yanchor: "bottom",
+                    font: { family: CHART_FONT, size: 12, color: "#94a3b8" },
+                    bgcolor: "rgba(255,255,255,0)",
+                    bordercolor: "rgba(0,0,0,0)",
+                  },
+                  xaxis: {
+                    title: { text: safeHeaders[0] ?? "Index", font: { family: CHART_FONT, size: 11, color: "#94a3b8", weight: 500 } },
+                    showgrid: false,
+                    zeroline: false,
+                    showline: false,
+                    tickfont: { family: CHART_FONT, size: 12, color: "#94a3b8" },
+                    ticklen: 0,
+                    tickcolor: "rgba(0,0,0,0)",
+                    rangeslider: { visible: false },
+                  },
+                  yaxis: yaxisLayout,
+                  ...(yaxis2Layout && { yaxis2: yaxis2Layout }),
+                  plot_bgcolor: "#fff",
+                  paper_bgcolor: "#fff",
+                  font: { family: CHART_FONT },
+                  hoverlabel: {
+                    bgcolor: "#fff",
+                    bordercolor: "#e2e8f0",
+                    font: { family: CHART_FONT, size: 12, color: "#0F172A" },
+                  },
+                }}
                 config={{ displaylogo: false, responsive: true, modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d"] }}
                 style={{ width: "100%" }}
               />
@@ -1391,7 +1525,7 @@ function KpiYaYrBarChart({ title, color, x, ya, yr, xAxisTitle }) {
                 bordercolor: "rgba(0,0,0,0)",
               },
               xaxis: {
-                title: { text: xAxisTitle, font: { family: CHART_FONT, size: 13, color: "#94a3b8", weight: 500 } },
+                title: { text: xAxisTitle, font: { family: CHART_FONT, size: 11, color: "#94a3b8", weight: 500 } },
                 showgrid: false,
                 zeroline: false,
                 showline: false,
@@ -1400,7 +1534,7 @@ function KpiYaYrBarChart({ title, color, x, ya, yr, xAxisTitle }) {
                 tickcolor: "rgba(0,0,0,0)",
               },
               yaxis: {
-                title: { text: "Yield (kWh/kWp)", font: { family: CHART_FONT, size: 13, color: "#94a3b8", weight: 500 } },
+                title: { text: "Yield (kWh/kWp)", font: { family: CHART_FONT, size: 11, color: "#94a3b8", weight: 500 } },
                 showgrid: true,
                 gridcolor: "#e5e7eb",
                 griddash: "dot",
@@ -1600,6 +1734,7 @@ export default function KpiAnalysisPage() {
   const [iecPowerMin, setIecPowerMin] = useState("0");
   const [iecPowerMax, setIecPowerMax] = useState(""); // empty = use max of P_DC in data
   const [iecStatusFilter, setIecStatusFilter] = useState("all"); // "all" | "valid"
+  const [iecStatusHover, setIecStatusHover] = useState(null); // "all" | "valid" | null
   const [iecHelpOpen, setIecHelpOpen] = useState(false);
   const iecHelpRef = useRef(null);
   // Applied IEC61724 + status filter (used for actual filtering; draft = inputs until Apply)
@@ -1936,9 +2071,50 @@ export default function KpiAnalysisPage() {
             </div>
           </div>
           {kpiOverviewOpen && (
-            <div style={{ marginTop: 20 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#0F172A", letterSpacing: ".08em", textTransform: "uppercase", fontFamily: FONT }}>
-                SECTION TITLE
+            <div style={{ marginTop: 20, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16 }}>
+              {/* Data import, IEC filters & daily PR */}
+              <div style={{ background: "#FFFBEB", borderRadius: 12, padding: 18, border: "1px solid #FDE68A" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#0F172A", letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 4, fontFamily: FONT }}>
+                  DATA IMPORT & IEC FILTERING
+                </div>
+                <p style={{ fontSize: 12, color: "#475569", lineHeight: 1.7, marginBottom: 10, fontFamily: FONT }}>
+                  Import PV and weather CSVs, then apply IEC 61724 data quality filters before any KPI is calculated. This ensures that PR, capacity factor, and yield metrics are based only on realistic, validated operating conditions.
+                </p>
+                <ul style={{ fontSize: 12, color: "#64748B", lineHeight: 1.6, paddingLeft: 18, margin: 0, fontFamily: FONT }}>
+                  <li>Upload PV status data, weather data, and optional system info to the KPI page.</li>
+                  <li>IEC 61724 bounds for irradiance, temperature, wind, and power are applied to remove implausible rows.</li>
+                  <li>The resulting filtered dataset feeds all daily PR, capacity factor, and yield calculations below.</li>
+                </ul>
+              </div>
+
+              {/* Degradation and trends */}
+              <div style={{ background: "#FFFBEB", borderRadius: 12, padding: 18, border: "1px solid #FDE68A" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#0F172A", letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 4, fontFamily: FONT }}>
+                  DEGRADATION & LONG-TERM TRENDS
+                </div>
+                <p style={{ fontSize: 12, color: "#475569", lineHeight: 1.7, marginBottom: 10, fontFamily: FONT }}>
+                  Track PR and yield over months or years to estimate performance drift and degradation. Use consistent filters and resampling steps to avoid weather-driven noise.
+                </p>
+                <ul style={{ fontSize: 12, color: "#64748B", lineHeight: 1.6, paddingLeft: 18, margin: 0, fontFamily: FONT }}>
+                  <li>Year-over-year comparison of PR and capacity factor.</li>
+                  <li>Optional linear trend on aggregated KPIs to estimate degradation.</li>
+                  <li>Quickly spot step changes after events or configuration updates.</li>
+                </ul>
+              </div>
+
+              {/* Yield breakdowns & export */}
+              <div style={{ background: "#FFFBEB", borderRadius: 12, padding: 18, border: "1px solid #FDE68A" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "#0F172A", letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 4, fontFamily: FONT }}>
+                  YIELD BREAKDOWNS & EXPORT
+                </div>
+                <p style={{ fontSize: 12, color: "#475569", lineHeight: 1.7, marginBottom: 10, fontFamily: FONT }}>
+                  Visualize daily array yield vs reference yield, and export KPI tables for reporting. Combine PR, capacity factor, and yield ratios in one place for quick diagnostics.
+                </p>
+                <ul style={{ fontSize: 12, color: "#64748B", lineHeight: 1.6, paddingLeft: 18, margin: 0, fontFamily: FONT }}>
+                  <li>Daily KPI tables aligned with the chart views on this page.</li>
+                  <li>Array vs reference yield comparisons for each day.</li>
+                  <li>CSV export ready for external dashboards or monthly reports.</li>
+                </ul>
               </div>
             </div>
           )}
@@ -2175,7 +2351,7 @@ export default function KpiAnalysisPage() {
                       },
                     }}
                   >
-                    Cancel
+                    Reset
                   </Button>
                   <Button
                     size="small"
@@ -2210,16 +2386,14 @@ export default function KpiAnalysisPage() {
                   {/* GHI */}
                   <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "3px 4px", background: "#fff", borderRadius: 6, border: "1px solid #E2E8F0", minWidth: 0, width: "92%", maxWidth: "100%", boxSizing: "border-box" }}>
-                    <span style={{ fontFamily: FONT, fontSize: 7, fontWeight: 600, color: "#64748B", letterSpacing: "0.02em" }}>GHI (W/m²)</span>
+                    <span style={{ fontFamily: FONT, fontSize: 7, fontWeight: 600, color: "#64748B", letterSpacing: "0.02em", textAlign: "center", width: "100%" }}>GHI (W/m²)</span>
                     <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
                       <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
-                        <span style={{ position: "absolute", left: 4, top: 2, fontSize: 6, fontWeight: 600, color: "#94a3b8", pointerEvents: "none", fontFamily: FONT }}>min</span>
-                        <input type="text" inputMode="decimal" className="kpi-iec-num-input" value={iecGhiMin} onChange={(e) => setIecGhiMin(e.target.value)} style={{ width: "100%", height: 26, padding: "10px 4px 2px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box" }} />
+                        <input type="text" inputMode="decimal" className="kpi-iec-num-input" value={iecGhiMin} onChange={(e) => setIecGhiMin(e.target.value)} style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box" }} />
                       </div>
                       <div style={{ width: 16, height: 26, display: "flex", alignItems: "center", justifyContent: "center", color: "#cbd5e1", flexShrink: 0, fontSize: 9 }}>→</div>
                       <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
-                        <span style={{ position: "absolute", left: 4, top: 2, fontSize: 6, fontWeight: 600, color: "#94a3b8", pointerEvents: "none", fontFamily: FONT }}>max</span>
-                        <input type="text" inputMode="decimal" className="kpi-iec-num-input" value={iecGhiMax} onChange={(e) => setIecGhiMax(e.target.value)} style={{ width: "100%", height: 26, padding: "10px 4px 2px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box" }} />
+                        <input type="text" inputMode="decimal" className="kpi-iec-num-input" value={iecGhiMax} onChange={(e) => setIecGhiMax(e.target.value)} style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box" }} />
                       </div>
                     </div>
                   </div>
@@ -2227,16 +2401,14 @@ export default function KpiAnalysisPage() {
                   {/* T_amb */}
                   <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "3px 4px", background: "#fff", borderRadius: 6, border: "1px solid #E2E8F0", minWidth: 0, width: "92%", maxWidth: "100%", boxSizing: "border-box" }}>
-                    <span style={{ fontFamily: FONT, fontSize: 7, fontWeight: 600, color: "#64748B", letterSpacing: "0.02em" }}>T_amb (°C)</span>
+                    <span style={{ fontFamily: FONT, fontSize: 7, fontWeight: 600, color: "#64748B", letterSpacing: "0.02em", textAlign: "center", width: "100%" }}>T_amb (°C)</span>
                     <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
                       <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
-                        <span style={{ position: "absolute", left: 4, top: 2, fontSize: 6, fontWeight: 600, color: "#94a3b8", pointerEvents: "none", fontFamily: FONT }}>min</span>
-                        <input type="text" inputMode="decimal" className="kpi-iec-num-input" value={iecAirTempMin} onChange={(e) => setIecAirTempMin(e.target.value)} style={{ width: "100%", height: 26, padding: "10px 4px 2px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box" }} />
+                        <input type="text" inputMode="decimal" className="kpi-iec-num-input" value={iecAirTempMin} onChange={(e) => setIecAirTempMin(e.target.value)} style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box" }} />
                       </div>
                       <div style={{ width: 16, height: 26, display: "flex", alignItems: "center", justifyContent: "center", color: "#cbd5e1", flexShrink: 0, fontSize: 9 }}>→</div>
                       <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
-                        <span style={{ position: "absolute", left: 4, top: 2, fontSize: 6, fontWeight: 600, color: "#94a3b8", pointerEvents: "none", fontFamily: FONT }}>max</span>
-                        <input type="text" inputMode="decimal" className="kpi-iec-num-input" value={iecAirTempMax} onChange={(e) => setIecAirTempMax(e.target.value)} style={{ width: "100%", height: 26, padding: "10px 4px 2px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box" }} />
+                        <input type="text" inputMode="decimal" className="kpi-iec-num-input" value={iecAirTempMax} onChange={(e) => setIecAirTempMax(e.target.value)} style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box" }} />
                       </div>
                     </div>
                   </div>
@@ -2244,16 +2416,14 @@ export default function KpiAnalysisPage() {
                   {/* Wind */}
                   <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "3px 4px", background: "#fff", borderRadius: 6, border: "1px solid #E2E8F0", minWidth: 0, width: "92%", maxWidth: "100%", boxSizing: "border-box" }}>
-                    <span style={{ fontFamily: FONT, fontSize: 7, fontWeight: 600, color: "#64748B", letterSpacing: "0.02em" }}>Wind (m/s)</span>
+                    <span style={{ fontFamily: FONT, fontSize: 7, fontWeight: 600, color: "#64748B", letterSpacing: "0.02em", textAlign: "center", width: "100%" }}>Wind (m/s)</span>
                     <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
                       <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
-                        <span style={{ position: "absolute", left: 4, top: 2, fontSize: 6, fontWeight: 600, color: "#94a3b8", pointerEvents: "none", fontFamily: FONT }}>min</span>
-                        <input type="text" inputMode="decimal" className="kpi-iec-num-input" value={iecWindSpeedMin} onChange={(e) => setIecWindSpeedMin(e.target.value)} style={{ width: "100%", height: 26, padding: "10px 4px 2px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box" }} />
+                        <input type="text" inputMode="decimal" className="kpi-iec-num-input" value={iecWindSpeedMin} onChange={(e) => setIecWindSpeedMin(e.target.value)} style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box" }} />
                       </div>
                       <div style={{ width: 16, height: 26, display: "flex", alignItems: "center", justifyContent: "center", color: "#cbd5e1", flexShrink: 0, fontSize: 9 }}>→</div>
                       <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
-                        <span style={{ position: "absolute", left: 4, top: 2, fontSize: 6, fontWeight: 600, color: "#94a3b8", pointerEvents: "none", fontFamily: FONT }}>max</span>
-                        <input type="text" inputMode="decimal" className="kpi-iec-num-input" value={iecWindSpeedMax} onChange={(e) => setIecWindSpeedMax(e.target.value)} style={{ width: "100%", height: 26, padding: "10px 4px 2px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box" }} />
+                        <input type="text" inputMode="decimal" className="kpi-iec-num-input" value={iecWindSpeedMax} onChange={(e) => setIecWindSpeedMax(e.target.value)} style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box" }} />
                       </div>
                     </div>
                   </div>
@@ -2261,16 +2431,14 @@ export default function KpiAnalysisPage() {
                   {/* Power (kW) — P_DC */}
                   <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "3px 4px", background: "#fff", borderRadius: 6, border: "1px solid #E2E8F0", minWidth: 0, width: "92%", maxWidth: "100%", boxSizing: "border-box" }}>
-                    <span style={{ fontFamily: FONT, fontSize: 7, fontWeight: 600, color: "#64748B", letterSpacing: "0.02em" }}>Power (kW)</span>
+                    <span style={{ fontFamily: FONT, fontSize: 7, fontWeight: 600, color: "#64748B", letterSpacing: "0.02em", textAlign: "center", width: "100%" }}>Power (kW)</span>
                     <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
                       <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
-                        <span style={{ position: "absolute", left: 4, top: 2, fontSize: 6, fontWeight: 600, color: "#94a3b8", pointerEvents: "none", fontFamily: FONT }}>min</span>
-                        <input type="text" inputMode="decimal" className="kpi-iec-num-input" value={iecPowerMin} onChange={(e) => setIecPowerMin(e.target.value)} style={{ width: "100%", height: 26, padding: "10px 4px 2px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box" }} />
+                        <input type="text" inputMode="decimal" className="kpi-iec-num-input" value={iecPowerMin} onChange={(e) => setIecPowerMin(e.target.value)} style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box" }} />
                       </div>
                       <div style={{ width: 16, height: 26, display: "flex", alignItems: "center", justifyContent: "center", color: "#cbd5e1", flexShrink: 0, fontSize: 9 }}>→</div>
                       <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
-                        <span style={{ position: "absolute", left: 4, top: 2, fontSize: 6, fontWeight: 600, color: "#94a3b8", pointerEvents: "none", fontFamily: FONT }}>max</span>
-                        <input type="text" inputMode="decimal" className="kpi-iec-num-input" value={iecPowerMax !== "" ? iecPowerMax : (maxPdcInData != null ? String(maxPdcInData) : "")} onChange={(e) => setIecPowerMax(e.target.value)} placeholder={maxPdcInData != null ? String(maxPdcInData) : "—"} style={{ width: "100%", height: 26, padding: "10px 4px 2px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box" }} />
+                        <input type="text" inputMode="decimal" className="kpi-iec-num-input" value={iecPowerMax !== "" ? iecPowerMax : (maxPdcInData != null ? String(maxPdcInData) : "")} onChange={(e) => setIecPowerMax(e.target.value)} placeholder={maxPdcInData != null ? String(maxPdcInData) : "—"} style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box" }} />
                       </div>
                     </div>
                   </div>
@@ -2284,36 +2452,80 @@ export default function KpiAnalysisPage() {
                   <button
                     type="button"
                     onClick={() => setIecStatusFilter("all")}
+                    onMouseEnter={() => setIecStatusHover("all")}
+                    onMouseLeave={() => setIecStatusHover(null)}
                     style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      height: 34,
+                      padding: "0 15px",
                       fontFamily: FONT,
                       fontSize: 11,
                       fontWeight: 600,
-                      color: iecStatusFilter === "all" ? "#fff" : "#64748B",
-                      background: iecStatusFilter === "all" ? "#00b4d8" : "#F1F5F9",
-                      border: `1px solid ${iecStatusFilter === "all" ? "#00b4d8" : "#E2E8F0"}`,
-                      borderRadius: 8,
-                      padding: "6px 12px",
+                      color:
+                        iecStatusFilter === "all"
+                          ? "#5f7696"
+                          : "#929fb4",
+                      background:
+                        iecStatusFilter === "all"
+                          ? iecStatusHover === "all"
+                            ? "#c5def8"
+                            : "#cfe4fa"
+                          : iecStatusHover === "all"
+                          ? "#e5e7eb"
+                          : "#f1f5f9",
+                      border:
+                        iecStatusFilter === "all"
+                          ? "1px solid #d7e5f4"
+                          : "1px solid #d4d7dd",
+                      borderRadius: 9999,
                       cursor: "pointer",
+                      boxShadow: "none",
+                      transition: "background-color 150ms ease, border-color 150ms ease, color 150ms ease",
                     }}
                   >
-                    All
+                    <FilterListOutlined sx={{ fontSize: 18, color: "inherit" }} />
+                    <span>All</span>
                   </button>
                   <button
                     type="button"
                     onClick={() => setIecStatusFilter("valid")}
+                    onMouseEnter={() => setIecStatusHover("valid")}
+                    onMouseLeave={() => setIecStatusHover(null)}
                     style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 6,
+                      height: 34,
+                      padding: "0 15px",
                       fontFamily: FONT,
                       fontSize: 11,
                       fontWeight: 600,
-                      color: iecStatusFilter === "valid" ? "#fff" : "#64748B",
-                      background: iecStatusFilter === "valid" ? "#00a896" : "#F1F5F9",
-                      border: `1px solid ${iecStatusFilter === "valid" ? "#00a896" : "#E2E8F0"}`,
-                      borderRadius: 8,
-                      padding: "6px 12px",
+                      color:
+                        iecStatusFilter === "valid"
+                          ? "#4f8a68"
+                          : "#8ba099",
+                      background:
+                        iecStatusFilter === "valid"
+                          ? iecStatusHover === "valid"
+                            ? "#e6f4ec"
+                            : "#edf8f2"
+                          : iecStatusHover === "valid"
+                          ? "#e5e7eb"
+                          : "#f1f5f9",
+                      border:
+                        iecStatusFilter === "valid"
+                          ? "1px solid #cfe8dc"
+                          : "1px solid #d4d7dd",
+                      borderRadius: 9999,
                       cursor: "pointer",
+                      boxShadow: "none",
+                      transition: "background-color 150ms ease, border-color 150ms ease, color 150ms ease",
                     }}
                   >
-                    Valid
+                    <CheckCircleOutline sx={{ fontSize: 18, color: "inherit" }} />
+                    <span>Valid</span>
                   </button>
                 </div>
                 </div>
@@ -2356,7 +2568,7 @@ export default function KpiAnalysisPage() {
                 originalRows={pvData.originalRows}
                 resampledStepMinutes={pvData.resampledStepMinutes}
               />
-              <KpiCSVChart title="PV & Weather Data" color={O} headers={pvData.headers} rows={pvStatusFilteredRows} fullRowsForGaps={pvFilteredRows} defaultYHeader="P_DC" defaultRightYHeader="weather_GTI" />
+                <KpiCSVChart title="PV & Weather Data" color={O} headers={pvData.headers} rows={pvStatusFilteredRows} fullRowsForGaps={pvFilteredRows} defaultYHeader="P_DC" defaultRightYHeader="weather_GTI" />
             </div>
 
             {/* KPI Analysis card — Daily resample + E_DC, Ya, Yr, PR (requires System Info with tot_power) */}
@@ -2391,11 +2603,21 @@ export default function KpiAnalysisPage() {
                   resampled={true}
                   resampledStepMinutes="D"
                 />
-                <KpiCSVChart title="Daily KPI" color={KPI} headers={dailyKpiData.headers} rows={dailyKpiData.rows} defaultYHeader="PR" singleYAxis traceMode="lines+markers" />
+                <KpiCSVChart
+                  title="Daily Performance Ratio"
+                  color={KPI}
+                  headers={dailyKpiData.headers}
+                  rows={dailyKpiData.rows}
+                  defaultYHeader="PR"
+                  singleYAxis
+                  traceMode="lines+markers"
+                  fixedYHeader="PR"
+                  fixedYAsPercent
+                />
                 {/* Array Yield and Reference Yield — Chart (grouped bar, same card style as Daily KPI) */}
                 {yaYrBarChartData && (
                   <KpiYaYrBarChart
-                    title="Array Yield and Reference Yield"
+                    title="Daily Array Yield and Reference Yield"
                     color={KPI}
                     x={yaYrBarChartData.x}
                     ya={yaYrBarChartData.ya}
