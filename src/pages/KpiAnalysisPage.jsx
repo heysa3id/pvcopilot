@@ -1952,7 +1952,7 @@ export default function KpiAnalysisPage() {
   const [iecAirTempMax, setIecAirTempMax] = useState("60");
   const [iecWindSpeedMin, setIecWindSpeedMin] = useState("0");
   const [iecWindSpeedMax, setIecWindSpeedMax] = useState("30");
-  const [iecPowerMin, setIecPowerMin] = useState("0");
+  const [iecPowerMin, setIecPowerMin] = useState("10");
   const [iecPowerMax, setIecPowerMax] = useState(""); // empty = use max of P_DC in data
   const [iecStatusFilter, setIecStatusFilter] = useState("all"); // "all" | "valid"
   const [iecStatusHover, setIecStatusHover] = useState(null); // "all" | "valid" | null
@@ -1967,7 +1967,7 @@ export default function KpiAnalysisPage() {
   const [appliedIecAirTempMax, setAppliedIecAirTempMax] = useState("60");
   const [appliedIecWindSpeedMin, setAppliedIecWindSpeedMin] = useState("0");
   const [appliedIecWindSpeedMax, setAppliedIecWindSpeedMax] = useState("30");
-  const [appliedIecPowerMin, setAppliedIecPowerMin] = useState("0");
+  const [appliedIecPowerMin, setAppliedIecPowerMin] = useState("10");
   const [appliedIecPowerMax, setAppliedIecPowerMax] = useState(null); // null = use max P_DC in data
   const [appliedIecStatusFilter, setAppliedIecStatusFilter] = useState("all");
 
