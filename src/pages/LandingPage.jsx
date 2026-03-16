@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { cloneElement, useEffect, useRef, useState } from "react";
 import {
   CloudDownloadOutlined,
@@ -44,10 +44,11 @@ const TOOL_ICONS = {
   filter: <FilterAltOutlined sx={{ fontSize: 22, color: ICON_COLOR }} />,
 };
 
+const SOCIAL_LINK = "https://www.linkedin.com/in/saïd-elhamaoui/";
 const SOCIAL_LINKS = [
-  { id: "LinkedIn", icon: <LinkedIn sx={{ fontSize: 18, color: ICON_COLOR }} /> },
-  { id: "GitHub", icon: <GitHub sx={{ fontSize: 18, color: ICON_COLOR }} /> },
-  { id: "YouTube", icon: <YouTube sx={{ fontSize: 18, color: ICON_COLOR }} /> },
+  { id: "LinkedIn", icon: <LinkedIn sx={{ fontSize: 18, color: ICON_COLOR }} />, href: SOCIAL_LINK },
+  { id: "GitHub", icon: <GitHub sx={{ fontSize: 18, color: ICON_COLOR }} />, href: SOCIAL_LINK },
+  { id: "YouTube", icon: <YouTube sx={{ fontSize: 18, color: ICON_COLOR }} />, href: SOCIAL_LINK },
 ];
 
 const PARTNER_LOGOS = [
@@ -549,13 +550,23 @@ const PLATFORM_MODULES = [
 ];
 
 export default function LandingPage() {
+  const { hash } = useLocation();
   const [teamImgError, setTeamImgError] = useState(false);
   const [hoveredModuleIndex, setHoveredModuleIndex] = useState(0);
+
+  useEffect(() => {
+    if (hash) {
+      const id = hash.slice(1);
+      const el = document.getElementById(id);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [hash]);
+
   return (
     <div style={{ minHeight: "100vh", fontFamily: "Inter, Arial, sans-serif", color: "#0F172A" }}>
 
       {/* ━━━ HERO — dark, dramatic, geometric ━━━ */}
-      <section style={{
+      <section id="hero" style={{
         position: "relative", overflow: "hidden",
         background: "linear-gradient(135deg, #0F172A 0%, #1E293B 50%, #0F172A 100%)",
         padding: "100px 24px 100px", minHeight: 540,
@@ -645,150 +656,7 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ━━━ PIPELINE — horizontal flowchart (8 stages, chevrons) ━━━ */}
-      <section
-        id="pipeline"
-        style={{
-          padding: "72px 24px 56px",
-          background: "#FFFFFF",
-          borderTop: "1px solid #E2E8F0",
-        }}
-      >
-        <div style={{ maxWidth: 1140, margin: "0 auto" }}>
-          {/* Header row */}
-          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 24, marginBottom: 48 }}>
-            <div style={{ maxWidth: 480, textAlign: "left", paddingLeft: 0, marginLeft: 0 }}>
-              <span style={{
-                display: "inline-block", fontSize: 11, fontWeight: 700, color: G,
-                letterSpacing: ".12em", textTransform: "uppercase",
-                padding: "5px 12px", borderRadius: 6,
-                background: "rgba(255,184,0,0.12)", marginBottom: 14,
-              }}>
-                Processing Pipeline
-              </span>
-              <h2 style={{ fontSize: "clamp(24px, 3vw, 32px)", fontWeight: 800, color: "#0F172A", lineHeight: 1.2, letterSpacing: "-.02em", margin: 0, marginLeft: 0, paddingLeft: 0 }}>
-                End-to-End Processing Pipeline
-              </h2>
-            </div>
-            <p style={{ maxWidth: 340, fontSize: 14, color: "#64748B", lineHeight: 1.65, margin: 0, paddingTop: 28 }}>
-              Each stage outputs corrected data that feeds the next — run the full chain or any subset.
-            </p>
-          </div>
-
-          <div style={{
-            display: "flex",
-            flexDirection: "row",
-            alignItems: "flex-start",
-            justifyContent: "center",
-            flexWrap: "wrap",
-            gap: 6,
-          }}>
-            {PIPE.map((step, i) => {
-              const gradientId = `badge-grad-${i}`;
-              const t = PIPE.length > 1 ? i / (PIPE.length - 1) : 0;
-              const badgeStart = "#FFB800";
-              const badgeEnd = "#FF8C00";
-              return (
-                <span key={step.id} style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
-                  <div style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    width: 120,
-                    minWidth: 120,
-                  }}>
-                    {/* Blob background with icon */}
-                    <div style={{
-                      position: "relative",
-                      width: 100,
-                      height: 100,
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      marginBottom: 12,
-                    }}>
-                      {/* Organic blob shape with warm tint */}
-                      <svg viewBox="0 0 200 200" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
-                        <defs>
-                          <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" stopColor={badgeStart} />
-                            <stop offset="100%" stopColor={badgeEnd} />
-                          </linearGradient>
-                        </defs>
-                        <path
-                          d="M 100, 20 C 140, 20  175, 45  180, 85 C 185, 125  155, 170  115, 178 C 75, 186  30, 160  22, 120 C 14, 80  60, 20  100, 20 Z"
-                          fill="#FFF9EC"
-                        />
-                      </svg>
-                      {/* Icon */}
-                      <span style={{ position: "relative", zIndex: 1, display: "flex", fontSize: 28 }}>
-                        {cloneElement(step.icon, { sx: { fontSize: 32, color: G } })}
-                      </span>
-                      {/* Number badge */}
-                      <span style={{
-                        position: "absolute",
-                        top: 0,
-                        right: 2,
-                        zIndex: 2,
-                        width: 24,
-                        height: 24,
-                        borderRadius: "50%",
-                        background: `linear-gradient(135deg, ${badgeStart}, ${badgeEnd})`,
-                        color: "#FFFFFF",
-                        fontSize: 11,
-                        fontWeight: 700,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        boxShadow: "0 2px 8px rgba(255,184,0,0.4)",
-                      }}>
-                        {String(i + 1).padStart(2, "0")}
-                      </span>
-                    </div>
-                    {/* Label */}
-                    <div style={{
-                      fontSize: 12,
-                      fontWeight: 700,
-                      color: "#0F172A",
-                      textAlign: "center",
-                      lineHeight: 1.3,
-                      overflow: "hidden",
-                      display: "-webkit-box",
-                      WebkitLineClamp: 2,
-                      WebkitBoxOrient: "vertical",
-                    }}>
-                      {step.label}
-                    </div>
-                  </div>
-                  {/* Decorative dots between items */}
-                  {i < PIPE.length - 1 && (
-                    <span style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 4,
-                      alignItems: "center",
-                      margin: "0 2px",
-                      paddingBottom: 24,
-                    }}>
-                      {[4, 5, 4].map((size, di) => (
-                        <span key={di} style={{
-                          width: size,
-                          height: size,
-                          borderRadius: "50%",
-                          background: di === 1 ? G : "rgba(255,184,0,0.25)",
-                          opacity: di === 1 ? 0.7 : 0.5,
-                        }} />
-                      ))}
-                    </span>
-                  )}
-                </span>
-              );
-            })}
-          </div>
-        </div>
-      </section>
-
-      {/* ━━━ TECHNICAL SPECS ━━━ */}
+      {/* ━━━ TECHNICAL FOUNDATION ━━━ */}
       <style>{`
         .tf-section { max-width: 1260px; margin: 0 auto; padding: 64px 24px 72px; }
         .tf-header { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 24px; margin-bottom: 48px; }
@@ -814,7 +682,7 @@ export default function LandingPage() {
           .tf-card.tf-light { padding: 16px 14px; }
         }
       `}</style>
-      <section style={{ padding: 0, background: "#FFFFFF", borderTop: "1px solid #E2E8F0" }}>
+      <section id="foundation" style={{ padding: 0, background: "#FFFFFF", borderTop: "1px solid #E2E8F0" }}>
         <div className="tf-section">
           <div className="tf-header">
             <div style={{ maxWidth: 480, textAlign: "left", paddingLeft: 0, marginLeft: 0 }}>
@@ -961,8 +829,151 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ━━━ PROCESSING PIPELINE — horizontal flowchart (8 stages, chevrons) ━━━ */}
+      <section
+        id="pipeline"
+        style={{
+          padding: "72px 24px 56px",
+          background: "#FFFFFF",
+          borderTop: "1px solid #E2E8F0",
+        }}
+      >
+        <div style={{ maxWidth: 1140, margin: "0 auto" }}>
+          {/* Header row */}
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 24, marginBottom: 48 }}>
+            <div style={{ maxWidth: 480, textAlign: "left", paddingLeft: 0, marginLeft: 0 }}>
+              <span style={{
+                display: "inline-block", fontSize: 11, fontWeight: 700, color: G,
+                letterSpacing: ".12em", textTransform: "uppercase",
+                padding: "5px 12px", borderRadius: 6,
+                background: "rgba(255,184,0,0.12)", marginBottom: 14,
+              }}>
+                Processing Pipeline
+              </span>
+              <h2 style={{ fontSize: "clamp(24px, 3vw, 32px)", fontWeight: 800, color: "#0F172A", lineHeight: 1.2, letterSpacing: "-.02em", margin: 0, marginLeft: 0, paddingLeft: 0 }}>
+                End-to-End Processing Pipeline
+              </h2>
+            </div>
+            <p style={{ maxWidth: 340, fontSize: 14, color: "#64748B", lineHeight: 1.65, margin: 0, paddingTop: 28 }}>
+              Each stage outputs corrected data that feeds the next — run the full chain or any subset.
+            </p>
+          </div>
+
+          <div style={{
+            display: "flex",
+            flexDirection: "row",
+            alignItems: "flex-start",
+            justifyContent: "center",
+            flexWrap: "wrap",
+            gap: 6,
+          }}>
+            {PIPE.map((step, i) => {
+              const gradientId = `badge-grad-${i}`;
+              const t = PIPE.length > 1 ? i / (PIPE.length - 1) : 0;
+              const badgeStart = "#FFB800";
+              const badgeEnd = "#FF8C00";
+              return (
+                <span key={step.id} style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
+                  <div style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    width: 120,
+                    minWidth: 120,
+                  }}>
+                    {/* Blob background with icon */}
+                    <div style={{
+                      position: "relative",
+                      width: 100,
+                      height: 100,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      marginBottom: 12,
+                    }}>
+                      {/* Organic blob shape with warm tint */}
+                      <svg viewBox="0 0 200 200" style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}>
+                        <defs>
+                          <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stopColor={badgeStart} />
+                            <stop offset="100%" stopColor={badgeEnd} />
+                          </linearGradient>
+                        </defs>
+                        <path
+                          d="M 100, 20 C 140, 20  175, 45  180, 85 C 185, 125  155, 170  115, 178 C 75, 186  30, 160  22, 120 C 14, 80  60, 20  100, 20 Z"
+                          fill="#FFF9EC"
+                        />
+                      </svg>
+                      {/* Icon */}
+                      <span style={{ position: "relative", zIndex: 1, display: "flex", fontSize: 28 }}>
+                        {cloneElement(step.icon, { sx: { fontSize: 32, color: G } })}
+                      </span>
+                      {/* Number badge */}
+                      <span style={{
+                        position: "absolute",
+                        top: 0,
+                        right: 2,
+                        zIndex: 2,
+                        width: 24,
+                        height: 24,
+                        borderRadius: "50%",
+                        background: `linear-gradient(135deg, ${badgeStart}, ${badgeEnd})`,
+                        color: "#FFFFFF",
+                        fontSize: 11,
+                        fontWeight: 700,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        boxShadow: "0 2px 8px rgba(255,184,0,0.4)",
+                      }}>
+                        {String(i + 1).padStart(2, "0")}
+                      </span>
+                    </div>
+                    {/* Label */}
+                    <div style={{
+                      fontSize: 12,
+                      fontWeight: 700,
+                      color: "#0F172A",
+                      textAlign: "center",
+                      lineHeight: 1.3,
+                      overflow: "hidden",
+                      display: "-webkit-box",
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: "vertical",
+                    }}>
+                      {step.label}
+                    </div>
+                  </div>
+                  {/* Decorative dots between items */}
+                  {i < PIPE.length - 1 && (
+                    <span style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 4,
+                      alignItems: "center",
+                      margin: "0 2px",
+                      paddingBottom: 24,
+                    }}>
+                      {[4, 5, 4].map((size, di) => (
+                        <span key={di} style={{
+                          width: size,
+                          height: size,
+                          borderRadius: "50%",
+                          background: di === 1 ? G : "rgba(255,184,0,0.25)",
+                          opacity: di === 1 ? 0.7 : 0.5,
+                        }} />
+                      ))}
+                    </span>
+                  )}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      </section>
+
       {/* ━━━ PLATFORM MODULES — hover-to-expand cards ━━━ */}
-      <section style={{
+      <section id="modules" style={{
         position: "relative",
         padding: "72px 24px 80px",
         background: "linear-gradient(160deg, #0F172A 0%, #131c2e 30%, #1a1710 60%, #0F172A 100%)",
@@ -1152,10 +1163,10 @@ export default function LandingPage() {
               </div>
               <div style={{ display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "flex-end", gap: 16, marginTop: 16, flexWrap: "wrap" }}>
                 <div style={{ display: "flex", gap: 10 }}>
-                  {SOCIAL_LINKS.map(({ id, icon }) => (
+                  {SOCIAL_LINKS.map(({ id, icon, href }) => (
                     <a
                       key={id}
-                      href={id === "LinkedIn" ? "https://linkedin.com" : id === "GitHub" ? "https://github.com" : "https://youtube.com"}
+                      href={href}
                       target="_blank"
                       rel="noopener noreferrer"
                       style={{
@@ -1280,7 +1291,7 @@ export default function LandingPage() {
       </section>
 
       {/* ━━━ FOOTER — particle background only (no sun trajectory) ━━━ */}
-      <footer style={{
+      <footer id="contact" style={{
         position: "relative", overflow: "hidden",
         background: "#0F172A", color: "#94a3b8",
         fontFamily: "Inter, Arial, sans-serif",
@@ -1335,19 +1346,24 @@ export default function LandingPage() {
             </p>
             {/* Social icons */}
             <div style={{ display: "flex", gap: 12, marginTop: 20 }}>
-              {SOCIAL_LINKS.map(({ id, icon }) => (
-                <div key={id} style={{
-                  width: 32, height: 32, borderRadius: 8,
-                  background: "rgba(255,255,255,.05)", border: "1px solid rgba(255,255,255,.08)",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  fontSize: 12, color: "#64748B", cursor: "pointer",
-                  transition: "background .15s",
-                }}
-                onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,.1)"; e.currentTarget.style.color = "#FFFFFF"; }}
-                onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,.05)"; e.currentTarget.style.color = "#64748B"; }}
+              {SOCIAL_LINKS.map(({ id, icon, href }) => (
+                <a
+                  key={id}
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{
+                    width: 32, height: 32, borderRadius: 8,
+                    background: "rgba(255,255,255,.05)", border: "1px solid rgba(255,255,255,.08)",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    fontSize: 12, color: "#64748B", cursor: "pointer",
+                    transition: "background .15s", textDecoration: "none",
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,.1)"; e.currentTarget.style.color = "#FFFFFF"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,.05)"; e.currentTarget.style.color = "#64748B"; }}
                 >
                   {icon}
-                </div>
+                </a>
               ))}
             </div>
           </div>
