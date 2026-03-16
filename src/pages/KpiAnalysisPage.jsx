@@ -336,6 +336,50 @@ function resampleRowsToDaily(headers, rows, tot_power) {
   return { headers: dailyHeaders, rows: outRows };
 }
 
+/** Aggregate daily KPI data to monthly or yearly by taking the mean of daily KPIs. */
+function aggregateDailyKpi(dailyKpiData, mode) {
+  if (!dailyKpiData?.headers?.length || !dailyKpiData?.rows?.length) return dailyKpiData ?? null;
+  if (mode === "daily") return dailyKpiData;
+  const headers = dailyKpiData.headers;
+  const timeIdx = 0;
+  const groups = new Map();
+  for (const row of dailyKpiData.rows) {
+    if (!Array.isArray(row)) continue;
+    const t = String(row[timeIdx] ?? "");
+    if (!t) continue;
+    let key = t;
+    if (mode === "monthly") {
+      key = t.slice(0, 7); // "YYYY-MM-DD" → "YYYY-MM"
+    } else if (mode === "yearly") {
+      key = t.slice(0, 4); // "YYYY-MM-DD" → "YYYY"
+    }
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+  if (!groups.size) return dailyKpiData;
+  const sortedKeys = Array.from(groups.keys()).sort();
+  const outRows = [];
+  for (const key of sortedKeys) {
+    const group = groups.get(key);
+    const outRow = new Array(headers.length).fill("");
+    outRow[timeIdx] = key;
+    for (let c = 1; c < headers.length; c++) {
+      let sum = 0;
+      let count = 0;
+      for (const r of group) {
+        const v = parseFloat(r[c]);
+        if (Number.isFinite(v)) {
+          sum += v;
+          count++;
+        }
+      }
+      outRow[c] = count > 0 ? String(sum / count) : "";
+    }
+    outRows.push(outRow);
+  }
+  return { headers, rows: outRows };
+}
+
 function filterRowsByDateRange(headers, rows, dateFrom, dateTo) {
   if (!Array.isArray(rows) || rows.length === 0) return [];
   const dateCol = getDateColumnIndex(headers || []);
@@ -1188,6 +1232,7 @@ function KpiCSVChart({
     const source = useGaps && safeFullRows.length ? safeFullRows : safeRows;
     return safeHeaders.map((h, i) => ({ header: h, index: i })).filter(({ index }) => {
       const sample = source.slice(0, Math.min(100, source.length));
+      if (sample.length === 0) return false;
       let numCount = 0;
       for (const row of sample) {
         const raw = (Array.isArray(row) ? (row[index] ?? "") : "").trim();
@@ -1195,6 +1240,9 @@ function KpiCSVChart({
         const n = parseFloat(raw);
         if (!isNaN(n) && isFinite(n)) numCount++;
       }
+      // For very small samples (e.g. monthly/yearly KPI with 1–2 rows), allow a column
+      // if we have at least one numeric value.
+      if (sample.length <= 2) return numCount >= 1;
       return numCount >= Math.max(2, sample.length * 0.15);
     });
   }, [safeHeaders, safeRows, safeFullRows, useGaps]);
@@ -1936,10 +1984,88 @@ export default function KpiAnalysisPage() {
     return resampleRowsToDaily(pvData.headers, rowsForDaily, totPower);
   }, [pvData, pvStatusFilteredRows, pvHourlyForKpi, totPower]);
 
-  // Ya / Yr grouped bar chart data (from daily KPI)
+  // KPI aggregation level for Analysis card (daily, monthly, yearly)
+  const [kpiAggregation, setKpiAggregation] = useState("daily");
+
+  const aggregatedKpiData = useMemo(() => {
+    if (!dailyKpiData) return null;
+    return aggregateDailyKpi(dailyKpiData, kpiAggregation);
+  }, [dailyKpiData, kpiAggregation]);
+
+  // KPI summary (date range + filters + mean PR/Ya/Yr for current aggregation)
+  const kpiSummary = useMemo(() => {
+    if (!aggregatedKpiData?.headers?.length || !aggregatedKpiData?.rows?.length) return null;
+    const headers = aggregatedKpiData.headers;
+    const timeIdx = 0;
+    const prIdx = getColumnIndex(headers, ["PR"]);
+    const yaIdx = getColumnIndex(headers, ["Ya"]);
+    const yrIdx = getColumnIndex(headers, ["Yr"]);
+    let prSum = 0, prCount = 0;
+    let yaSum = 0, yaCount = 0;
+    let yrSum = 0, yrCount = 0;
+    let minTime = null;
+    let maxTime = null;
+    for (const row of aggregatedKpiData.rows) {
+      if (!Array.isArray(row)) continue;
+      const t = row[timeIdx];
+      if (t != null && t !== "") {
+        if (minTime == null || String(t) < String(minTime)) minTime = t;
+        if (maxTime == null || String(t) > String(maxTime)) maxTime = t;
+      }
+      if (prIdx >= 0) {
+        const v = parseFloat(row[prIdx]);
+        if (Number.isFinite(v)) { prSum += v; prCount++; }
+      }
+      if (yaIdx >= 0) {
+        const v = parseFloat(row[yaIdx]);
+        if (Number.isFinite(v)) { yaSum += v; yaCount++; }
+      }
+      if (yrIdx >= 0) {
+        const v = parseFloat(row[yrIdx]);
+        if (Number.isFinite(v)) { yrSum += v; yrCount++; }
+      }
+    }
+    const meanPr = prCount > 0 ? prSum / prCount : null;
+    const meanYa = yaCount > 0 ? yaSum / yaCount : null;
+    const meanYr = yrCount > 0 ? yrSum / yrCount : null;
+    const filters = [];
+    if (dateFrom || dateTo) {
+      filters.push(`Date range: ${dateFrom || "min"} → ${dateTo || "max"}`);
+    }
+    filters.push(
+      `GHI ∈ [${appliedIecGhiMin}, ${appliedIecGhiMax}] W/m²`,
+      `Air Temp ∈ [${appliedIecAirTempMin}, ${appliedIecAirTempMax}] °C`,
+      `Wind speed ∈ [${appliedIecWindSpeedMin}, ${appliedIecWindSpeedMax}] m/s`,
+      `Power ∈ [${appliedIecPowerMin}, ${appliedIecPowerMax != null ? appliedIecPowerMax : "max(P_DC)"}] kW`
+    );
+    filters.push(`Status: ${appliedIecStatusFilter === "valid" ? "Valid only" : "All statuses"}`);
+    return {
+      minTime,
+      maxTime,
+      meanPr,
+      meanYa,
+      meanYr,
+      filters,
+    };
+  }, [
+    aggregatedKpiData,
+    dateFrom,
+    dateTo,
+    appliedIecGhiMin,
+    appliedIecGhiMax,
+    appliedIecAirTempMin,
+    appliedIecAirTempMax,
+    appliedIecWindSpeedMin,
+    appliedIecWindSpeedMax,
+    appliedIecPowerMin,
+    appliedIecPowerMax,
+    appliedIecStatusFilter,
+  ]);
+
+  // Ya / Yr grouped bar chart data (from (possibly aggregated) KPI)
   const yaYrBarChartData = useMemo(() => {
-    if (!dailyKpiData?.headers?.length || !dailyKpiData?.rows?.length) return null;
-    const headers = dailyKpiData.headers;
+    if (!aggregatedKpiData?.headers?.length || !aggregatedKpiData?.rows?.length) return null;
+    const headers = aggregatedKpiData.headers;
     const timeIdx = 0;
     const yaIdx = getColumnIndex(headers, ["Ya"]);
     const yrIdx = getColumnIndex(headers, ["Yr"]);
@@ -1947,7 +2073,7 @@ export default function KpiAnalysisPage() {
     const x = [];
     const ya = [];
     const yr = [];
-    for (const row of dailyKpiData.rows) {
+    for (const row of aggregatedKpiData.rows) {
       if (!Array.isArray(row)) continue;
       x.push(row[timeIdx] ?? "");
       const yaVal = parseFloat(row[yaIdx]);
@@ -1956,7 +2082,7 @@ export default function KpiAnalysisPage() {
       yr.push(Number.isFinite(yrVal) ? yrVal : null);
     }
     return { x, ya, yr };
-  }, [dailyKpiData]);
+  }, [aggregatedKpiData]);
 
   useEffect(() => {
     if (!pvRawData?.headers?.length || !pvRawData?.rows?.length) return;
@@ -2571,8 +2697,8 @@ export default function KpiAnalysisPage() {
                 <KpiCSVChart title="PV & Weather Data" color={O} headers={pvData.headers} rows={pvStatusFilteredRows} fullRowsForGaps={pvFilteredRows} defaultYHeader="P_DC" defaultRightYHeader="weather_GTI" />
             </div>
 
-            {/* KPI Analysis card — Daily resample + E_DC, Ya, Yr, PR (requires System Info with tot_power) */}
-            {dailyKpiData && (
+            {/* KPI Analysis card — Daily/Monthly/Yearly KPI resample + E_DC, Ya, Yr, PR (requires System Info with tot_power) */}
+            {aggregatedKpiData && (
               <div
                 style={{
                   background: "#ffffff",
@@ -2585,29 +2711,59 @@ export default function KpiAnalysisPage() {
                   gap: 14,
                 }}
               >
-                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 2 }}>
-                  <div style={{ width: 30, height: 30, borderRadius: 10, background: `${KPI}12`, border: `1px solid ${KPI}35`, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                    <QueryStats sx={{ fontSize: 18, color: KPI }} />
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 2 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ width: 30, height: 30, borderRadius: 10, background: `${KPI}12`, border: `1px solid ${KPI}35`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <QueryStats sx={{ fontSize: 18, color: KPI }} />
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column" }}>
+                      <span style={{ fontFamily: FONT, fontSize: 14, fontWeight: 800, color: "#0F172A" }}>KPI Analysis</span>
+                      <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>Daily performance metrics: E_DC, Ya, Yr, and PR.</span>
+                    </div>
                   </div>
-                  <div style={{ display: "flex", flexDirection: "column" }}>
-                    <span style={{ fontFamily: FONT, fontSize: 14, fontWeight: 800, color: "#0F172A" }}>KPI Analysis</span>
-                    <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>Daily performance metrics: E_DC, Ya, Yr, and PR.</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    {["daily", "monthly", "yearly"].map((mode) => {
+                      const label = mode === "daily" ? "Daily" : mode === "monthly" ? "Monthly" : "Yearly";
+                      const isActive = kpiAggregation === mode;
+                      return (
+                        <button
+                          key={mode}
+                          type="button"
+                          onClick={() => setKpiAggregation(mode)}
+                          style={{
+                            padding: "4px 10px",
+                            fontSize: 11,
+                            fontFamily: FONT,
+                            borderRadius: 999,
+                            border: isActive ? `1px solid ${KPI}` : "1px solid #E2E8F0",
+                            background: isActive ? `${KPI}14` : "#FFFFFF",
+                            color: isActive ? "#166534" : "#64748B",
+                            cursor: "pointer",
+                            fontWeight: isActive ? 700 : 500,
+                            boxShadow: "none",
+                            transition: "background-color 120ms ease, border-color 120ms ease, color 120ms ease",
+                          }}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
                 <KpiCSVTable
-                  title="Daily KPI (resampled D)"
+                  title={kpiAggregation === "daily" ? "Daily KPI (resampled D)" : kpiAggregation === "monthly" ? "Monthly KPI (mean of daily)" : "Yearly KPI (mean of daily)"}
                   icon={<QueryStats sx={{ fontSize: 20, color: KPI }} />}
                   color={KPI}
-                  headers={dailyKpiData.headers}
-                  rows={dailyKpiData.rows}
+                  headers={aggregatedKpiData.headers}
+                  rows={aggregatedKpiData.rows}
                   resampled={true}
-                  resampledStepMinutes="D"
+                  resampledStepMinutes={kpiAggregation === "daily" ? "D" : kpiAggregation === "monthly" ? "M" : "Y"}
                 />
                 <KpiCSVChart
-                  title="Daily Performance Ratio"
+                  title={kpiAggregation === "daily" ? "Daily Performance Ratio" : kpiAggregation === "monthly" ? "Monthly Performance Ratio" : "Yearly Performance Ratio"}
                   color={KPI}
-                  headers={dailyKpiData.headers}
-                  rows={dailyKpiData.rows}
+                  headers={aggregatedKpiData.headers}
+                  rows={aggregatedKpiData.rows}
                   defaultYHeader="PR"
                   singleYAxis
                   traceMode="lines+markers"
@@ -2617,14 +2773,185 @@ export default function KpiAnalysisPage() {
                 {/* Array Yield and Reference Yield — Chart (grouped bar, same card style as Daily KPI) */}
                 {yaYrBarChartData && (
                   <KpiYaYrBarChart
-                    title="Daily Array Yield and Reference Yield"
+                    title={kpiAggregation === "daily" ? "Daily Array Yield and Reference Yield" : kpiAggregation === "monthly" ? "Monthly Array Yield and Reference Yield" : "Yearly Array Yield and Reference Yield"}
                     color={KPI}
                     x={yaYrBarChartData.x}
                     ya={yaYrBarChartData.ya}
                     yr={yaYrBarChartData.yr}
-                    xAxisTitle={dailyKpiData.headers[0] ?? "time"}
+                    xAxisTitle={aggregatedKpiData.headers[0] ?? "time"}
                   />
                 )}
+              </div>
+            )}
+
+            {/* KPI Analysis summary card — placed last on page */}
+            {kpiSummary && (
+              <div
+                style={{
+                  background: "#ffffff",
+                  borderRadius: 16,
+                  border: "1px solid #E2E8F0",
+                  boxShadow: "0 18px 45px rgba(15, 23, 42, 0.08)",
+                  padding: "16px 18px 18px",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: 12,
+                  marginTop: 12,
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-start", gap: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ width: 28, height: 28, borderRadius: 999, background: `${KPI}10`, border: `1px solid ${KPI}30`, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <QueryStats sx={{ fontSize: 18, color: KPI }} />
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column" }}>
+                      <span style={{ fontFamily: FONT, fontSize: 13, fontWeight: 800, color: "#0F172A" }}>KPI Analysis summary</span>
+                      <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>
+                        {kpiAggregation === "daily" ? "Daily" : kpiAggregation === "monthly" ? "Monthly" : "Yearly"} view · PR, Ya, Yr averages.
+                      </span>
+                    </div>
+                  </div>
+                </div>
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 12,
+                    justifyContent: "space-between",
+                  }}
+                >
+                  <div
+                    style={{
+                      flex: "1 1 0",
+                      minWidth: 140,
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      background: "#F8FAFC",
+                      border: "1px solid #E2E8F0",
+                    }}
+                  >
+                    <div style={{ fontFamily: FONT, fontSize: 10, fontWeight: 600, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.4, textAlign: "center" }}>Data range</div>
+                    <div style={{ fontFamily: MONO, fontSize: 11, color: "#0F172A", marginTop: 4, textAlign: "center" }}>
+                      {kpiSummary.minTime || "—"}{" "}
+                      <span style={{ color: "#94A3B8" }}>→</span> {kpiSummary.maxTime || "—"}
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      flex: "1 1 0",
+                      minWidth: 140,
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      background: "#F8FAFC",
+                      border: "1px solid #E2E8F0",
+                    }}
+                  >
+                    <div style={{ fontFamily: FONT, fontSize: 10, fontWeight: 600, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.4, textAlign: "center" }}>Mean PR</div>
+                    <div style={{ fontFamily: MONO, fontSize: 14, color: "#166534", marginTop: 4, textAlign: "center" }}>
+                      {kpiSummary.meanPr != null ? `${(kpiSummary.meanPr * 100).toFixed(2)} %` : "—"}
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      flex: "1 1 0",
+                      minWidth: 140,
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      background: "#F8FAFC",
+                      border: "1px solid #E2E8F0",
+                    }}
+                  >
+                    <div style={{ fontFamily: FONT, fontSize: 10, fontWeight: 600, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.4, textAlign: "center" }}>Mean Ya</div>
+                    <div style={{ fontFamily: MONO, fontSize: 14, color: "#0F172A", marginTop: 4, textAlign: "center" }}>
+                      {kpiSummary.meanYa != null ? kpiSummary.meanYa.toFixed(3) : "—"} <span style={{ fontSize: 10, color: "#94A3B8" }}>kWh/kWp</span>
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      flex: "1 1 0",
+                      minWidth: 140,
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      background: "#F8FAFC",
+                      border: "1px solid #E2E8F0",
+                    }}
+                  >
+                    <div style={{ fontFamily: FONT, fontSize: 10, fontWeight: 600, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.4, textAlign: "center" }}>Mean Yr</div>
+                    <div style={{ fontFamily: MONO, fontSize: 14, color: "#0F172A", marginTop: 4, textAlign: "center" }}>
+                      {kpiSummary.meanYr != null ? kpiSummary.meanYr.toFixed(3) : "—"} <span style={{ fontSize: 10, color: "#94A3B8" }}>kWh/m²</span>
+                    </div>
+                  </div>
+                </div>
+                <div
+                  style={{
+                    marginTop: 4,
+                    paddingTop: 6,
+                    borderTop: "1px dashed #E2E8F0",
+                    display: "flex",
+                    alignItems: "flex-end",
+                    justifyContent: "space-between",
+                    gap: 12,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontFamily: FONT,
+                      fontSize: 10,
+                      color: "#64748B",
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 2,
+                      maxWidth: "70%",
+                    }}
+                  >
+                    <span style={{ fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.4 }}>Filters applied</span>
+                    <span>{kpiSummary.filters.join(" · ")}</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!aggregatedKpiData?.headers?.length || !aggregatedKpiData?.rows?.length) return;
+                      const csvRows = [];
+                      csvRows.push(aggregatedKpiData.headers.map((h) => `"${String(h ?? "").replace(/"/g, '""')}"`).join(","));
+                      for (const row of aggregatedKpiData.rows) {
+                        if (!Array.isArray(row)) continue;
+                        csvRows.push(row.map((v) => `"${String(v ?? "").replace(/"/g, '""')}"`).join(","));
+                      }
+                      const blob = new Blob([csvRows.join("\n")], { type: "text/csv;charset=utf-8;" });
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      const prefix = kpiAggregation === "daily" ? "daily" : kpiAggregation === "monthly" ? "monthly" : "yearly";
+                      a.download = `kpi_${prefix}_data.csv`;
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                      URL.revokeObjectURL(url);
+                    }}
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 5,
+                      padding: "5px 14px",
+                      borderRadius: 8,
+                      background: "#1F2937",
+                      color: "#fff",
+                      border: "none",
+                      cursor: "pointer",
+                      fontSize: 10,
+                      fontWeight: 600,
+                      fontFamily: FONT,
+                      letterSpacing: ".03em",
+                      transition: "background .15s",
+                      whiteSpace: "nowrap",
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = "#374151")}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = "#1F2937")}
+                  >
+                    <FileDownloadOutlined sx={{ fontSize: 14, color: "#ffffff" }} />
+                    <span>Download KPI Data</span>
+                  </button>
+                </div>
               </div>
             )}
           </div>
