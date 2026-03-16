@@ -1988,7 +1988,7 @@ export default function KpiAnalysisPage() {
                             }}
                           >
                             <div style={{ fontWeight: 700, color: "#0F172A", marginBottom: 6 }}>IEC-61724 Filters</div>
-                            <p style={{ margin: "0 0 10px 0" }}>
+                            <p style={{ margin: "0 0 10px 0", fontFamily: FONT, fontWeight: 400 }}>
                               IEC61724 filters are used to improve PV monitoring data quality by excluding weather measurements outside realistic operating ranges. The filtering step screens global horizontal irradiance (GHI), ambient temperature, and wind speed to remove implausible values, sensor faults, and abnormal spikes before KPI calculation and performance analysis. These variables are commonly checked because they directly influence PV performance interpretation and downstream diagnostics.
                             </p>
                             <p style={{ margin: "0 0 8px 0" }}>
@@ -2158,8 +2158,8 @@ export default function KpiAnalysisPage() {
                       fontSize: 11,
                       fontWeight: 600,
                       color: iecStatusFilter === "all" ? "#fff" : "#64748B",
-                      background: iecStatusFilter === "all" ? "#2563EB" : "#F1F5F9",
-                      border: `1px solid ${iecStatusFilter === "all" ? "#2563EB" : "#E2E8F0"}`,
+                      background: iecStatusFilter === "all" ? "#00b4d8" : "#F1F5F9",
+                      border: `1px solid ${iecStatusFilter === "all" ? "#00b4d8" : "#E2E8F0"}`,
                       borderRadius: 8,
                       padding: "6px 12px",
                       cursor: "pointer",
@@ -2175,8 +2175,8 @@ export default function KpiAnalysisPage() {
                       fontSize: 11,
                       fontWeight: 600,
                       color: iecStatusFilter === "valid" ? "#fff" : "#64748B",
-                      background: iecStatusFilter === "valid" ? "#16A34A" : "#F1F5F9",
-                      border: `1px solid ${iecStatusFilter === "valid" ? "#16A34A" : "#E2E8F0"}`,
+                      background: iecStatusFilter === "valid" ? "#00a896" : "#F1F5F9",
+                      border: `1px solid ${iecStatusFilter === "valid" ? "#00a896" : "#E2E8F0"}`,
                       borderRadius: 8,
                       padding: "6px 12px",
                       cursor: "pointer",
