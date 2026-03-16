@@ -640,10 +640,10 @@ export default function LandingPage() {
             borderTop: "1px solid rgba(255,255,255,.06)",
           }}>
             {[
-              { value: "5", label: "Analysis Modules" },
+              { value: "6", label: "Analysis Modules" },
               { value: "IEC 61724", label: "Compliant KPIs" },
-              { value: "20+", label: "CAPEX Line Items" },
-              { value: "40 yr", label: "Project Horizon" },
+              { value: "20+", label: "Algorithms Implemented" },
+              { value: "10+", label: "PV Performance KPIs" },
             ].map(s => (
               <div key={s.label} style={{ textAlign: "center" }}>
                 <div style={{ fontSize: 22, fontWeight: 800, color: "#FFFFFF", fontFamily: "Inter, Arial, sans-serif" }}>

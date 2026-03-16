@@ -1275,6 +1275,8 @@ function KpiCSVTable({ title, icon, color, headers, rows, resampled, originalRow
 // ── Chart column multi-select + dual Y-axis chart (KPI page only) ──
 const KPI_CHART_COLORS_LEFT = ["#1f77b4", "#dc2626", "#16a34a"];
 const KPI_CHART_COLORS_RIGHT = ["#ff7f0e", "#7c3aed", "#0891b2"];
+// Same Ya/Yr colors used in PR chart and Ya/Yr bar chart for consistency
+const YA_YR_BAR_COLORS = { Yr: "#14B8A6", Ya: "#6366F1" };
 
 function KpiColumnMultiSelect({ options, selected, onChange, label }) {
   const [open, setOpen] = useState(false);
@@ -1445,6 +1447,10 @@ function KpiCSVChart({
         fixedLower &&
         (headerLower === fixedLower || headerLower === "pr_tcorr");
       const hoverTemplate = isPercentTrace ? "<b>%{fullData.name}</b>: %{y:.2f}%<extra></extra>" : "<b>%{fullData.name}</b>: %{y}<extra></extra>";
+      const lineColor =
+        fixedLower === "pr" && i === 0
+          ? YA_YR_BAR_COLORS.Ya
+          : KPI_CHART_COLORS_LEFT[i % KPI_CHART_COLORS_LEFT.length];
       const trace = {
         x: xValues,
         y: yValues,
@@ -1452,7 +1458,7 @@ function KpiCSVChart({
         mode,
         connectgaps: false,
         name: singleYAxis ? name : name + " (L)",
-        line: { color: KPI_CHART_COLORS_LEFT[i % KPI_CHART_COLORS_LEFT.length], width: 1.5, shape: "spline", smoothing: 1.2 },
+        line: { color: lineColor, width: 1.5, shape: "spline", smoothing: 1.2 },
         hovertemplate: hoverTemplate,
         yaxis: "y",
       };
@@ -1468,7 +1474,6 @@ function KpiCSVChart({
         const yValues = getYValues(prTcorrIdx);
         const isPercentTrace = fixedYAsPercent;
         const hoverTemplate = isPercentTrace ? "<b>%{fullData.name}</b>: %{y:.2f}%<extra></extra>" : "<b>%{fullData.name}</b>: %{y}<extra></extra>";
-        const colorIndex = selectedIndicesLeft.length;
         const trace = {
           x: xValues,
           y: yValues,
@@ -1477,7 +1482,7 @@ function KpiCSVChart({
           connectgaps: false,
           name: singleYAxis ? "PR Temperature Corrected" : "PR Temperature Corrected (L)",
           line: {
-            color: KPI_CHART_COLORS_LEFT[colorIndex % KPI_CHART_COLORS_LEFT.length],
+            color: YA_YR_BAR_COLORS.Yr,
             width: 1.5,
             shape: "spline",
             smoothing: 1.2,
@@ -1660,8 +1665,6 @@ function KpiCSVChart({
 }
 
 // ── Ya / Yr grouped bar chart (same card style as Daily KPI — Chart) ──
-const YA_YR_BAR_COLORS = { Yr: "#14B8A6", Ya: "#6366F1" };
-
 function KpiYaYrBarChart({ title, color, x, ya, yr, xAxisTitle }) {
   const [expanded, setExpanded] = useState(true);
   return (
@@ -2232,17 +2235,15 @@ export default function KpiAnalysisPage() {
     const meanPrTcorr = prTcorrCount > 0 ? prTcorrSum / prTcorrCount : null;
     const meanYa = yaCount > 0 ? yaSum / yaCount : null;
     const meanYr = yrCount > 0 ? yrSum / yrCount : null;
-    const filters = [];
-    if (dateFrom || dateTo) {
-      filters.push(`Date range: ${dateFrom || "min"} → ${dateTo || "max"}`);
-    }
-    filters.push(
+    const powerMaxDisplay = appliedIecPowerMax != null && appliedIecPowerMax !== "" ? appliedIecPowerMax : (maxPdcInData != null ? String(maxPdcInData) : "max(P_DC)");
+    const filters = [
+      `Date range: ${minTime ?? "—"} → ${maxTime ?? "—"}`,
       `GHI ∈ [${appliedIecGhiMin}, ${appliedIecGhiMax}] W/m²`,
       `Air Temp ∈ [${appliedIecAirTempMin}, ${appliedIecAirTempMax}] °C`,
       `Wind speed ∈ [${appliedIecWindSpeedMin}, ${appliedIecWindSpeedMax}] m/s`,
-      `Power ∈ [${appliedIecPowerMin}, ${appliedIecPowerMax != null ? appliedIecPowerMax : "max(P_DC)"}] kW`
-    );
-    filters.push(`Status: ${appliedIecStatusFilter === "valid" ? "Valid only" : "All statuses"}`);
+      `Power ∈ [${appliedIecPowerMin}, ${powerMaxDisplay}] kW`,
+      `Status: ${appliedIecStatusFilter === "valid" ? "Valid only" : "All statuses"}`,
+    ];
     return {
       minTime,
       maxTime,
@@ -2254,8 +2255,6 @@ export default function KpiAnalysisPage() {
     };
   }, [
     aggregatedKpiData,
-    dateFrom,
-    dateTo,
     appliedIecGhiMin,
     appliedIecGhiMax,
     appliedIecAirTempMin,
@@ -2265,6 +2264,7 @@ export default function KpiAnalysisPage() {
     appliedIecPowerMin,
     appliedIecPowerMax,
     appliedIecStatusFilter,
+    maxPdcInData,
   ]);
 
   // Ya / Yr grouped bar chart data (from (possibly aggregated) KPI)
@@ -3151,6 +3151,21 @@ export default function KpiAnalysisPage() {
                       border: "1px solid #E2E8F0",
                     }}
                   >
+                    <div style={{ fontFamily: FONT, fontSize: 10, fontWeight: 600, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.4, textAlign: "center" }}>Mean PR corrected</div>
+                    <div style={{ fontFamily: MONO, fontSize: 14, color: "#166534", marginTop: 4, textAlign: "center" }}>
+                      {kpiSummary.meanPrTcorr != null ? `${(kpiSummary.meanPrTcorr * 100).toFixed(2)} %` : "—"}
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      flex: "1 1 0",
+                      minWidth: 140,
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      background: "#F8FAFC",
+                      border: "1px solid #E2E8F0",
+                    }}
+                  >
                     <div style={{ fontFamily: FONT, fontSize: 10, fontWeight: 600, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.4, textAlign: "center" }}>Mean Ya</div>
                     <div style={{ fontFamily: MONO, fontSize: 14, color: "#0F172A", marginTop: 4, textAlign: "center" }}>
                       {kpiSummary.meanYa != null ? kpiSummary.meanYa.toFixed(3) : "—"} <span style={{ fontSize: 10, color: "#94A3B8" }}>kWh/kWp</span>
@@ -3169,21 +3184,6 @@ export default function KpiAnalysisPage() {
                     <div style={{ fontFamily: FONT, fontSize: 10, fontWeight: 600, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.4, textAlign: "center" }}>Mean Yr</div>
                     <div style={{ fontFamily: MONO, fontSize: 14, color: "#0F172A", marginTop: 4, textAlign: "center" }}>
                       {kpiSummary.meanYr != null ? kpiSummary.meanYr.toFixed(3) : "—"} <span style={{ fontSize: 10, color: "#94A3B8" }}>kWh/m²</span>
-                    </div>
-                  </div>
-                  <div
-                    style={{
-                      flex: "1 1 0",
-                      minWidth: 140,
-                      padding: "8px 10px",
-                      borderRadius: 10,
-                      background: "#F8FAFC",
-                      border: "1px solid #E2E8F0",
-                    }}
-                  >
-                    <div style={{ fontFamily: FONT, fontSize: 10, fontWeight: 600, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.4, textAlign: "center" }}>Mean PR corrected</div>
-                    <div style={{ fontFamily: MONO, fontSize: 14, color: "#166534", marginTop: 4, textAlign: "center" }}>
-                      {kpiSummary.meanPrTcorr != null ? `${(kpiSummary.meanPrTcorr * 100).toFixed(2)} %` : "—"}
                     </div>
                   </div>
                 </div>
