@@ -661,7 +661,15 @@ function CSVTable({ title, icon, color, headers, rows, resampled, originalRows, 
                 <tr key={ri} style={{ background: ri % 2 === 0 ? "#fff" : "#FAFBFC" }}>
                   {visibleColumns.map((c) => (
                     <td key={c.id} style={c.id === ROW_NUM_ID ? { ...tdStyle, color: "#94a3b8", fontWeight: 600 } : tdStyle}>
-                      {c.id === ROW_NUM_ID ? ri + 1 : (Array.isArray(row) ? (row[c.id] ?? "") : "")}
+                      {c.id === ROW_NUM_ID
+                        ? ri + 1
+                        : (() => {
+                            const raw = Array.isArray(row) ? row[c.id] ?? "" : "";
+                            if (raw === "" || raw === null || raw === undefined) return "";
+                            const num = Number(raw);
+                            if (!Number.isFinite(num)) return raw;
+                            return num.toFixed(4);
+                          })()}
                     </td>
                   ))}
                 </tr>
@@ -1048,8 +1056,8 @@ function CorrelationChart({ pvHeaders, pvRows, weatherHeaders, weatherRows }) {
         linewidth: 1,
         mirror: false,
       },
-      plot_bgcolor: "#FAFBFC",
-      paper_bgcolor: "#fff",
+      plot_bgcolor: "#FFFFFF",
+      paper_bgcolor: "#FFFFFF",
       font: { family: FONT },
     };
 
@@ -1296,8 +1304,8 @@ function SyncedCorrelationChart({ merged }) {
       linecolor: "#E2E8F0",
       linewidth: 1,
     },
-    plot_bgcolor: "#FAFBFC",
-    paper_bgcolor: "#fff",
+    plot_bgcolor: "#FFFFFF",
+    paper_bgcolor: "#FFFFFF",
     font: { family: FONT },
   };
 
@@ -2486,7 +2494,7 @@ export default function QualityCheckPage() {
 
   return (
     <div style={{
-      minHeight: "calc(100vh - 56px)", background: "#FAFBFC",
+      minHeight: "calc(100vh - 56px)", background: "#FFFFFF",
       fontFamily: FONT, padding: "32px 40px 60px",
     }}>
       {/* Toast */}

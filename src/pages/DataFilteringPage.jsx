@@ -1468,7 +1468,15 @@ function FilterCSVTable({ title, icon, color, headers, rows, resampled, original
                 <tr key={ri} style={{ background: ri % 2 === 0 ? "#fff" : "#FAFBFC" }}>
                   {visibleColumns.map((c) => (
                     <td key={c.id} style={c.id === ROW_NUM_ID ? { ...tdStyle, color: "#94a3b8", fontWeight: 600 } : tdStyle}>
-                      {c.id === ROW_NUM_ID ? ri + 1 : (Array.isArray(row) ? (row[c.id] ?? "") : "")}
+                      {c.id === ROW_NUM_ID
+                        ? ri + 1
+                        : (() => {
+                            const raw = Array.isArray(row) ? row[c.id] ?? "" : "";
+                            if (raw === "" || raw === null || raw === undefined) return "";
+                            const num = Number(raw);
+                            if (!Number.isFinite(num)) return raw;
+                            return num.toFixed(4);
+                          })()}
                     </td>
                   ))}
                 </tr>
@@ -1811,8 +1819,8 @@ function PdcPvWattsCorrelationChart({ data }) {
         showline: true,
         linecolor: "#E2E8F0",
       },
-      plot_bgcolor: "#FAFBFC",
-      paper_bgcolor: "#fff",
+      plot_bgcolor: "#FFFFFF",
+      paper_bgcolor: "#FFFFFF",
       font: { family: FONT },
     };
     return { traces: [...scatterTraces, traceLine], layout };

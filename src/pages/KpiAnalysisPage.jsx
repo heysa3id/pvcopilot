@@ -1127,7 +1127,15 @@ function KpiCSVTable({ title, icon, color, headers, rows, resampled, originalRow
                 <tr key={ri} style={{ background: ri % 2 === 0 ? "#fff" : "#FAFBFC" }}>
                   {visibleColumns.map((c) => (
                     <td key={c.id} style={c.id === ROW_NUM_ID ? { ...kpiTdStyle, color: "#94a3b8", fontWeight: 600 } : kpiTdStyle}>
-                      {c.id === ROW_NUM_ID ? ri + 1 : (Array.isArray(row) ? (row[c.id] ?? "") : "")}
+                      {c.id === ROW_NUM_ID
+                        ? ri + 1
+                        : (() => {
+                            const raw = Array.isArray(row) ? row[c.id] ?? "" : "";
+                            if (raw === "" || raw === null || raw === undefined) return "";
+                            const num = Number(raw);
+                            if (!Number.isFinite(num)) return raw;
+                            return num.toFixed(4);
+                          })()}
                     </td>
                   ))}
                 </tr>
@@ -1801,6 +1809,31 @@ export default function KpiAnalysisPage() {
   }, []);
 
   const IEC_DEFAULTS = useMemo(() => ({ ghiMin: "20", ghiMax: "1500", airMin: "-40", airMax: "60", windMin: "0", windMax: "30", powerMin: "0", powerMax: "", status: "all" }), []);
+  const iecAppliedSignature = useMemo(
+    () =>
+      [
+        appliedIecGhiMin,
+        appliedIecGhiMax,
+        appliedIecAirTempMin,
+        appliedIecAirTempMax,
+        appliedIecWindSpeedMin,
+        appliedIecWindSpeedMax,
+        appliedIecPowerMin,
+        appliedIecPowerMax ?? "maxPdc",
+        appliedIecStatusFilter,
+      ].join("|"),
+    [
+      appliedIecGhiMin,
+      appliedIecGhiMax,
+      appliedIecAirTempMin,
+      appliedIecAirTempMax,
+      appliedIecWindSpeedMin,
+      appliedIecWindSpeedMax,
+      appliedIecPowerMin,
+      appliedIecPowerMax,
+      appliedIecStatusFilter,
+    ]
+  );
   const handleIecApply = useCallback(() => {
     setAppliedIecGhiMin(iecGhiMin);
     setAppliedIecGhiMax(iecGhiMax);
@@ -2685,6 +2718,7 @@ export default function KpiAnalysisPage() {
                 </div>
               </div>
               <KpiCSVTable
+                key={`pv-table-${iecAppliedSignature}`}
                 title="PV Data"
                 icon={<SolarPowerOutlined sx={{ fontSize: 20, color: O }} />}
                 color={O}
@@ -2694,7 +2728,16 @@ export default function KpiAnalysisPage() {
                 originalRows={pvData.originalRows}
                 resampledStepMinutes={pvData.resampledStepMinutes}
               />
-                <KpiCSVChart title="PV & Weather Data" color={O} headers={pvData.headers} rows={pvStatusFilteredRows} fullRowsForGaps={pvFilteredRows} defaultYHeader="P_DC" defaultRightYHeader="weather_GTI" />
+                <KpiCSVChart
+                  key={`pv-chart-${iecAppliedSignature}`}
+                  title="PV & Weather Data"
+                  color={O}
+                  headers={pvData.headers}
+                  rows={pvStatusFilteredRows}
+                  fullRowsForGaps={pvFilteredRows}
+                  defaultYHeader="P_DC"
+                  defaultRightYHeader="weather_GTI"
+                />
             </div>
 
             {/* KPI Analysis card — Daily/Monthly/Yearly KPI resample + E_DC, Ya, Yr, PR (requires System Info with tot_power) */}
