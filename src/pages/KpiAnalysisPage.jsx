@@ -257,10 +257,31 @@ const DAILY_AGG_MAP = {
 };
 
 /**
- * Resample rows to daily and compute E_DC, Ya, Yr, PR.
+ * Resample rows to daily and compute E_DC, Ya, Yr, PR, and temperature-corrected PR (PR_Tcorr).
+ *
+ * Temperature-corrected PR_Tcorr (NREL-style) at daily level:
+ *
+ *   PR_Tcorr = Ya / [ Yr × (1 + γ × (T_cell_day - 25)) ]
+ *
+ * where:
+ * - Ya          : daily array yield (kWh/kWp), already computed as E_DC / P_STC.
+ * - Yr          : daily reference yield from irradiance (kWh/kWp).
+ * - γ           : module temperature coefficient of power (1/°C). If provided in %/°C,
+ *                 it is converted to decimal per °C (e.g. -0.38 %/°C → -0.0038 1/°C).
+ * - T_cell_day  : daily representative cell temperature (°C), taken as the mean of
+ *                 valid T_cell over the day (irradiance above threshold).
+ *
+ * T_cell at the timestep level is determined by:
+ *   1) Direct Tcell column if available
+ *   2) Otherwise module temperature (e.g. T1) plus 3°C
+ *   3) Otherwise an ambient-based thermal model (same as backend.datafiltering.py)
+ *
+ * Rows with G_POA <= 20 W/m² or invalid temperature do not contribute to T_cell_day.
+ * If Yr <= 0, γ is invalid, or T_cell_day is missing, PR_Tcorr is left blank.
+ *
  * tot_power from system (kW). Returns { headers, rows } or null if missing columns.
  */
-function resampleRowsToDaily(headers, rows, tot_power) {
+function resampleRowsToDaily(headers, rows, tot_power, systemConfig) {
   if (!headers?.length || !rows?.length || !Number.isFinite(tot_power) || tot_power <= 0)
     return null;
   const timeColIdx = getDateColumnIndex(headers);
@@ -269,6 +290,65 @@ function resampleRowsToDaily(headers, rows, tot_power) {
   const pdcIdx = getColumnIndex(headers, ["P_DC"]);
   const gtiIdx = getColumnIndex(headers, ["GTI", "weather_GTI"]);
   if (pdcIdx < 0 || gtiIdx < 0) return null;
+
+  // Extract γ (temperature coefficient of power) and thermal model coefficients from system config.
+  const cfg = systemConfig && typeof systemConfig === "object" ? systemConfig.config || systemConfig : null;
+  let gamma = null; // temperature coefficient in 1/°C
+  let coef_a = null;
+  let coef_b = null;
+  let delta = null;
+  if (cfg && typeof cfg === "object") {
+    const rawTempCoef = cfg.temp_coef != null ? Number(cfg.temp_coef) : NaN;
+    if (Number.isFinite(rawTempCoef) && rawTempCoef !== 0) {
+      // Datasheets give temperature coefficient in %/°C (e.g. -0.38 %/°C). Convert to 1/°C.
+      // If |temp_coef| >= 0.1 it is in %/°C; if smaller, assume already decimal (e.g. -0.0038).
+      const absCoef = Math.abs(rawTempCoef);
+      gamma = absCoef >= 0.1 ? rawTempCoef * 1e-2 : rawTempCoef;
+    }
+    coef_a = cfg.coef_a != null ? Number(cfg.coef_a) : null;
+    coef_b = cfg.coef_b != null ? Number(cfg.coef_b) : null;
+    delta = cfg.delta != null ? Number(cfg.delta) : null;
+  }
+
+  // Temperature source column indices.
+  const tcellIdx = getColumnIndex(headers, ["Tcell"]);
+  const tModuleIdx = getColumnIndex(headers, ["T_module", "Tmod", "T1"]);
+  const airIdx = getColumnIndex(headers, ["Air_Temp", "weather_Air_Temp"]);
+  const windIdx = getColumnIndex(headers, ["Wind_speed", "weather_Wind_speed"]);
+
+  const canUseThermalModel =
+    Number.isFinite(coef_a) &&
+    Number.isFinite(coef_b) &&
+    Number.isFinite(delta) &&
+    airIdx >= 0 &&
+    windIdx >= 0 &&
+    gtiIdx >= 0;
+
+  // Helper to determine cell temperature per row following the priority:
+  // 1) direct Tcell column
+  // 2) module temperature (e.g. T1) + 3°C
+  // 3) ambient-based thermal model (Air_Temp, GTI, Wind_speed, and system coefficients)
+  function getCellTemperature(row) {
+    if (!Array.isArray(row)) return null;
+    if (tcellIdx >= 0) {
+      const t = parseFloat(row[tcellIdx]);
+      if (Number.isFinite(t)) return t;
+    }
+    if (tModuleIdx >= 0) {
+      const tm = parseFloat(row[tModuleIdx]);
+      if (Number.isFinite(tm)) return tm + 3; // module → cell offset
+    }
+    if (canUseThermalModel) {
+      const airTemp = parseFloat(row[airIdx]);
+      const gpoa = parseFloat(row[gtiIdx]);
+      const wind = parseFloat(row[windIdx]);
+      if (Number.isFinite(airTemp) && Number.isFinite(gpoa) && Number.isFinite(wind)) {
+        // Same structure as backend/datafiltering.py and DataFilteringPage.computePdcComparison.
+        return airTemp + gpoa * Math.exp(coef_a + coef_b * wind) + (gpoa * delta) / 1000;
+      }
+    }
+    return null;
+  }
 
   const sumCols = new Set();
   const meanCols = new Set();
@@ -318,20 +398,50 @@ function resampleRowsToDaily(headers, rows, tot_power) {
     }
     const pdcSum = group.reduce((s, { row }) => s + (parseFloat(row[pdcIdx]) || 0), 0);
     const gtiSum = group.reduce((s, { row }) => s + (parseFloat(row[gtiIdx]) || 0), 0);
+    // Standard (uncorrected) daily metrics. E_DC in kWh (P_DC assumed in W, sum in Wh → /1000).
     const E_DC = pdcSum / 1000;
     const Ya = E_DC / tot_power;
     const Yr = gtiSum / 1000;
     const PR = Yr > 0 ? Ya / Yr : "";
-    return { row: newRow, E_DC, Ya, Yr, PR };
+    // Temperature-corrected PR_Tcorr = Ya / [ Yr × (1 + γ × (T_cell_day - 25)) ].
+    const MIN_G_POA = 20; // W/m² irradiance threshold for valid temperature contribution
+    let tSum = 0;
+    let tCount = 0;
+    if (gamma != null && Number.isFinite(gamma) && group.length > 0) {
+      for (const { row } of group) {
+        const gpoa = parseFloat(row[gtiIdx]);
+        if (!Number.isFinite(gpoa) || gpoa <= MIN_G_POA) continue;
+        const tcell = getCellTemperature(row);
+        if (!Number.isFinite(tcell)) continue;
+        tSum += tcell;
+        tCount++;
+      }
+    }
+    const T_cell_day = tCount > 0 ? tSum / tCount : null;
+    let PR_Tcorr = "";
+    if (
+      T_cell_day != null &&
+      Number.isFinite(T_cell_day) &&
+      gamma != null &&
+      Number.isFinite(gamma) &&
+      Yr > 0
+    ) {
+      const tempFactorDay = 1 + gamma * (T_cell_day - 25);
+      if (Number.isFinite(tempFactorDay) && Math.abs(tempFactorDay) > 1e-9) {
+        PR_Tcorr = Ya / (Yr * tempFactorDay);
+      }
+    }
+    return { row: newRow, E_DC, Ya, Yr, PR, PR_Tcorr };
   });
 
-  const dailyHeaders = [...headers, "E_DC", "Ya", "Yr", "PR"];
-  const outRows = dailyRows.map(({ row, E_DC, Ya, Yr, PR }) => [
+  const dailyHeaders = [...headers, "E_DC", "Ya", "Yr", "PR", "PR_Tcorr"];
+  const outRows = dailyRows.map(({ row, E_DC, Ya, Yr, PR, PR_Tcorr }) => [
     ...row,
     E_DC.toFixed(6),
     Ya.toFixed(6),
     Yr.toFixed(6),
     PR !== "" ? Number(PR).toFixed(6) : "",
+    PR_Tcorr !== "" ? Number(PR_Tcorr).toFixed(6) : "",
   ]);
   return { headers: dailyHeaders, rows: outRows };
 }
@@ -1081,7 +1191,7 @@ const kpiTdStyle = { padding: "8px 14px", borderBottom: "1px solid #F1F5F9", col
 
 const ROW_NUM_ID = "_rowNum";
 
-function KpiCSVTable({ title, icon, color, headers, rows, resampled, originalRows, resampledStepMinutes = 10 }) {
+function KpiCSVTable({ title, icon, color, headers, rows, resampled, originalRows, resampledStepMinutes = 10, defaultVisibleLabels, titleExtra }) {
   const [expanded, setExpanded] = useState(false);
   const safeHeaders = Array.isArray(headers) ? headers : [];
   const safeRows = Array.isArray(rows) ? rows : [];
@@ -1092,7 +1202,17 @@ function KpiCSVTable({ title, icon, color, headers, rows, resampled, originalRow
     ],
     [safeHeaders]
   );
-  const defaultVisibleIds = useMemo(() => columns.map((c) => c.id), [columns]);
+  const defaultVisibleIds = useMemo(() => {
+    if (defaultVisibleLabels && defaultVisibleLabels.length > 0 && columns.length > 1) {
+      const lowerLabels = defaultVisibleLabels.map((l) => String(l).toLowerCase());
+      const ids = [ROW_NUM_ID];
+      columns.forEach((c) => {
+        if (c.id !== ROW_NUM_ID && lowerLabels.includes(c.label.toLowerCase())) ids.push(c.id);
+      });
+      if (ids.length > 1) return ids;
+    }
+    return columns.map((c) => c.id);
+  }, [columns, defaultVisibleLabels]);
   const [visibleIds, setVisibleIds] = useState(() => defaultVisibleIds);
   const visibleColumns = useMemo(() => columns.filter((c) => visibleIds.includes(c.id)), [columns, visibleIds]);
 
@@ -1102,6 +1222,7 @@ function KpiCSVTable({ title, icon, color, headers, rows, resampled, originalRow
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           {icon}
           <span style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: FONT }}>{title}</span>
+          {titleExtra != null && <span onClick={(e) => e.stopPropagation()} style={{ display: "inline-flex" }}>{titleExtra}</span>}
           <span style={{ fontSize: 11, fontWeight: 600, color, background: `${color}14`, padding: "2px 10px", borderRadius: 20, fontFamily: MONO }}>{safeRows.length} rows × {visibleColumns.length} cols</span>
           {resampled && (
             <span style={{ fontSize: 11, fontWeight: 600, color: Y, background: `${Y}14`, padding: "2px 10px", borderRadius: 20, fontFamily: MONO }}>{resampledStepMinutes === "D" || resampledStepMinutes === "daily" ? "Daily resampled" : `${resampledStepMinutes} min resampled`}{originalRows ? ` (from ${originalRows})` : ""}</span>
@@ -1285,6 +1406,12 @@ function KpiCSVChart({
     const traces = [];
     const mode = traceMode || "lines";
     const getYValues = (colIndex) => {
+      const headerLower = String(safeHeaders[colIndex] ?? "").trim().toLowerCase();
+      const fixedLower = fixedYHeader ? String(fixedYHeader).trim().toLowerCase() : null;
+      const isPercentCol =
+        fixedYAsPercent &&
+        fixedLower &&
+        (headerLower === fixedLower || headerLower === "pr_tcorr");
       if (useGaps && keptTimeSet && safeFullRows.length) {
         return safeFullRows.map((r) => {
           const key = String(Array.isArray(r) ? r[0] : "");
@@ -1292,7 +1419,7 @@ function KpiCSVChart({
           const raw = Array.isArray(r) ? r[colIndex] : "";
           const v = parseFloat(raw);
           if (isNaN(v)) return null;
-          if (fixedYAsPercent && fixedYHeader && String(safeHeaders[colIndex] ?? "").trim().toLowerCase() === String(fixedYHeader).trim().toLowerCase()) {
+          if (isPercentCol) {
             return v * 100;
           }
           return v;
@@ -1302,7 +1429,7 @@ function KpiCSVChart({
         const raw = Array.isArray(r) ? r[colIndex] : "";
         const v = parseFloat(raw);
         if (isNaN(v)) return null;
-        if (fixedYAsPercent && fixedYHeader && String(safeHeaders[colIndex] ?? "").trim().toLowerCase() === String(fixedYHeader).trim().toLowerCase()) {
+        if (isPercentCol) {
           return v * 100;
         }
         return v;
@@ -1311,7 +1438,12 @@ function KpiCSVChart({
     selectedIndicesLeft.forEach((colIndex, i) => {
       const yValues = getYValues(colIndex);
       const name = safeHeaders[colIndex] ?? `Col ${colIndex}`;
-      const isPercentTrace = fixedYAsPercent && fixedYHeader && String(safeHeaders[colIndex] ?? "").trim().toLowerCase() === String(fixedYHeader).trim().toLowerCase();
+      const headerLower = String(safeHeaders[colIndex] ?? "").trim().toLowerCase();
+      const fixedLower = fixedYHeader ? String(fixedYHeader).trim().toLowerCase() : null;
+      const isPercentTrace =
+        fixedYAsPercent &&
+        fixedLower &&
+        (headerLower === fixedLower || headerLower === "pr_tcorr");
       const hoverTemplate = isPercentTrace ? "<b>%{fullData.name}</b>: %{y:.2f}%<extra></extra>" : "<b>%{fullData.name}</b>: %{y}<extra></extra>";
       const trace = {
         x: xValues,
@@ -1327,6 +1459,36 @@ function KpiCSVChart({
       if (mode.includes("markers")) trace.marker = { size: 6 };
       traces.push(trace);
     });
+    // For the dedicated Performance Ratio chart, always add a second trace for
+    // temperature-corrected PR (PR_Tcorr) if the column exists, so both series
+    // share the same x-axis, aggregation, and styling.
+    if (fixedYHeader && String(fixedYHeader).trim().toLowerCase() === "pr") {
+      const prTcorrIdx = safeHeaders.findIndex((h, i) => i > 0 && String(h ?? "").trim().toLowerCase() === "pr_tcorr");
+      if (prTcorrIdx > 0) {
+        const yValues = getYValues(prTcorrIdx);
+        const isPercentTrace = fixedYAsPercent;
+        const hoverTemplate = isPercentTrace ? "<b>%{fullData.name}</b>: %{y:.2f}%<extra></extra>" : "<b>%{fullData.name}</b>: %{y}<extra></extra>";
+        const colorIndex = selectedIndicesLeft.length;
+        const trace = {
+          x: xValues,
+          y: yValues,
+          type: "scatter",
+          mode,
+          connectgaps: false,
+          name: singleYAxis ? "PR Temperature Corrected" : "PR Temperature Corrected (L)",
+          line: {
+            color: KPI_CHART_COLORS_LEFT[colorIndex % KPI_CHART_COLORS_LEFT.length],
+            width: 1.5,
+            shape: "spline",
+            smoothing: 1.2,
+          },
+          hovertemplate: hoverTemplate,
+          yaxis: "y",
+        };
+        if (mode.includes("markers")) trace.marker = { size: 6 };
+        traces.push(trace);
+      }
+    }
     if (!singleYAxis) {
       selectedIndicesRight.forEach((colIndex, i) => {
         const yValues = getYValues(colIndex);
@@ -1793,6 +1955,8 @@ export default function KpiAnalysisPage() {
   const [iecStatusHover, setIecStatusHover] = useState(null); // "all" | "valid" | null
   const [iecHelpOpen, setIecHelpOpen] = useState(false);
   const iecHelpRef = useRef(null);
+  const [kpiFormulasHelpOpen, setKpiFormulasHelpOpen] = useState(false);
+  const kpiFormulasHelpRef = useRef(null);
   // Applied IEC61724 + status filter (used for actual filtering; draft = inputs until Apply)
   const [appliedIecGhiMin, setAppliedIecGhiMin] = useState("20");
   const [appliedIecGhiMax, setAppliedIecGhiMax] = useState("1500");
@@ -2014,8 +2178,8 @@ export default function KpiAnalysisPage() {
     if (!pvData?.headers?.length || totPower == null) return null;
     const rowsForDaily = pvHourlyForKpi ?? pvStatusFilteredRows;
     if (!rowsForDaily.length) return null;
-    return resampleRowsToDaily(pvData.headers, rowsForDaily, totPower);
-  }, [pvData, pvStatusFilteredRows, pvHourlyForKpi, totPower]);
+    return resampleRowsToDaily(pvData.headers, rowsForDaily, totPower, sysData);
+  }, [pvData, pvStatusFilteredRows, pvHourlyForKpi, totPower, sysData]);
 
   // KPI aggregation level for Analysis card (daily, monthly, yearly)
   const [kpiAggregation, setKpiAggregation] = useState("daily");
@@ -2031,9 +2195,11 @@ export default function KpiAnalysisPage() {
     const headers = aggregatedKpiData.headers;
     const timeIdx = 0;
     const prIdx = getColumnIndex(headers, ["PR"]);
+    const prTcorrIdx = getColumnIndex(headers, ["PR_Tcorr"]);
     const yaIdx = getColumnIndex(headers, ["Ya"]);
     const yrIdx = getColumnIndex(headers, ["Yr"]);
     let prSum = 0, prCount = 0;
+    let prTcorrSum = 0, prTcorrCount = 0;
     let yaSum = 0, yaCount = 0;
     let yrSum = 0, yrCount = 0;
     let minTime = null;
@@ -2049,6 +2215,10 @@ export default function KpiAnalysisPage() {
         const v = parseFloat(row[prIdx]);
         if (Number.isFinite(v)) { prSum += v; prCount++; }
       }
+      if (prTcorrIdx >= 0) {
+        const v = parseFloat(row[prTcorrIdx]);
+        if (Number.isFinite(v)) { prTcorrSum += v; prTcorrCount++; }
+      }
       if (yaIdx >= 0) {
         const v = parseFloat(row[yaIdx]);
         if (Number.isFinite(v)) { yaSum += v; yaCount++; }
@@ -2059,6 +2229,7 @@ export default function KpiAnalysisPage() {
       }
     }
     const meanPr = prCount > 0 ? prSum / prCount : null;
+    const meanPrTcorr = prTcorrCount > 0 ? prTcorrSum / prTcorrCount : null;
     const meanYa = yaCount > 0 ? yaSum / yaCount : null;
     const meanYr = yrCount > 0 ? yrSum / yrCount : null;
     const filters = [];
@@ -2076,6 +2247,7 @@ export default function KpiAnalysisPage() {
       minTime,
       maxTime,
       meanPr,
+      meanPrTcorr,
       meanYa,
       meanYr,
       filters,
@@ -2140,6 +2312,16 @@ export default function KpiAnalysisPage() {
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [iecHelpOpen]);
+
+  useEffect(() => {
+    if (!kpiFormulasHelpOpen) return;
+    const onDown = (e) => {
+      if (kpiFormulasHelpRef.current?.contains(e.target)) return;
+      setKpiFormulasHelpOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [kpiFormulasHelpOpen]);
 
   const handleSysLoad = useCallback(
     (name, text) => {
@@ -2727,6 +2909,19 @@ export default function KpiAnalysisPage() {
                 resampled={pvData.resampled}
                 originalRows={pvData.originalRows}
                 resampledStepMinutes={pvData.resampledStepMinutes}
+                defaultVisibleLabels={[
+                  "time",
+                  "I1",
+                  "U_DC",
+                  "P_DC",
+                  "T1",
+                  "weather_GHI",
+                  "weather_GTI",
+                  "weather_air_temp",
+                  "weather_wind speed",
+                  "PVWatts",
+                  "status",
+                ]}
               />
                 <KpiCSVChart
                   key={`pv-chart-${iecAppliedSignature}`}
@@ -2763,6 +2958,57 @@ export default function KpiAnalysisPage() {
                       <span style={{ fontFamily: FONT, fontSize: 14, fontWeight: 800, color: "#0F172A" }}>KPI Analysis</span>
                       <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>Daily performance metrics: E_DC, Ya, Yr, and PR.</span>
                     </div>
+                    <span ref={kpiFormulasHelpRef} style={{ position: "relative", display: "inline-flex" }}>
+                      <button
+                        type="button"
+                        onClick={() => setKpiFormulasHelpOpen((o) => !o)}
+                        aria-label="Explain Yr, Ya, PR and PR Temperature Corrected"
+                        style={{ width: 20, height: 20, borderRadius: "50%", border: "1px solid #E2E8F0", background: "#F8FAFC", color: "#64748B", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0 }}
+                      >
+                        <HelpOutline sx={{ fontSize: 14 }} />
+                      </button>
+                      {kpiFormulasHelpOpen && (
+                        <div
+                          style={{
+                            position: "absolute",
+                            left: 0,
+                            bottom: "100%",
+                            marginBottom: 8,
+                            zIndex: 1002,
+                            width: 400,
+                            maxWidth: "90vw",
+                            maxHeight: "70vh",
+                            overflow: "auto",
+                            background: "#fff",
+                            borderRadius: 12,
+                            border: "1px solid #E2E8F0",
+                            boxShadow: "0 12px 40px rgba(0,0,0,0.15)",
+                            padding: 14,
+                            fontFamily: FONT,
+                            fontSize: 11,
+                            color: "#475569",
+                            lineHeight: 1.55,
+                          }}
+                        >
+                          <div style={{ fontWeight: 700, color: "#0F172A", marginBottom: 8 }}>KPI formulas (IEC 61724)</div>
+                          <p style={{ margin: "0 0 8px 0" }}>
+                            <strong>E_DC</strong> — Daily DC energy (kWh): sum of measured DC power over the period, divided by 1000 when P_DC is in watts.
+                          </p>
+                          <p style={{ margin: "0 0 8px 0" }}>
+                            <strong>Yr</strong> (Reference yield) — Daily in-plane irradiance expressed as equivalent sun hours: <em>Yr = G_POA_sum / 1000</em> (kWh/kWp). G_POA is plane-of-array irradiance (e.g. GTI) in W/m².
+                          </p>
+                          <p style={{ margin: "0 0 8px 0" }}>
+                            <strong>Ya</strong> (Array yield) — Specific energy delivered by the array: <em>Ya = E_DC / P_STC</em> (kWh/kWp). P_STC is installed nominal DC power at STC (kW).
+                          </p>
+                          <p style={{ margin: "0 0 8px 0" }}>
+                            <strong>PR</strong> (Performance ratio) — Ratio of actual to reference yield: <em>PR = Ya / Yr</em>. Typically 0.75–0.90 (75–90%). Independent of location and size; lower values indicate losses or underperformance.
+                          </p>
+                          <p style={{ margin: "0 0 0 0" }}>
+                            <strong>PR Temperature Corrected</strong> — PR with module temperature effect removed: <em>PR_Tcorr = Ya / [ Yr × (1 + γ × (T_cell − 25)) ]</em>. γ is the module temperature coefficient of power (1/°C); T_cell is a daily representative cell temperature (°C). Allows comparison across seasons and sites with different temperatures.
+                          </p>
+                        </div>
+                      )}
+                    </span>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     {["daily", "monthly", "yearly"].map((mode) => {
@@ -2801,6 +3047,7 @@ export default function KpiAnalysisPage() {
                   rows={aggregatedKpiData.rows}
                   resampled={true}
                   resampledStepMinutes={kpiAggregation === "daily" ? "D" : kpiAggregation === "monthly" ? "M" : "Y"}
+                  defaultVisibleLabels={["time", "E_DC", "Ya", "Yr", "PR"]}
                 />
                 <KpiCSVChart
                   title={kpiAggregation === "daily" ? "Daily Performance Ratio" : kpiAggregation === "monthly" ? "Monthly Performance Ratio" : "Yearly Performance Ratio"}
@@ -2850,7 +3097,7 @@ export default function KpiAnalysisPage() {
                     <div style={{ display: "flex", flexDirection: "column" }}>
                       <span style={{ fontFamily: FONT, fontSize: 13, fontWeight: 800, color: "#0F172A" }}>KPI Analysis summary</span>
                       <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>
-                        {kpiAggregation === "daily" ? "Daily" : kpiAggregation === "monthly" ? "Monthly" : "Yearly"} view · PR, Ya, Yr averages.
+                        {kpiAggregation === "daily" ? "Daily" : kpiAggregation === "monthly" ? "Monthly" : "Yearly"} view · PR, PR corrected, Ya, Yr averages.
                       </span>
                     </div>
                   </div>
@@ -2922,6 +3169,21 @@ export default function KpiAnalysisPage() {
                     <div style={{ fontFamily: FONT, fontSize: 10, fontWeight: 600, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.4, textAlign: "center" }}>Mean Yr</div>
                     <div style={{ fontFamily: MONO, fontSize: 14, color: "#0F172A", marginTop: 4, textAlign: "center" }}>
                       {kpiSummary.meanYr != null ? kpiSummary.meanYr.toFixed(3) : "—"} <span style={{ fontSize: 10, color: "#94A3B8" }}>kWh/m²</span>
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      flex: "1 1 0",
+                      minWidth: 140,
+                      padding: "8px 10px",
+                      borderRadius: 10,
+                      background: "#F8FAFC",
+                      border: "1px solid #E2E8F0",
+                    }}
+                  >
+                    <div style={{ fontFamily: FONT, fontSize: 10, fontWeight: 600, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.4, textAlign: "center" }}>Mean PR corrected</div>
+                    <div style={{ fontFamily: MONO, fontSize: 14, color: "#166534", marginTop: 4, textAlign: "center" }}>
+                      {kpiSummary.meanPrTcorr != null ? `${(kpiSummary.meanPrTcorr * 100).toFixed(2)} %` : "—"}
                     </div>
                   </div>
                 </div>

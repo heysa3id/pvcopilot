@@ -2935,7 +2935,6 @@ export default function DataFilteringPage() {
                   "weather_GTI",
                   "weather_air_temp",
                   "weather_wind speed",
-                  "weather_wind_speed",
                 ]}
               />
               <FilterCSVChart title="PV & Weather Data" color={O} headers={pvData.headers} rows={pvFilteredRows} defaultYHeader="P_DC" defaultRightYHeader="weather_GTI" />

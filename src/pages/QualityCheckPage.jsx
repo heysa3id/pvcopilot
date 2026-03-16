@@ -3278,7 +3278,7 @@ export default function QualityCheckPage() {
                                 gridTemplateColumns: "1fr auto",
                               }}>
                                 <div style={{ padding: "10px 14px", fontFamily: FONT, fontSize: 12, color: "#64748B", display: "flex", alignItems: "center", gap: 6 }}>
-                                  <span>Correlation R²after</span>
+                                  <span>Correlation R² after</span>
                                 </div>
                                 <div style={{ padding: "10px 14px", display: "flex", alignItems: "center", justifyContent: "flex-end" }}>
                                   <span style={{
