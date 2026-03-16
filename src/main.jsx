@@ -115,7 +115,7 @@ function GapFillingPage() {
     </div>
   )
 }
-function PipelinePage() {
+function WorkflowPage() {
   const color = "#0ea5e9";
   return (
     <div
@@ -153,10 +153,10 @@ function PipelinePage() {
             <AccountTree sx={{ fontSize: 40, color: ICON_COLOR }} />
           </div>
           <h1 style={{ fontSize: 28, fontWeight: 800, color: "#0F172A", marginBottom: 8 }}>
-            Pipeline
+            Workflow
           </h1>
           <p style={{ fontSize: 14, color: "#94a3b8", marginBottom: 32, lineHeight: 1.6 }}>
-            End-to-end data and model pipeline orchestration with configurable steps and monitoring.
+            End-to-end data and model workflow orchestration with configurable steps and monitoring.
           </p>
           <div
             style={{
@@ -182,7 +182,7 @@ function PipelinePage() {
         </div>
       </div>
 
-      {/* Pipeline diagram below */}
+      {/* Workflow diagram below */}
       <div
         style={{
           display: "flex",
@@ -205,7 +205,7 @@ function PipelinePage() {
         >
           <img
             src="/pipeline-diagram.png"
-            alt="PV data processing and analysis pipeline: from outdoor field and data acquisition through synchronization, filtering, gap filling, KPI calculation, performance prediction to system report"
+            alt="PV data processing and analysis workflow: from outdoor field and data acquisition through synchronization, filtering, gap filling, KPI calculation, performance prediction to system report"
             style={{
               width: "100%",
               height: "auto",
@@ -344,7 +344,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           <Route path="/data-ingestion" element={<DataIngestionPage />} />
           <Route path="/kpi-analysis" element={<KpiAnalysisPage />} />
           <Route path="/gap-filling" element={<GapFillingPage />} />
-          <Route path="/pipeline" element={<PipelinePage />} />
+          <Route path="/workflow" element={<WorkflowPage />} />
           <Route path="/power-prediction" element={<PowerPredictionPage />} />
           <Route path="/data-filtering" element={<DataFilteringPage />} />
           <Route path="/lcoe-tool" element={<LcoeTool />} />

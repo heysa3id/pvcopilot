@@ -19,12 +19,12 @@ const TOOLS = [
   { path: "/gap-filling",      label: "Gap Filling",         icon: <AutoFixHigh sx={{ fontSize: 18, color: ICON_COLOR }} />, color: "#059669" },
   { path: "/power-prediction", label: "Power Prediction",    icon: <ElectricBolt sx={{ fontSize: 18, color: ICON_COLOR }} />, color: "#ff7a45" },
   { path: "/lcoe-tool",        label: "LCOE Tool",           icon: <CurrencyExchangeIcon sx={{ fontSize: 18, color: ICON_COLOR }} />, color: "#1d9bf0" },
-  { path: "/pipeline",        label: "Pipeline",            icon: <AccountTree sx={{ fontSize: 18, color: ICON_COLOR }} />, color: "#0ea5e9" },
+  { path: "/workflow",        label: "Workflow",            icon: <AccountTree sx={{ fontSize: 18, color: ICON_COLOR }} />, color: "#0ea5e9" },
 ];
 
 const LANDING_SECTIONS = [
   { id: "foundation", label: "Overview" },
-  { id: "pipeline", label: "Pipeline" },
+  { id: "workflow", label: "Workflow" },
   { id: "modules", label: "Modules" },
   { id: "team", label: "Team" },
   { id: "partners", label: "Partners" },

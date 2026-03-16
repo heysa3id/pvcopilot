@@ -38,7 +38,7 @@ const TOOL_ICONS = {
   quality: <SearchOutlined sx={{ fontSize: 22, color: ICON_COLOR }} />,
   kpi: <QueryStats sx={{ fontSize: 22, color: ICON_COLOR }} />,
   gap: <AutoFixHigh sx={{ fontSize: 22, color: ICON_COLOR }} />,
-  pipeline: <AccountTree sx={{ fontSize: 22, color: ICON_COLOR }} />,
+  workflow: <AccountTree sx={{ fontSize: 22, color: ICON_COLOR }} />,
   predict: <ElectricBolt sx={{ fontSize: 22, color: ICON_COLOR }} />,
   lcoe: <CurrencyExchangeIcon sx={{ fontSize: 22, color: ICON_COLOR }} />,
   filter: <FilterAltOutlined sx={{ fontSize: 22, color: ICON_COLOR }} />,
@@ -445,7 +445,7 @@ function PlatformModuleCard({ number, icon, title, subtitle, desc, tags, path, e
         </div>
         {/* Category label */}
         <div style={{ fontSize: 12, fontWeight: 600, color: G, marginBottom: 6, letterSpacing: "0.02em" }}>
-          {subtitle || "Core pipeline module"}
+          {subtitle || "Core workflow module"}
         </div>
         {/* Title */}
         <h2 style={{ fontFamily: "Inter, Arial, sans-serif", margin: "0 0 10px", fontSize: "clamp(1.4rem, 2.8vw, 1.85rem)", lineHeight: 1.05, fontWeight: 800, letterSpacing: "-0.03em", color: "#f3f4f6" }}>{title}</h2>
@@ -546,7 +546,7 @@ const PLATFORM_MODULES = [
   { number: "05", icon: TOOL_ICONS.predict, title: "Power Prediction", subtitle: "Energy forecast & performance model", path: "/power-prediction", desc: "Combines a single-diode physical model with weather inputs (GHI, Tamb, wind) to predict expected power. Flags under-performance and estimates energy losses.", tags: ["Physical model", "Weather correlation", "Loss analysis", "Scenarios"] },
   { number: "06", icon: TOOL_ICONS.lcoe, title: "LCOE Calculator", subtitle: "Financial analysis & PVsyst integration", path: "/lcoe-tool", desc: "Industry-standard Levelized Cost of Energy with 20+ itemized CAPEX line items, linear degradation, DCF analysis, IRR, NPV, payback, and tornado sensitivity charts.", tags: ["LCOE $/kWh", "CAPEX breakdown", "Cash flow", "IRR / NPV"] },
   { number: "07", icon: <LinkOutlined sx={{ fontSize: 22, color: "#fff" }} />, title: "Series Workflows", subtitle: "Chain tools on the same dataset", path: "/data-ingestion", desc: "Execute multiple modules in sequence: QC → Gap Fill → KPI → Prediction → Report. Each stage consumes corrected output from the previous one, ensuring full data consistency.", tags: ["QC", "Gap Fill", "KPI", "Predict", "LCOE", "Report"], isWorkflow: true },
-  { number: "08", icon: TOOL_ICONS.pipeline, title: "Pipeline", subtitle: "End-to-end data and model orchestration", path: "/pipeline", desc: "End-to-end data and model pipeline orchestration with configurable steps and monitoring.", tags: ["Orchestration", "Configurable steps", "Monitoring", "Workflows"] },
+  { number: "08", icon: TOOL_ICONS.workflow, title: "Workflow", subtitle: "End-to-end data and model orchestration", path: "/workflow", desc: "End-to-end data and model workflow orchestration with configurable steps and monitoring.", tags: ["Orchestration", "Configurable steps", "Monitoring", "Workflows"] },
 ];
 
 export default function LandingPage() {
@@ -603,7 +603,7 @@ export default function LandingPage() {
           }}>
             From raw sensor data to bankable reports — PVCopilot chains data ingestion,
             gap filling, KPI analysis, performance prediction, and LCOE evaluation
-            into one integrated pipeline.
+            into one integrated workflow.
           </p>
 
           {/* CTAs — pill buttons */}
@@ -619,7 +619,7 @@ export default function LandingPage() {
             >
               Launch LCOE Tool
             </Link>
-            <a href="#pipeline" style={{
+            <a href="#workflow" style={{
               padding: "13px 34px", background: "transparent",
               color: "#CBD5E1", textDecoration: "none", borderRadius: 9999,
               fontWeight: 600, fontSize: 15,
@@ -629,7 +629,7 @@ export default function LandingPage() {
             onMouseEnter={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,.3)"; e.currentTarget.style.color = "#fff"; }}
             onMouseLeave={e => { e.currentTarget.style.borderColor = "rgba(255,255,255,.15)"; e.currentTarget.style.color = "#CBD5E1"; }}
             >
-              View Pipeline ↓
+              View Workflow ↓
             </a>
           </div>
 
@@ -712,7 +712,7 @@ export default function LandingPage() {
               }}>⤓</div>
               <h3 style={{ margin: "0 0 10px", fontSize: 26, lineHeight: 1, letterSpacing: "-0.035em", fontWeight: 800, color: "#0f1b36" }}>Inputs</h3>
               <p style={{ margin: "0 0 14px", color: "#5e6b80", fontSize: 14, lineHeight: 1.45 }}>
-                Validated technical and operational data sources used to feed the analytics pipeline.
+                Validated technical and operational data sources used to feed the analytics workflow.
               </p>
               <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gap: 10 }}>
                 {[
@@ -829,9 +829,9 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ━━━ PROCESSING PIPELINE — horizontal flowchart (8 stages, chevrons) ━━━ */}
+      {/* ━━━ PROCESSING WORKFLOW — horizontal flowchart (8 stages, chevrons) ━━━ */}
       <section
-        id="pipeline"
+        id="workflow"
         style={{
           padding: "72px 24px 56px",
           background: "#FFFFFF",
@@ -848,10 +848,10 @@ export default function LandingPage() {
                 padding: "5px 12px", borderRadius: 6,
                 background: "rgba(255,184,0,0.12)", marginBottom: 14,
               }}>
-                Processing Pipeline
+                Processing Workflow
               </span>
               <h2 style={{ fontSize: "clamp(24px, 3vw, 32px)", fontWeight: 800, color: "#0F172A", lineHeight: 1.2, letterSpacing: "-.02em", margin: 0, marginLeft: 0, paddingLeft: 0 }}>
-                End-to-End Processing Pipeline
+                End-to-End Processing Workflow
               </h2>
             </div>
             <p style={{ maxWidth: 340, fontSize: 14, color: "#64748B", lineHeight: 1.65, margin: 0, paddingTop: 28 }}>
@@ -1380,7 +1380,7 @@ export default function LandingPage() {
               { label: "Gap Filling", path: "/gap-filling" },
               { label: "Power Prediction", path: "/power-prediction" },
               { label: "LCOE Calculator", path: "/lcoe-tool" },
-              { label: "Pipeline", path: "/pipeline" },
+              { label: "Workflow", path: "/workflow" },
             ].map(l => (
               <Link key={l.path} to={l.path} style={{
                 display: "block", fontSize: 13, color: "#64748B",
