@@ -27,6 +27,7 @@ import TableColumnSelector from "../components/TableColumnSelector";
 const Plot = createPlotlyComponent(Plotly);
 
 const FONT = "Inter, Arial, sans-serif";
+const CHART_FONT = "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif";
 const MONO = "'JetBrains Mono', monospace";
 const O = "#ff7a45";
 const B = "#1d9bf0";
@@ -1307,13 +1308,32 @@ function KpiCSVChart({ title, color, headers, rows, fullRowsForGaps, defaultYHea
 }
 
 // ── Ya / Yr grouped bar chart (same card style as Daily KPI — Chart) ──
-const YA_YR_BAR_COLORS = { Yr: "#fb8500", Ya: "#0077b6" }; 
+const YA_YR_BAR_COLORS = { Yr: "#14B8A6", Ya: "#6366F1" };
 
 function KpiYaYrBarChart({ title, color, x, ya, yr, xAxisTitle }) {
   const [expanded, setExpanded] = useState(true);
   return (
-    <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #E2E8F0", overflow: "hidden" }}>
-      <div onClick={() => setExpanded(!expanded)} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", cursor: "pointer", userSelect: "none", borderBottom: expanded ? "1px solid #E2E8F0" : "none" }}>
+    <div
+      style={{
+        background: "#fff",
+        borderRadius: 26,
+        border: "1px solid #e2e8f0",
+        boxShadow: "0 8px 30px rgba(15,23,42,0.06)",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        onClick={() => setExpanded(!expanded)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "14px 20px",
+          cursor: "pointer",
+          userSelect: "none",
+          borderBottom: expanded ? "1px solid #e2e8f0" : "none",
+        }}
+      >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <BarChart sx={{ fontSize: 20, color }} />
           <span style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: FONT }}>{title} — Chart</span>
@@ -1321,25 +1341,84 @@ function KpiYaYrBarChart({ title, color, x, ya, yr, xAxisTitle }) {
         {expanded ? <ExpandLessIcon sx={{ fontSize: 20, color: "#94a3b8" }} /> : <ExpandMoreIcon sx={{ fontSize: 20, color: "#94a3b8" }} />}
       </div>
       {expanded && (
-        <div style={{ padding: "8px 12px 12px" }}>
+        <div
+          style={{
+            padding: "16px 16px 20px",
+            margin: "0 12px 12px 12px",
+            background: "#fff",
+            borderRadius: 16,
+          }}
+        >
           <Plot
             data={[
-              { x, y: yr, type: "bar", name: "Yr", marker: { color: YA_YR_BAR_COLORS.Yr }, hovertemplate: "<b>Yr</b>: %{y}<extra></extra>" },
-              { x, y: ya, type: "bar", name: "Ya", marker: { color: YA_YR_BAR_COLORS.Ya }, hovertemplate: "<b>Ya</b>: %{y}<extra></extra>" },
+              {
+                x,
+                y: yr,
+                type: "bar",
+                name: "Yr",
+                marker: { color: YA_YR_BAR_COLORS.Yr, line: { width: 0 } },
+                hovertemplate: "<b>Yr</b>: %{y}<extra></extra>",
+              },
+              {
+                x,
+                y: ya,
+                type: "bar",
+                name: "Ya",
+                marker: { color: YA_YR_BAR_COLORS.Ya, line: { width: 0 } },
+                hovertemplate: "<b>Ya</b>: %{y}<extra></extra>",
+              },
             ]}
             layout={{
               barmode: "group",
+              bargap: 0.38,
+              bargroupgap: 0.31,
+              barcornerradius: 8,
               hovermode: "x unified",
               template: "plotly_white",
               height: 340,
-              margin: { t: 44, r: 50, b: 50, l: 60 },
+              margin: { t: 52, r: 50, b: 50, l: 60 },
               showlegend: true,
-              legend: { orientation: "h", x: 0.5, y: 1.02, xanchor: "center", yanchor: "bottom", font: { family: FONT, size: 11 } },
-              xaxis: { title: { text: xAxisTitle, font: { family: FONT, size: 12, color: "#94a3b8" } }, gridcolor: "#F1F5F9", tickfont: { family: MONO, size: 10, color: "#94a3b8" } },
-              yaxis: { title: { text: "Yield (h)", font: { family: FONT, size: 12, color: "#94a3b8" } }, gridcolor: "#F1F5F9", tickfont: { family: MONO, size: 10, color: "#94a3b8" } },
+              legend: {
+                orientation: "h",
+                x: 0.5,
+                y: 1.02,
+                xanchor: "center",
+                yanchor: "bottom",
+                font: { family: CHART_FONT, size: 12, color: "#94a3b8" },
+                itemclick: "toggle",
+                itemdoubleclick: "toggleothers",
+                bgcolor: "rgba(255,255,255,0)",
+                bordercolor: "rgba(0,0,0,0)",
+              },
+              xaxis: {
+                title: { text: xAxisTitle, font: { family: CHART_FONT, size: 13, color: "#94a3b8", weight: 500 } },
+                showgrid: false,
+                zeroline: false,
+                showline: false,
+                tickfont: { family: CHART_FONT, size: 12, color: "#94a3b8" },
+                ticklen: 0,
+                tickcolor: "rgba(0,0,0,0)",
+              },
+              yaxis: {
+                title: { text: "Yield (kWh/kWp)", font: { family: CHART_FONT, size: 13, color: "#94a3b8", weight: 500 } },
+                showgrid: true,
+                gridcolor: "#e5e7eb",
+                griddash: "dot",
+                gridwidth: 1,
+                zeroline: false,
+                showline: false,
+                tickfont: { family: CHART_FONT, size: 12, color: "#94a3b8" },
+                ticklen: 0,
+                tickcolor: "rgba(0,0,0,0)",
+              },
               plot_bgcolor: "#fff",
               paper_bgcolor: "#fff",
-              font: { family: FONT },
+              font: { family: CHART_FONT },
+              hoverlabel: {
+                bgcolor: "#fff",
+                bordercolor: "#e2e8f0",
+                font: { family: CHART_FONT, size: 12, color: "#0F172A" },
+              },
             }}
             config={{ displaylogo: false, responsive: true, modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d"] }}
             style={{ width: "100%" }}
