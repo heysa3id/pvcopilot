@@ -1407,7 +1407,7 @@ function FilterDateFilterBar({
 // ── PV Data table (Data Filtering only) ──
 const ROW_NUM_ID = "_rowNum";
 
-function FilterCSVTable({ title, icon, color, headers, rows, resampled, originalRows, resampledStepMinutes = 10 }) {
+function FilterCSVTable({ title, icon, color, headers, rows, resampled, originalRows, resampledStepMinutes = 10, defaultVisibleLabels }) {
   const [expanded, setExpanded] = useState(false);
   const safeHeaders = Array.isArray(headers) ? headers : [];
   const safeRows = Array.isArray(rows) ? rows : [];
@@ -1418,7 +1418,17 @@ function FilterCSVTable({ title, icon, color, headers, rows, resampled, original
     ],
     [safeHeaders]
   );
-  const defaultVisibleIds = useMemo(() => columns.map((c) => c.id), [columns]);
+  const defaultVisibleIds = useMemo(() => {
+    if (defaultVisibleLabels && defaultVisibleLabels.length > 0 && columns.length > 1) {
+      const lowerLabels = defaultVisibleLabels.map((l) => String(l).toLowerCase());
+      const ids = [ROW_NUM_ID];
+      columns.forEach((c) => {
+        if (c.id !== ROW_NUM_ID && lowerLabels.includes(c.label.toLowerCase())) ids.push(c.id);
+      });
+      if (ids.length > 1) return ids;
+    }
+    return columns.map((c) => c.id);
+  }, [columns, defaultVisibleLabels]);
   const [visibleIds, setVisibleIds] = useState(() => defaultVisibleIds);
   const visibleColumns = useMemo(() => columns.filter((c) => visibleIds.includes(c.id)), [columns, visibleIds]);
 
@@ -2907,7 +2917,7 @@ export default function DataFilteringPage() {
                 </div>
               </div>
               <FilterCSVTable
-                title="PV Data"
+                title="PV & Weather Data"
                 icon={<SolarPowerOutlined sx={{ fontSize: 20, color: O }} />}
                 color={O}
                 headers={pvData.headers}
@@ -2915,6 +2925,18 @@ export default function DataFilteringPage() {
                 resampled={pvData.resampled}
                 originalRows={pvData.originalRows}
                 resampledStepMinutes={pvData.resampledStepMinutes}
+                defaultVisibleLabels={[
+                  "time",
+                  "I1",
+                  "U_DC",
+                  "P_DC",
+                  "T1",
+                  "weather_GHI",
+                  "weather_GTI",
+                  "weather_air_temp",
+                  "weather_wind speed",
+                  "weather_wind_speed",
+                ]}
               />
               <FilterCSVChart title="PV & Weather Data" color={O} headers={pvData.headers} rows={pvFilteredRows} defaultYHeader="P_DC" defaultRightYHeader="weather_GTI" />
 

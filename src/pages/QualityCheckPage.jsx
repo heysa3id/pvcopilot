@@ -587,7 +587,7 @@ function UploadZone({ label, icon, accept, color, file, onLoad, onFileUpload, on
 // ── CSV Table (scrollable, 10 visible rows) ─────────────────────────────────
 const ROW_NUM_ID = "_rowNum";
 
-function CSVTable({ title, icon, color, headers, rows, resampled, originalRows, resampledStepMinutes = 10 }) {
+function CSVTable({ title, icon, color, headers, rows, resampled, originalRows, resampledStepMinutes = 10, defaultVisibleLabels }) {
   const [expanded, setExpanded] = useState(false);
   const safeHeaders = Array.isArray(headers) ? headers : [];
   const safeRows = Array.isArray(rows) ? rows : [];
@@ -599,7 +599,17 @@ function CSVTable({ title, icon, color, headers, rows, resampled, originalRows, 
     ],
     [safeHeaders]
   );
-  const defaultVisibleIds = useMemo(() => columns.map((c) => c.id), [columns]);
+  const defaultVisibleIds = useMemo(() => {
+    if (defaultVisibleLabels && defaultVisibleLabels.length > 0 && columns.length > 1) {
+      const lowerLabels = defaultVisibleLabels.map((l) => String(l).toLowerCase());
+      const ids = [ROW_NUM_ID];
+      columns.forEach((c) => {
+        if (c.id !== ROW_NUM_ID && lowerLabels.includes(c.label.toLowerCase())) ids.push(c.id);
+      });
+      if (ids.length > 1) return ids;
+    }
+    return columns.map((c) => c.id);
+  }, [columns, defaultVisibleLabels]);
   const [visibleIds, setVisibleIds] = useState(() => defaultVisibleIds);
   const visibleColumns = useMemo(() => columns.filter((c) => visibleIds.includes(c.id)), [columns, visibleIds]);
 
@@ -2827,6 +2837,7 @@ export default function QualityCheckPage() {
                 resampled={pvData.resampled}
                 originalRows={pvData.originalRows}
                 resampledStepMinutes={pvData.resampledStepMinutes}
+                defaultVisibleLabels={["time", "I1", "U_DC", "P_DC", "T1"]}
               />
               <CSVChart
                 title="PV Data"
@@ -2879,6 +2890,7 @@ export default function QualityCheckPage() {
                 resampled={weatherData.resampled}
                 originalRows={weatherData.originalRows}
                 resampledStepMinutes={weatherData.resampledStepMinutes}
+                defaultVisibleLabels={["time", "ghi", "gti", "air_temp", "wind speed", "wind_speed"]}
               />
               <CSVChart
                 title="Weather Data"

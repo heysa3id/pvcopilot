@@ -1808,7 +1808,7 @@ export default function KpiAnalysisPage() {
     setToast({ message, type, key: Date.now() });
   }, []);
 
-  const IEC_DEFAULTS = useMemo(() => ({ ghiMin: "20", ghiMax: "1500", airMin: "-40", airMax: "60", windMin: "0", windMax: "30", powerMin: "0", powerMax: "", status: "all" }), []);
+  const IEC_DEFAULTS = useMemo(() => ({ ghiMin: "20", ghiMax: "1500", airMin: "-40", airMax: "60", windMin: "0", windMax: "30", powerMin: "10", powerMax: "", status: "all" }), []);
   const iecAppliedSignature = useMemo(
     () =>
       [
@@ -2719,7 +2719,7 @@ export default function KpiAnalysisPage() {
               </div>
               <KpiCSVTable
                 key={`pv-table-${iecAppliedSignature}`}
-                title="PV Data"
+                title="PV & Weather Data"
                 icon={<SolarPowerOutlined sx={{ fontSize: 20, color: O }} />}
                 color={O}
                 headers={pvData.headers}
