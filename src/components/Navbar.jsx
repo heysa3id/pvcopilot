@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Link, useLocation } from "react-router-dom";
 import {
   SearchOutlined,
@@ -27,17 +27,17 @@ const LANDING_SECTIONS = [
   { id: "workflow", label: "Workflow" },
   { id: "modules", label: "Modules" },
   { id: "team", label: "Team" },
-  { id: "partners", label: "Partners" },
   { id: "contact", label: "Contact" },
 ];
 
+const transitionEase = "cubic-bezier(0.4, 0, 0.2, 1)";
 const linkBase = {
   padding: "8px 14px",
   borderRadius: 10,
   textDecoration: "none",
   fontSize: 13,
   fontFamily: "Inter, Arial, sans-serif",
-  transition: "all .15s",
+  transition: `background 0.28s ${transitionEase}, color 0.28s ${transitionEase}, font-weight 0.2s ease`,
 };
 const activeLink = { ...linkBase, background: "#FDF8E7", color: "#E8AA34", fontWeight: 600 };
 const inactiveLink = { ...linkBase, background: "transparent", color: "#64748B", fontWeight: 500 };
@@ -45,9 +45,53 @@ const inactiveLink = { ...linkBase, background: "transparent", color: "#64748B",
 export default function Navbar() {
   const { pathname, hash } = useLocation();
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [scrollSectionId, setScrollSectionId] = useState(null);
   const isToolPage = TOOLS.some(t => pathname === t.path);
   const isLanding = pathname === "/";
-  const activeSectionId = isLanding && hash ? hash.slice(1) : null;
+  const activeSectionId = isLanding
+    ? (scrollSectionId ?? (hash ? hash.slice(1) : "foundation"))
+    : null;
+
+  // When user clicks a nav link, sync selection to hash immediately
+  useEffect(() => {
+    if (isLanding && hash) setScrollSectionId(hash.slice(1));
+  }, [isLanding, hash]);
+
+  // Update navbar selection based on scroll position (which section is in view)
+  const visibleRef = useRef(new Set());
+  const rafRef = useRef(null);
+  useEffect(() => {
+    if (!isLanding) return;
+    const sectionIds = LANDING_SECTIONS.map((s) => s.id);
+    const visible = visibleRef.current;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          const id = entry.target.id;
+          if (sectionIds.includes(id)) {
+            if (entry.isIntersecting) visible.add(id);
+            else visible.delete(id);
+          }
+        });
+        if (rafRef.current) cancelAnimationFrame(rafRef.current);
+        rafRef.current = requestAnimationFrame(() => {
+          rafRef.current = null;
+          const active = sectionIds.find((id) => visible.has(id));
+          if (active != null) setScrollSectionId(active);
+        });
+      },
+      { rootMargin: "-80px 0px -55% 0px", threshold: [0, 0.1] }
+    );
+    sectionIds.forEach((id) => {
+      const el = document.getElementById(id);
+      if (el) observer.observe(el);
+    });
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+      visible.clear();
+      observer.disconnect();
+    };
+  }, [isLanding]);
 
   return (
     <nav
@@ -86,24 +130,24 @@ export default function Navbar() {
               <Link
                 key={id}
                 to={`/#${id}`}
-                style={isActive ? activeLink : inactiveLink}
-                onMouseEnter={e => {
-                  if (!isActive) {
-                    e.currentTarget.style.background = "#F8FAFC";
-                    e.currentTarget.style.color = "#475569";
-                  }
-                }}
-                onMouseLeave={e => {
-                  if (!isActive) {
-                    e.currentTarget.style.background = "transparent";
-                    e.currentTarget.style.color = "#64748B";
-                  }
-                }}
-              >
-                {label}
-              </Link>
-            );
-          })}
+                  style={isActive ? activeLink : inactiveLink}
+                  onMouseEnter={e => {
+                    if (!isActive) {
+                      e.currentTarget.style.background = "#F8FAFC";
+                      e.currentTarget.style.color = "#475569";
+                    }
+                  }}
+                  onMouseLeave={e => {
+                    if (!isActive) {
+                      e.currentTarget.style.background = "transparent";
+                      e.currentTarget.style.color = "#64748B";
+                    }
+                  }}
+                >
+                  {label}
+                </Link>
+              );
+            })}
 
           {/* Tools dropdown */}
           <div

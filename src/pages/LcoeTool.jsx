@@ -360,6 +360,7 @@ export default function LcoeTool() {
   const [tempRate, setTempRate] = useState(1);
   const [showLcoeThresholdsPopup, setShowLcoeThresholdsPopup] = useState(false);
   const [showLcoeStatusHelpPopup, setShowLcoeStatusHelpPopup] = useState(false);
+  const [showLcoeMeaningPopup, setShowLcoeMeaningPopup] = useState(false);
   const [showSimplePaybackHelpPopup, setShowSimplePaybackHelpPopup] = useState(false);
   const [showDiscPaybackHelpPopup, setShowDiscPaybackHelpPopup] = useState(false);
   const [showTotalCapexHelpPopup, setShowTotalCapexHelpPopup] = useState(false);
@@ -539,6 +540,35 @@ export default function LcoeTool() {
           <Button onClick={() => setShowLcoeThresholdsPopup(false)} variant="contained" sx={{ bgcolor: G, "&:hover": { bgcolor: "#e6a200" } }}>
             Apply
           </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* LCOE meaning & equation popup */}
+      <Dialog open={showLcoeMeaningPopup} onClose={() => setShowLcoeMeaningPopup(false)} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontSize: 16 }}>What is Levelized Cost of Energy (LCOE)?</DialogTitle>
+        <DialogContent>
+          <p style={{ fontSize: 13, color: "#334155", lineHeight: 1.6, marginBottom: 12 }}>
+            <strong>LCOE</strong> is the average cost per unit of energy (e.g. per kWh) over the project lifetime, in today&apos;s money. It allows you to compare different energy sources or projects on an equal basis. Lower LCOE means cheaper energy.
+          </p>
+          <p style={{ fontSize: 13, color: "#334155", lineHeight: 1.6, marginBottom: 12 }}>
+            All future costs (CAPEX at start, annual O&amp;M) and energy production are discounted to present value, then LCOE = total discounted costs ÷ total discounted energy.
+          </p>
+          <div style={{ background: "#FFFBEB", borderRadius: 12, padding: 16, border: "1px solid #FDE68A", marginTop: 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#0F172A", letterSpacing: ".08em", textTransform: "uppercase", marginBottom: 8 }}>
+              Equation used
+            </div>
+            <div style={{ fontSize: 13, color: "#475569", lineHeight: 1.7, fontFamily: "'JetBrains Mono', monospace" }}>
+              <div style={{ marginBottom: 6 }}>LCOE = Σ Costₜ/(1+r)ᵗ ÷ Σ Eₜ/(1+r)ᵗ</div>
+              <div style={{ fontSize: 12, marginTop: 8 }}>E₀ = annual energy (year 0, no degradation)</div>
+              <div>Eₜ = E₀ × (f₁ − d×t), t ≥ 1 &nbsp;&nbsp;(linear degradation)</div>
+              <div style={{ marginTop: 4 }}>Cost₀ = CAPEX</div>
+              <div>Costₜ = annual O&amp;M (constant), t ≥ 1</div>
+              <div style={{ marginTop: 6, fontSize: 11, color: "#64748B" }}>r = discount rate, t = year</div>
+            </div>
+          </div>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => setShowLcoeMeaningPopup(false)} variant="outlined" size="small">Close</Button>
         </DialogActions>
       </Dialog>
 
@@ -1265,8 +1295,25 @@ export default function LcoeTool() {
                 </button>
               </div>
               {/* ── Currency popup (rendered via portal-like fixed positioning) ── */}
-              <div style={{ fontSize:9, color:"#94a3b8", fontWeight:700, letterSpacing:".08em",
-                textTransform:"uppercase", marginBottom:8, whiteSpace:"nowrap" }}>Levelized Cost of Energy</div>
+              <div style={{ display:"flex", alignItems:"center", gap:6, marginBottom:8 }}>
+                <span style={{ fontSize:9, color:"#94a3b8", fontWeight:700, letterSpacing:".08em",
+                  textTransform:"uppercase", whiteSpace:"nowrap" }}>Levelized Cost of Energy</span>
+                <button
+                  type="button"
+                  onClick={() => setShowLcoeMeaningPopup(true)}
+                  title="What is LCOE?"
+                  style={{
+                    display:"inline-flex", alignItems:"center", justifyContent:"center",
+                    width:16, height:16, padding:0, border:"none", borderRadius:"50%",
+                    background:"#E2E8F0", color:"#64748B", cursor:"pointer",
+                    flexShrink:0,
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background = "#CBD5E1"; e.currentTarget.style.color = "#475569"; }}
+                  onMouseLeave={e => { e.currentTarget.style.background = "#E2E8F0"; e.currentTarget.style.color = "#64748B"; }}
+                >
+                  <HelpOutlineIcon sx={{ fontSize: 12 }} />
+                </button>
+              </div>
               <div style={{ display:"flex", alignItems:"baseline", gap:6, marginBottom:8 }}>
                 <span style={{ fontFamily:"'JetBrains Mono'", fontSize:"clamp(28px,4vw,42px)", fontWeight:700,
                   color:lcoeColor, lineHeight:1 }}>{fmt(cx(R.lcoe),4)}</span>
