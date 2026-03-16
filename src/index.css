@@ -109,3 +109,27 @@ select:focus{border-color:#FFB800}
   .team-card{flex-direction:column}
   .team-card-image{width:100%;min-height:200px}
 }
+
+/* KPI IEC61724 text inputs (no spinners) */
+.kpi-iec-num-input {
+  appearance: textfield;
+  -moz-appearance: textfield;
+  transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
+}
+.kpi-iec-num-input::-webkit-inner-spin-button,
+.kpi-iec-num-input::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.kpi-iec-num-input:hover {
+  border-color: #e2e8f0 !important;
+  background-color: #fff !important;
+}
+.kpi-iec-num-input:focus {
+  border-color: #ffb347 !important;
+  box-shadow: 0 0 0 4px rgba(255, 179, 71, 0.16) !important;
+  background-color: #fff !important;
+  outline: none !important;
+}

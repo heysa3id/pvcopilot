@@ -11,20 +11,12 @@ import LcoeTool from './pages/LcoeTool'
 import PlaceholderPage from './pages/PlaceholderPage'
 import DataIngestionPage from './pages/QualityCheckPage'
 import DataFilteringPage from './pages/DataFilteringPage'
-import QueryStats from '@mui/icons-material/QueryStats'
+import KpiAnalysisPage from './pages/KpiAnalysisPage'
 import AutoFixHigh from '@mui/icons-material/AutoFixHigh'
 import ElectricBolt from '@mui/icons-material/ElectricBolt'
 
 const ICON_COLOR = "#FFB800";
-function KpiAnalysisPage() {
-  return (
-    <PlaceholderPage
-      icon={<QueryStats sx={{ fontSize: 40, color: ICON_COLOR }} />}
-      title="KPI Analysis" color="#16a34a"
-      desc="IEC 61724 performance metrics: PR, capacity factor, degradation rate, and yield ratios."
-    />
-  )
-}
+
 function GapFillingPage() {
   return (
     <PlaceholderPage

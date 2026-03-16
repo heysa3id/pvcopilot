@@ -2260,6 +2260,7 @@ function FilterCSVChart({ title, color, headers, rows, defaultYHeader, defaultRi
         y: yValues,
         type: "scatter",
         mode: "lines",
+        connectgaps: false,
         name: (safeHeaders[colIndex] ?? `Col ${colIndex}`) + " (L)",
         line: { color: CHART_COLORS_LEFT[i % CHART_COLORS_LEFT.length], width: 1.5, shape: "spline", smoothing: 1.2 },
         hovertemplate: "<b>%{fullData.name}</b>: %{y}<extra></extra>",
@@ -2276,6 +2277,7 @@ function FilterCSVChart({ title, color, headers, rows, defaultYHeader, defaultRi
         y: yValues,
         type: "scatter",
         mode: "lines",
+        connectgaps: false,
         name: (safeHeaders[colIndex] ?? `Col ${colIndex}`) + " (R)",
         line: { color: CHART_COLORS_RIGHT[i % CHART_COLORS_RIGHT.length], width: 1.5, shape: "spline", smoothing: 1.2 },
         hovertemplate: "<b>%{fullData.name}</b>: %{y}<extra></extra>",
@@ -2333,6 +2335,7 @@ function FilterCSVChart({ title, color, headers, rows, defaultYHeader, defaultRi
                   title: { text: safeHeaders[0] ?? "Index", font: { family: FONT, size: 12, color: "#94a3b8" } },
                   gridcolor: "#F1F5F9",
                   tickfont: { family: MONO, size: 10, color: "#94a3b8" },
+                  rangeslider: { visible: false },
                 },
                 yaxis: {
                   title: { text: leftTitle, font: { family: FONT, size: 12, color: "#94a3b8" } },
