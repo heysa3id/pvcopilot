@@ -433,7 +433,7 @@ function PlatformModuleCard({ number, icon, title, subtitle, desc, tags, path, e
           opacity: expanded ? 1 : 0,
           pointerEvents: expanded ? "auto" : "none",
           transition: "opacity 0.25s ease",
-          overflow: "hidden",
+          overflow: "auto",
           cursor: path ? "pointer" : "default",
         }}
       >
@@ -461,24 +461,24 @@ function PlatformModuleCard({ number, icon, title, subtitle, desc, tags, path, e
           {number}
         </div>
         {/* Category label */}
-        <div className="platform-module-subtitle" style={{ fontSize: 12, fontWeight: 600, color: G, marginBottom: 6, letterSpacing: "0.02em" }}>
+        <div className="platform-module-subtitle" style={{ fontSize: 13, fontWeight: 600, color: G, marginBottom: 6, letterSpacing: "0.02em" }}>
           {subtitle || "Core workflow module"}
         </div>
         {/* Title */}
-        <h2 className="platform-module-title" style={{ fontFamily: "Inter, Arial, sans-serif", margin: "0 0 10px", fontSize: "clamp(1.4rem, 2.8vw, 1.85rem)", lineHeight: 1.05, fontWeight: 800, letterSpacing: "-0.03em", color: "#f3f4f6" }}>{title}</h2>
+        <h2 className="platform-module-title" style={{ fontFamily: "Inter, Arial, sans-serif", margin: "0 0 10px", fontSize: "clamp(1.35rem, 2.8vw, 1.9rem)", lineHeight: 1.1, fontWeight: 800, letterSpacing: "-0.03em", color: "#f3f4f6" }}>{title}</h2>
         {/* Description */}
-        {desc && <p className="platform-module-desc" style={{ margin: "0 0 16px", fontSize: 13, lineHeight: 1.5, color: "rgba(243,244,246,0.7)", flex: 1 }}>{desc}</p>}
+        {desc && <p className="platform-module-desc" style={{ margin: "0 0 16px", fontSize: 14, lineHeight: 1.5, color: "rgba(243,244,246,0.7)", flex: 1 }}>{desc}</p>}
         {/* Tags as pill badges */}
         {tags && tags.length > 0 && (
           <div className="platform-module-tags" style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
             {tags.slice(0, 4).map(t => (
               <span key={t} style={{
-                padding: "6px 14px",
+                padding: "6px 12px",
                 background: "rgba(255,255,255,0.08)",
                 border: "1px solid rgba(255,255,255,0.1)",
                 color: "#f3f4f6",
                 borderRadius: 999,
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: 600,
               }}>
                 {t}
@@ -500,14 +500,14 @@ function PlatformModuleCard({ number, icon, title, subtitle, desc, tags, path, e
             style={{
             fontFamily: "Inter, Arial, sans-serif",
             display: "inline-flex", alignItems: "center", gap: 10,
-            color: "#dec89a", textDecoration: "none", fontSize: 14, fontWeight: 800,
+            color: "#dec89a", textDecoration: "none", fontSize: 15, fontWeight: 800,
             transition: "color 0.25s ease, transform 0.25s ease",
             flexShrink: 0,
           }}>
             Open Module <span style={{ fontSize: 16, lineHeight: 1 }}>→</span>
           </Link>
         ) : (
-          <span className="platform-module-link" style={{ display: "inline-flex", alignItems: "center", gap: 10, fontSize: 14, fontWeight: 800, color: "#dec89a", flexShrink: 0 }}>Open Module →</span>
+          <span className="platform-module-link" style={{ display: "inline-flex", alignItems: "center", gap: 10, fontSize: 15, fontWeight: 800, color: "#dec89a", flexShrink: 0 }}>Open Module →</span>
         )}
       </div>
     </>
@@ -1017,16 +1017,16 @@ export default function LandingPage() {
           .platform-modules-cards-wrap { padding-left: 12px; padding-right: 12px; }
           .platform-module-card-wrap { min-width: 48px !important; max-width: 48px !important; flex: 0 0 48px !important; width: 48px !important; }
           .platform-module-card-wrap.platform-module-card-expanded { min-width: 260px !important; max-width: 280px !important; flex: 0 0 260px !important; width: 260px !important; }
-          /* Smaller text in expanded card so "Open Module" button stays visible */
-          .platform-module-card-expanded .platform-module-card-inner { padding: 10px 12px 10px !important; }
-          .platform-module-card-expanded .platform-module-card-icon { top: 10px !important; right: 10px !important; }
-          .platform-module-card-expanded .platform-module-badge { width: 36px !important; height: 36px !important; font-size: 11px !important; margin-bottom: 8px !important; }
-          .platform-module-card-expanded .platform-module-subtitle { font-size: 9px !important; margin-bottom: 2px !important; }
-          .platform-module-card-expanded .platform-module-title { font-size: 0.95rem !important; line-height: 1.1 !important; margin-bottom: 4px !important; }
-          .platform-module-card-expanded .platform-module-desc { font-size: 10px !important; line-height: 1.35 !important; margin-bottom: 6px !important; flex: 0 0 auto !important; display: -webkit-box !important; -webkit-line-clamp: 3 !important; -webkit-box-orient: vertical !important; overflow: hidden !important; }
-          .platform-module-card-expanded .platform-module-tags { gap: 4px !important; margin-bottom: 8px !important; }
-          .platform-module-card-expanded .platform-module-tags span { font-size: 8px !important; padding: 2px 6px !important; }
-          .platform-module-card-expanded .platform-module-link { font-size: 11px !important; }
+          /* Slightly larger text in expanded card; all content visible (scroll if needed) */
+          .platform-module-card-expanded .platform-module-card-inner { padding: 12px 14px 12px !important; overflow-y: auto !important; }
+          .platform-module-card-expanded .platform-module-card-icon { top: 12px !important; right: 12px !important; }
+          .platform-module-card-expanded .platform-module-badge { width: 38px !important; height: 38px !important; font-size: 12px !important; margin-bottom: 8px !important; }
+          .platform-module-card-expanded .platform-module-subtitle { font-size: 11px !important; margin-bottom: 4px !important; }
+          .platform-module-card-expanded .platform-module-title { font-size: 1.05rem !important; line-height: 1.15 !important; margin-bottom: 6px !important; }
+          .platform-module-card-expanded .platform-module-desc { font-size: 12px !important; line-height: 1.45 !important; margin-bottom: 8px !important; flex: 0 0 auto !important; }
+          .platform-module-card-expanded .platform-module-tags { gap: 6px !important; margin-bottom: 10px !important; }
+          .platform-module-card-expanded .platform-module-tags span { font-size: 10px !important; padding: 4px 8px !important; }
+          .platform-module-card-expanded .platform-module-link { font-size: 13px !important; }
         }
       `}</style>
       <section id="modules" style={{
