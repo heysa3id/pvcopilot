@@ -110,6 +110,87 @@ select:focus{border-color:#FFB800}
   .team-card-image{width:100%;min-height:200px}
 }
 
+/* ── LCOE Tool page responsiveness ── */
+@media (max-width: 900px) {
+  .lcoe-page-wrap,
+  .lcoe-main-grid { padding-left: 16px !important; padding-right: 16px !important; }
+  .lcoe-overview-header {
+    flex-wrap: wrap;
+  }
+  .lcoe-overview-header > div:first-of-type {
+    min-width: 0;
+  }
+  .lcoe-main-grid {
+    grid-template-columns: 1fr !important;
+    gap: 16px !important;
+  }
+  .lcoe-main-grid .left-panel {
+    width: 100% !important;
+    max-width: 100%;
+    position: relative !important;
+    top: auto !important;
+    max-height: none !important;
+  }
+  .lcoe-overview-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .lcoe-page-wrap,
+  .lcoe-main-grid { padding-left: 12px !important; padding-right: 12px !important; }
+  .lcoe-main-grid .kpi-lcoe {
+    padding-right: 72px !important;
+  }
+  .lcoe-hero-actions {
+    flex-wrap: wrap !important;
+    gap: 10px !important;
+  }
+  .lcoe-kpi-cards {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 10px !important;
+  }
+  .lcoe-chart-tabs {
+    flex-wrap: wrap !important;
+    width: 100% !important;
+    max-width: 100%;
+  }
+  .lcoe-chart-tabs .tab {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 6px 10px !important;
+    font-size: 10px !important;
+  }
+  .lcoe-methodology-grid {
+    grid-template-columns: 1fr !important;
+    gap: 16px !important;
+  }
+  .lcoe-cost-summary-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 6px !important;
+  }
+  .lcoe-input-row {
+    grid-template-columns: 1fr !important;
+  }
+  .lcoe-metrics-row {
+    grid-template-columns: repeat(2, 1fr) !important;
+  }
+}
+
+@media (max-width: 480px) {
+  .lcoe-page-wrap,
+  .lcoe-main-grid { padding-left: 10px !important; padding-right: 10px !important; }
+  .lcoe-kpi-cards {
+    grid-template-columns: 1fr !important;
+  }
+  .lcoe-cost-summary-grid {
+    grid-template-columns: 1fr !important;
+  }
+  .lcoe-metrics-row {
+    grid-template-columns: 1fr !important;
+  }
+}
+
 /* KPI IEC61724 text inputs (no spinners) */
 .kpi-iec-num-input {
   appearance: textfield;

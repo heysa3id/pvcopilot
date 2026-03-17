@@ -738,9 +738,10 @@ export default function LcoeTool() {
       </Dialog>
 
       {/* ──────────── TOOL OVERVIEW (COLLAPSIBLE) ──────────── */}
-      <div style={{ maxWidth:1380, margin:"0 auto 24px", padding:"0 20px" }}>
+      <div className="lcoe-page-wrap" style={{ maxWidth:1380, margin:"0 auto 24px", padding:"0 20px" }}>
         <Card>
           <div
+            className="lcoe-overview-header"
             style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", cursor:"pointer", gap:16 }}
             onClick={() => setOverviewOpen(o => !o)}
           >
@@ -770,7 +771,7 @@ export default function LcoeTool() {
             </div>
           </div>
           {overviewOpen && (
-            <div style={{ marginTop:20, display:"grid", gridTemplateColumns:"2fr 2fr 1.6fr", gap:16 }}>
+            <div className="lcoe-overview-grid" style={{ marginTop:20, display:"grid", gridTemplateColumns:"2fr 2fr 1.6fr", gap:16 }}>
               {/* Overview & Assumptions */}
               <div style={{ background:"#FFFBEB", borderRadius:12, padding:18, border:"1px solid #FDE68A" }}>
                 <div style={{ fontSize:11, fontWeight:700, color:"#0F172A", letterSpacing:".08em", textTransform:"uppercase", marginBottom:4 }}>
@@ -828,7 +829,7 @@ export default function LcoeTool() {
         </Card>
       </div>
 
-      <div style={{ maxWidth:1380, margin:"0 auto 40px", padding:"0 20px", display:"grid", gridTemplateColumns:"360px 1fr", gap:"20px", alignItems:"start" }}>
+      <div className="lcoe-main-grid" style={{ maxWidth:1380, margin:"0 auto 40px", padding:"0 20px", display:"grid", gridTemplateColumns:"360px 1fr", gap:"20px", alignItems:"start" }}>
         {/* ──────────── LEFT PANEL ──────────── */}
         <div className="left-panel" style={{ display:"flex", flexDirection:"column", gap:12 }}>
           {/* ── PDF Upload Zone ── */}
@@ -917,7 +918,7 @@ export default function LcoeTool() {
                     )}
                   </div>
                 )}
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:5 }}>
+                <div className="lcoe-input-row" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:5 }}>
                   {[
                     { l:"kWp DC",       u:"kWp",      v:pdfState.extracted.systemCapacity },
                     { l:"E_Solar/Grid", u:"kWh/yr",   v:pdfState.extracted.annualEnergy ? Math.round(pdfState.extracted.annualEnergy).toLocaleString() : null },
@@ -1010,13 +1011,13 @@ export default function LcoeTool() {
               <Div label="System Inputs" />
               <NI label="Installed Capacity" sub="DC array power (STC)"
                 value={p.systemCapacity} unit="kWp" min={1} max={500000} step={1} onChange={set("systemCapacity")} />
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+              <div className="lcoe-input-row" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
                 <NI label="Specific Yield" sub="From PVsyst simulation"
                   value={p.specificYield} unit="kWh/kWp" min={100} max={3000} step={10} onChange={set("specificYield")} />
                 <NI label="Performance Ratio" sub="PR from PVsyst"
                   value={p.performanceRatio} unit="%" min={50} max={100} step={0.01} onChange={set("performanceRatio")} />
               </div>
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+              <div className="lcoe-input-row" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
                 <NI label="DC/AC Ratio" sub="Inverter sizing ratio"
                   value={p.dcAcRatio} unit="" min={1} max={2} step={0.01} onChange={set("dcAcRatio")} />
                 <div style={{ marginBottom:13 }}>
@@ -1127,7 +1128,7 @@ export default function LcoeTool() {
                 })()
               )}
               <Div label="Derived Stats" />
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8 }}>
+              <div className="lcoe-metrics-row" style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:8 }}>
                 {[
                   { label:"Capacity Factor", v:`${fmt(R.capacityFactor,2)}%` },
                   { label:"Lifetime Energy",  v:`${fmt(R.lifeEnMWh/1000,2)} GWh` },
@@ -1247,7 +1248,7 @@ export default function LcoeTool() {
               <NI label="PPA / Feed-in Tariff" sub="used for IRR and payback only — not for LCOE"
                 value={parseFloat(cx(p.tariffPrice).toFixed(4))} unit={`${currSym}/kWh`} min={0} max={cx(0.5)} step={0.001} onChange={v => set("tariffPrice")(v/exchangeRate)} />
               <Div label="Financial Summary" />
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+              <div className="lcoe-input-row" style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
                 {[
                   { label:"Annual O&M",     v:`${currSym}${fmtK(cx(R.omAnnual))}` },
                   { label:"O&M NPV",        v:`${currSym}${fmtK(cx(R.opexNpv))}` },
@@ -1273,7 +1274,7 @@ export default function LcoeTool() {
               <div style={{ position:"absolute", top:-20, right:-20, width:100, height:100,
                 borderRadius:"50%", background:`radial-gradient(circle,${lcoeColor}22,transparent 70%)` }} />
               {/* ── Currency badge top-right ── */}
-              <div style={{ position:"absolute", top:12, right:14, zIndex:2 }}>
+              <div className="lcoe-hero-currency" style={{ position:"absolute", top:12, right:14, zIndex:2 }}>
                 <button
                   onClick={() => { setTempCurrency(currency); setTempRate(exchangeRate); setShowCurrencyPopup(true); }}
                   style={{
@@ -1319,7 +1320,7 @@ export default function LcoeTool() {
                   color:lcoeColor, lineHeight:1 }}>{fmt(cx(R.lcoe),4)}</span>
                 <span style={{ fontSize:12, color:"#64748B" }}>{currency}/kWh</span>
               </div>
-              <div style={{ display:"flex", alignItems:"center", gap:8, justifyContent:"space-between" }}>
+              <div className="lcoe-hero-actions" style={{ display:"flex", alignItems:"center", gap:8, justifyContent:"space-between" }}>
                 <div style={{ display:"flex", alignItems:"center", gap:8 }}>
                   <button
                     type="button"
@@ -1387,7 +1388,7 @@ export default function LcoeTool() {
             </Card>
           </div>
           {/* ── Row 2: 4 metric cards ── */}
-          <div className="fu fu1" style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:12, marginBottom:4 }}>
+          <div className="lcoe-kpi-cards fu fu1" style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:12, marginBottom:4 }}>
             {[
               { label:"Total CAPEX", value:`${currSym}${fmtK(cx(R.capexTotal))}`,
                 sub:`${fmt(cx(R.capexTotal/p.systemCapacity),0)} ${currSym}/kWp`, color:B },
@@ -1454,7 +1455,7 @@ export default function LcoeTool() {
 
           {/* ── Chart area ── */}
           <Card className="fu fu2">
-            <div style={{ display:"flex", gap:4, marginBottom:20,
+            <div className="lcoe-chart-tabs" style={{ display:"flex", gap:4, marginBottom:20,
               background:"#fffdf7", borderRadius:7, padding:4, width:"fit-content" }}>
               {[{id:"energy",label:"Energy Profile"},{id:"cashflow",label:"Cash Flow"},{id:"costs",label:"Cost Breakdown"},{id:"tornado",label:"Sensitivity"}]
                 .map(t=>(
@@ -1695,7 +1696,7 @@ export default function LcoeTool() {
                   tooltip: { ...APEX_BASE.tooltip, y: { formatter: v => `${currSym}${fmtK(v)}` } },
                   dataLabels: { enabled: false },
                 }} />
-                <div style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:8, marginTop:12 }}>
+                <div className="lcoe-cost-summary-grid" style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:8, marginTop:12 }}>
                   {[
                     { label:"CAPEX share", v:`${fmt(R.capexTotal/R.totalDiscC*100,1)}%`, color:B },
                     { label:"O&M share",   v:`${fmt(R.opexNpv/R.totalDiscC*100,1)}%`,   color:O },
@@ -1768,7 +1769,7 @@ export default function LcoeTool() {
 
           {/* ── Methodology ── */}
           <Card className="fu fu3" style={{ background:"#FFFFFF", border:"1px solid #E2E8F0" }}>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:20 }}>
+            <div className="lcoe-methodology-grid" style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:20 }}>
               {[
                 { title:"LCOE Formula", body:[
                   `LCOE = Σ Cost_t/(1+r)^t / Σ E_t/(1+r)^t`,
