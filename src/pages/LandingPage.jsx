@@ -586,7 +586,8 @@ export default function LandingPage() {
       <section id="hero" style={{
         position: "relative", overflow: "hidden",
         background: "linear-gradient(135deg, #0F172A 0%, #1E293B 50%, #0F172A 100%)",
-        padding: "clamp(72px, 12vw, 100px) 16px clamp(72px, 12vw, 100px)",
+        marginTop: -56,
+        padding: "calc(56px + clamp(72px, 12vw, 100px)) 16px clamp(72px, 12vw, 100px)",
         minHeight: "min(100vh, 540px)",
       }}>
         {/* Sun trajectory: sunrise → noon → sunset */}
