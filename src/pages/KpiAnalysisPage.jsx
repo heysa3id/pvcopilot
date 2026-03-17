@@ -589,6 +589,64 @@ function computeAllowedDaysByAvailabilityPct(headers, rows, stepMinutes, thresho
   return allowedDays;
 }
 
+function computeAvailabilityPctByDay(headers, rowsObserved, stepMinutes, rowsForDaylightWindow = null) {
+  if (!headers?.length || !Array.isArray(rowsObserved) || rowsObserved.length === 0) return null;
+  const step = Math.max(1, Math.min(1440, Number(stepMinutes) || 10));
+  const timeIdx = getDateColumnIndex(headers);
+  if (timeIdx < 0) return null;
+
+  const stepMs = step * 60 * 1000;
+  // Availability window: fixed hours (local time), independent of irradiance.
+  // Count buckets between 07:00 and 20:00.
+  const START_HOUR = 7;
+  const END_HOUR = 20; // exclusive
+  const windowMinutes = Math.max(0, (END_HOUR - START_HOUR) * 60);
+  const expectedPerDay = Math.max(1, Math.round(windowMinutes / step));
+
+  // Observed unique buckets per day from rowsObserved.
+  const observedBucketsByDay = new Map(); // dayKey -> Set(bucketMs)
+  for (const row of rowsObserved) {
+    if (!Array.isArray(row)) continue;
+    const ms = parseDateCell(row[timeIdx]);
+    if (Number.isNaN(ms)) continue;
+    const dayKey = toYMD(new Date(ms));
+    if (!dayKey) continue;
+    const bucket = Math.floor(ms / stepMs) * stepMs;
+    if (!observedBucketsByDay.has(dayKey)) observedBucketsByDay.set(dayKey, new Set());
+    observedBucketsByDay.get(dayKey).add(bucket);
+  }
+
+  // Days to compute: union of expected-window source and observed rows.
+  const daylightSource = Array.isArray(rowsForDaylightWindow) && rowsForDaylightWindow.length ? rowsForDaylightWindow : rowsObserved;
+  const expectedDays = new Set();
+  for (const row of daylightSource) {
+    if (!Array.isArray(row)) continue;
+    const ms = parseDateCell(row[timeIdx]);
+    if (Number.isNaN(ms)) continue;
+    const dayKey = toYMD(new Date(ms));
+    if (dayKey) expectedDays.add(dayKey);
+  }
+
+  const allDays = new Set([...Array.from(expectedDays), ...Array.from(observedBucketsByDay.keys())]);
+  if (!allDays.size) return null;
+
+  const pctByDay = new Map();
+  for (const dayKey of allDays) {
+    const buckets = observedBucketsByDay.get(dayKey) ?? new Set();
+    // Build fixed window in local time for that day.
+    const [y, m, d] = String(dayKey).split("-").map((x) => Number(x));
+    const dayStart = new Date(y, (m || 1) - 1, d || 1, 0, 0, 0, 0).getTime();
+    const startMs = dayStart + START_HOUR * 60 * 60 * 1000;
+    const endMs = dayStart + END_HOUR * 60 * 60 * 1000;
+
+    let observed = 0;
+    for (const b of buckets) if (b >= startMs && b < endMs) observed++;
+
+    pctByDay.set(dayKey, (observed / expectedPerDay) * 100);
+  }
+  return pctByDay;
+}
+
 function parseRangeTextBar(text) {
   const t = (text || "").trim();
   const sep = t.includes("~") ? "~" : t.includes("→") ? "→" : null;
@@ -1384,7 +1442,7 @@ function KpiColumnMultiSelect({ options, selected, onChange, label }) {
         <span style={{ display: "flex", alignItems: "center", color: "#94a3b8" }}>{open ? <ExpandLessIcon sx={{ fontSize: 14 }} /> : <ExpandMoreIcon sx={{ fontSize: 14 }} />}</span>
       </button>
       {open && (
-        <div ref={popRef} style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 20, width: 280, maxHeight: 280, overflow: "auto", background: "#fff", border: "1px solid #E2E8F0", borderRadius: 10, boxShadow: "0 8px 24px rgba(2, 6, 23, 0.1)", padding: 8 }}>
+        <div ref={popRef} style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 20, width: 280, maxHeight: 280, overflow: "auto", background: "#fff", border: "1px solid #E2E8F0", borderRadius: 10, boxShadow: "0 8px 24px rgba(2, 6, 23, 0.1)", padding: 8, paddingBottom: 100, scrollPaddingBottom: 100 }}>
           <div style={{ fontFamily: FONT, fontSize: 11, fontWeight: 500, color: "#94a3b8", padding: "2px 6px 4px" }}>{label ? `${label} — columns` : "Columns"}</div>
           {options.map((opt) => {
             const checked = selected.includes(opt.index);
@@ -1398,6 +1456,7 @@ function KpiColumnMultiSelect({ options, selected, onChange, label }) {
               </button>
             );
           })}
+          <div style={{ height: 6 }} />
         </div>
       )}
     </div>
@@ -2477,83 +2536,36 @@ export default function KpiAnalysisPage() {
     });
   }, [pvData, pvIecFilteredRows, appliedIecStatusFilter]);
 
-  const allowedDaysByAvailability = useMemo(() => {
-    if (!pvRawData?.headers?.length || !pvRawFilteredRowsForAvailability.length) return null;
-    if (!Number.isFinite(Number(appliedIecDataAvailabilityPct)) || Number(appliedIecDataAvailabilityPct) <= 0) return null;
+  const availabilityStatsByDay = useMemo(() => {
+    // Availability should be calculated on the base resampling step (min) before hourly → daily KPI.
+    if (!pvData?.headers?.length || !pvIecFilteredRows.length) return null;
 
-    // Apply the same IEC/status rules to the *loaded* (non-resampled) data before counting availability.
-    const headers = pvRawData.headers;
-    const ghiIdx = getColumnIndex(headers, ["GHI", "weather_GHI"]);
-    const airTempIdx = getColumnIndex(headers, ["Air_Temp", "weather_Air_Temp"]);
-    const windIdx = getColumnIndex(headers, ["Wind_speed", "weather_Wind_speed"]);
-    const pdcIdx = getColumnIndex(headers, ["P_DC"]);
-    const statusIdx = getColumnIndex(headers, ["status"]);
-    const ghiMin = Number(appliedIecGhiMin);
-    const ghiMax = Number(appliedIecGhiMax);
-    const airMin = Number(appliedIecAirTempMin);
-    const airMax = Number(appliedIecAirTempMax);
-    const windMin = Number(appliedIecWindSpeedMin);
-    const windMax = Number(appliedIecWindSpeedMax);
-    const powerMin = Number(appliedIecPowerMin) || 0;
-    const powerMax = appliedIecPowerMax != null && appliedIecPowerMax !== "" ? Number(appliedIecPowerMax) : maxPdcInData;
+    const headers = pvData.headers;
+    const rowsForDaylightWindow = pvIecFilteredRows; // status-independent baseline (same as "All")
+    const rowsObserved = appliedIecStatusFilter === "valid" ? pvStatusFilteredRows : pvIecFilteredRows;
 
-    const filteredNoStatus = pvRawFilteredRowsForAvailability.filter((row) => {
-      if (!Array.isArray(row)) return false;
-      if (ghiIdx >= 0) {
-        const v = parseFloat(row[ghiIdx]);
-        if (Number.isFinite(v) && (v < ghiMin || v > ghiMax)) return false;
-      }
-      if (airTempIdx >= 0) {
-        const v = parseFloat(row[airTempIdx]);
-        if (Number.isFinite(v) && (v < airMin || v > airMax)) return false;
-      }
-      if (windIdx >= 0) {
-        const v = parseFloat(row[windIdx]);
-        if (Number.isFinite(v) && (v < windMin || v > windMax)) return false;
-      }
-      if (pdcIdx >= 0 && powerMax != null && Number.isFinite(powerMax)) {
-        const v = parseFloat(row[pdcIdx]);
-        if (Number.isFinite(v) && (v < powerMin || v > powerMax)) return false;
-      }
-      return true;
-    });
+    const pctByDay = computeAvailabilityPctByDay(headers, rowsObserved, resamplingStepMinutes, rowsForDaylightWindow);
+    const thr = Number(appliedIecDataAvailabilityPct);
+    const allowedDays =
+      Number.isFinite(thr) && thr > 0 && pctByDay
+        ? new Set(Array.from(pctByDay.entries()).filter(([, pct]) => Number.isFinite(pct) && pct >= thr).map(([d]) => d))
+        : null;
 
-    const filteredObserved =
-      appliedIecStatusFilter === "valid" && statusIdx >= 0
-        ? filteredNoStatus.filter((row) => String(row?.[statusIdx] ?? "").toLowerCase().trim() === "valid")
-        : filteredNoStatus;
-
-    // Daylight window should be inferred from the non-status-filtered data, but observed availability
-    // should respect the status filter (valid-only when selected).
-    return computeAllowedDaysByAvailabilityPct(
-      headers,
-      filteredObserved,
-      resamplingStepMinutes,
-      appliedIecDataAvailabilityPct,
-      filteredNoStatus
-    );
+    return { pctByDay, allowedDays };
   }, [
-    pvRawData,
-    pvRawFilteredRowsForAvailability,
+    pvData,
+    pvIecFilteredRows,
+    pvStatusFilteredRows,
     resamplingStepMinutes,
     appliedIecDataAvailabilityPct,
-    appliedIecGhiMin,
-    appliedIecGhiMax,
-    appliedIecAirTempMin,
-    appliedIecAirTempMax,
-    appliedIecWindSpeedMin,
-    appliedIecWindSpeedMax,
-    appliedIecPowerMin,
-    appliedIecPowerMax,
     appliedIecStatusFilter,
-    maxPdcInData,
   ]);
 
   const pvAvailabilityFilteredRows = useMemo(() => {
     if (!pvData?.headers?.length || !pvStatusFilteredRows.length) return pvStatusFilteredRows;
-    // If availability threshold is active but no days meet it, allowedDaysByAvailability will be an empty Set
-    // and we should filter everything out (not fall back to unfiltered rows).
-    if (!allowedDaysByAvailability) return pvStatusFilteredRows;
+    // If threshold is disabled, allowedDays is null and we don't filter by availability.
+    const allowedDays = availabilityStatsByDay?.allowedDays;
+    if (!allowedDays) return pvStatusFilteredRows;
     const timeIdx = getDateColumnIndex(pvData.headers);
     if (timeIdx < 0) return pvStatusFilteredRows;
     return pvStatusFilteredRows.filter((row) => {
@@ -2562,9 +2574,9 @@ export default function KpiAnalysisPage() {
       if (Number.isNaN(ms)) return false;
       const dayKey = toYMD(new Date(ms));
       if (!dayKey) return false;
-      return allowedDaysByAvailability.has(dayKey);
+      return allowedDays.has(dayKey);
     });
-  }, [pvData, pvStatusFilteredRows, allowedDaysByAvailability]);
+  }, [pvData, pvStatusFilteredRows, availabilityStatsByDay]);
 
   // tot_power from system info (config.tot_power or top-level tot_power)
   const totPower = useMemo(() => {
@@ -2586,8 +2598,23 @@ export default function KpiAnalysisPage() {
     if (!pvData?.headers?.length || totPower == null) return null;
     const rowsForDaily = pvHourlyForKpi ?? pvAvailabilityFilteredRows;
     if (!rowsForDaily.length) return null;
-    return resampleRowsToDaily(pvData.headers, rowsForDaily, totPower, sysData);
-  }, [pvData, pvAvailabilityFilteredRows, pvHourlyForKpi, totPower, sysData]);
+    const base = resampleRowsToDaily(pvData.headers, rowsForDaily, totPower, sysData);
+    if (!base?.headers?.length || !base?.rows?.length) return base;
+
+    const pctByDay = availabilityStatsByDay?.pctByDay;
+    if (!pctByDay) return base;
+
+    const headers = [...base.headers, "Availability_%"];
+    const timeIdx = 0;
+    const rows = base.rows.map((r) => {
+      const out = Array.isArray(r) ? [...r] : [];
+      const dayKey = String(out[timeIdx] ?? "");
+      const pct = pctByDay.get(dayKey);
+      out.push(Number.isFinite(pct) ? String(Math.round(pct * 10) / 10) : "");
+      return out;
+    });
+    return { headers, rows };
+  }, [pvData, pvAvailabilityFilteredRows, pvHourlyForKpi, totPower, sysData, availabilityStatsByDay]);
 
   // KPI aggregation level for Analysis card (daily, monthly, yearly)
   const [kpiAggregation, setKpiAggregation] = useState("daily");
