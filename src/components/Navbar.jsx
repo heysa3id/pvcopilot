@@ -8,7 +8,6 @@ import {
   FileText,
   Wand2,
   Mail,
-  Calculator,
   ChevronDown,
   Menu,
   X,
@@ -20,6 +19,7 @@ import {
   ElectricBolt,
   FilterAltOutlined,
   AccountTree,
+  Calculate,
 } from "@mui/icons-material";
 import CurrencyExchangeIcon from "@mui/icons-material/CurrencyExchange";
 
@@ -269,8 +269,8 @@ function InteractiveLcoeButton({ closeMobile, fullWidth }) {
       <span className="relative z-10 flex items-center gap-2">
         {showHoverContent ? (
           <span className="flex items-center gap-1.5 transition-opacity duration-200">
-            <Calculator className="h-4 w-4" strokeWidth={2} />
-            LCOE
+            <Calculate sx={{ fontSize: 18 }} />
+            Open LCOE
           </span>
         ) : (
           <>
