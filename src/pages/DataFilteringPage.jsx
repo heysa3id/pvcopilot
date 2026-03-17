@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import createPlotlyComponent from "react-plotly.js/factory";
 import Plotly from "plotly.js-dist-min";
 import FilterAltOutlined from "@mui/icons-material/FilterAltOutlined";
+import PatternOutlined from "@mui/icons-material/PatternOutlined";
 import ShowChartOutlined from "@mui/icons-material/ShowChartOutlined";
 import SolarPowerOutlined from "@mui/icons-material/SolarPowerOutlined";
 import SettingsOutlined from "@mui/icons-material/SettingsOutlined";
@@ -2548,7 +2549,7 @@ export default function DataFilteringPage() {
   const [dateFrom, setDateFrom] = useState(null);
   const [dateTo, setDateTo] = useState(null);
   const [resamplingStepMinutes, setResamplingStepMinutes] = useState(10);
-  const [lossFactor, setLossFactor] = useState("0.97");
+  const [lossFactor, setLossFactor] = useState("1");
   const [lossFactorAdvanced, setLossFactorAdvanced] = useState(false);
   const [lossFactorRules, setLossFactorRules] = useState([]);
   const [pvwattsCardCollapsed, setPvwattsCardCollapsed] = useState(false);
@@ -3248,9 +3249,10 @@ export default function DataFilteringPage() {
                               <p style={{ margin: "0 0 8px 0" }}>
                                 The loss factor is a multiplier applied at the end of the PVWatts formula. It can represent <strong>calculation error of the PVWatts model</strong>, <strong>soiling conditions</strong> of the system, or <strong>degradation</strong>. Typical values are around 0.95–1.0 (e.g. 0.97 = 3% losses).
                               </p>
-                              <p style={{ margin: 0 }}>
-                                The next version of PVCopilot will compute this value automatically.
+                              <p style={{ margin: "0 0 6px 0" }}>
+                                Clicking the <strong>+</strong> button next to <code style={{ fontFamily: MONO, fontSize: 11 }}>loss_factor</code> opens Advanced mode, where you can define multiple loss_factor values as rules over different date ranges.
                               </p>
+                              <p style={{ margin: 0 }}>The next version of PVCopilot will compute this value automatically.</p>
                             </div>
                           )}
                           {!lossFactorAdvanced && (
@@ -3259,7 +3261,7 @@ export default function DataFilteringPage() {
                               type="number"
                               min={0}
                               max={2}
-                              step={0.01}
+                              step={0.1}
                               value={lossFactor}
                               onChange={(e) => setLossFactor(e.target.value)}
                               style={{
@@ -3414,6 +3416,7 @@ export default function DataFilteringPage() {
                             />
                             <input
                               type="number"
+                              step={0.1}
                               value={rule.factor ?? ""}
                               onChange={(e) => {
                                 const next = [...lossFactorRules];
@@ -3479,9 +3482,25 @@ export default function DataFilteringPage() {
                   }}
                 >
                   <div style={{ flex: "1 1 280px", fontFamily: FONT, fontSize: 12, color: "#334155", lineHeight: 1.6 }}>
-                    <div style={{ fontWeight: 700, color: "#0F172A", marginBottom: 6, fontSize: 12 }}>Filter logic</div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                      <div
+                        style={{
+                          width: 22,
+                          height: 22,
+                          borderRadius: 999,
+                          background: `${DF}08`,
+                          border: `1px solid ${DF}30`,
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                        }}
+                      >
+                        <PatternOutlined sx={{ fontSize: 14, color: DF }} />
+                      </div>
+                      <div style={{ fontWeight: 700, color: "#0F172A", fontSize: 12 }}>Filter logic</div>
+                    </div>
                     <div style={{ color: "#64748B", fontSize: 11 }}>
-                      <code style={{ display: "block", marginBottom: 4, fontFamily: FONT, fontSize: 11 }}>
+                      <code style={{ display: "block", marginBottom: 2, fontFamily: FONT, fontSize: 11 }}>
                         df['rel_error'] = abs((df['P_DC'] − df['PVWatts']) / df['P_DC'])
                       </code>
                       <code style={{ display: "block", fontFamily: FONT, fontSize: 11 }}>
@@ -3490,7 +3509,7 @@ export default function DataFilteringPage() {
                     </div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0, position: "relative" }}>
-                    <label style={{ fontFamily: FONT, fontSize: 12, fontWeight: 600, color: "#64748B" }} htmlFor="filter-threshold-input">
+                    <label style={{ fontFamily: FONT, fontSize: 11, fontWeight: 600, color: "#64748B" }} htmlFor="filter-threshold-input">
                       filter threshold (rel. error)
                     </label>
                     <span
@@ -3561,26 +3580,26 @@ export default function DataFilteringPage() {
                           }
                         }}
                         style={{
-                          width: 56,
-                          padding: "8px 10px",
-                          borderRadius: 10,
+                          width: 58,
+                          padding: "6px 9px",
+                          borderRadius: 8,
                           border: "1.5px solid #E2E8F0",
                           fontFamily: MONO,
-                          fontSize: 14,
+                          fontSize: 12,
                           color: "#0F172A",
                           background: "#FAFBFC",
                         }}
                       />
-                      <span style={{ fontFamily: FONT, fontSize: 14, color: "#64748B" }}>%</span>
+                      <span style={{ fontFamily: FONT, fontSize: 11, color: "#64748B" }}>%</span>
                     </div>
                   </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12, flexShrink: 0, position: "relative" }}>
-                    <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer", fontFamily: FONT, fontSize: 12, color: "#334155" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0, position: "relative" }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontFamily: FONT, fontSize: 11, color: "#334155" }}>
                       <input
                         type="checkbox"
                         checked={timeWeightEnabled}
                         onChange={(e) => setTimeWeightEnabled(e.target.checked)}
-                        style={{ width: 16, height: 16, accentColor: "#2563eb" }}
+                        style={{ width: 14, height: 14, accentColor: "#2563eb" }}
                       />
                       Soften at dawn/dusk
                     </label>
@@ -3680,7 +3699,7 @@ export default function DataFilteringPage() {
                     )}
                     {timeWeightEnabled && (
                       <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                        <span style={{ fontFamily: FONT, fontSize: 12, color: "#64748B" }}>min weight</span>
+                        <span style={{ fontFamily: FONT, fontSize: 11, color: "#64748B" }}>min weight</span>
                         <input
                           type="number"
                           min={0}
@@ -3689,12 +3708,12 @@ export default function DataFilteringPage() {
                           value={timeWeightMin}
                           onChange={(e) => setTimeWeightMin(e.target.value)}
                           style={{
-                            width: 48,
-                            padding: "6px 8px",
-                            borderRadius: 8,
+                            width: 55,
+                              padding: "5px 7px",
+                              borderRadius: 7,
                             border: "1px solid #E2E8F0",
                             fontFamily: MONO,
-                            fontSize: 12,
+                              fontSize: 11,
                             color: "#0F172A",
                             background: "#FAFBFC",
                           }}
