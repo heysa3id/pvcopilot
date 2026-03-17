@@ -8,6 +8,7 @@ import './index.css'
 import Navbar from './components/Navbar'
 import LandingPage from './pages/LandingPage'
 import LcoeTool from './pages/LcoeTool'
+import DocsPage from './pages/DocsPage'
 import PlaceholderPage from './pages/PlaceholderPage'
 import DataIngestionPage from './pages/QualityCheckPage'
 import DataFilteringPage from './pages/DataFilteringPage'
@@ -341,6 +342,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
       <div style={{ paddingTop: 56 }}>
         <Routes>
           <Route path="/" element={<LandingPage />} />
+          <Route path="/docs" element={<DocsPage />} />
           <Route path="/data-ingestion" element={<DataIngestionPage />} />
           <Route path="/kpi-analysis" element={<KpiAnalysisPage />} />
           <Route path="/gap-filling" element={<GapFillingPage />} />

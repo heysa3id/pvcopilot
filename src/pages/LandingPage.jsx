@@ -598,7 +598,16 @@ export default function LandingPage() {
         <div style={{ position: "relative", zIndex: 1, maxWidth: 860, margin: "0 auto", textAlign: "center", padding: "0 8px" }}>
           {/* Hero logo */}
           <div style={{ marginBottom: "clamp(16px, 3vw, 28px)" }}>
-            <img src="/logoWhite.svg" alt="PVCopilot" style={{ height: "clamp(80px, 18vw, 141px)", objectFit: "contain" }} />
+            <img
+              src="/logoWhite.svg"
+              alt="PVCopilot"
+              style={{
+                height: "clamp(80px, 18vw, 141px)",
+                objectFit: "contain",
+                display: "block",
+                margin: "0 auto",
+              }}
+            />
           </div>
 
           <h1 style={{

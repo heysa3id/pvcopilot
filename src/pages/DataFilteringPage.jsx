@@ -20,6 +20,7 @@ import BookmarkAddedOutlinedIcon from "@mui/icons-material/BookmarkAddedOutlined
 import RotateLeftOutlinedIcon from "@mui/icons-material/RotateLeftOutlined";
 import Button from "@mui/material/Button";
 import TableColumnSelector from "../components/TableColumnSelector";
+import SystemInfoHelpIcon from "../components/SystemInfoHelpIcon";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -765,10 +766,13 @@ function FilterSystemInfo({ data }) {
           borderBottom: expanded ? "1px solid #E2E8F0" : "none",
         }}
       >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, position: "relative" }}>
           <SettingsOutlined sx={{ fontSize: 20, color: O }} />
           <span style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: FONT }}>
             System Info
+          </span>
+          <span onClick={(e) => e.stopPropagation()} style={{ display: "inline-flex" }}>
+            <SystemInfoHelpIcon linkColor={DF} />
           </span>
           <span
             style={{

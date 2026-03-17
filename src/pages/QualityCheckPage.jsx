@@ -23,6 +23,7 @@ import BookmarkAddedOutlinedIcon from "@mui/icons-material/BookmarkAddedOutlined
 import RotateLeftOutlinedIcon from "@mui/icons-material/RotateLeftOutlined";
 import Button from "@mui/material/Button";
 import TableColumnSelector from "../components/TableColumnSelector";
+import SystemInfoHelpIcon from "../components/SystemInfoHelpIcon";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -2265,6 +2266,9 @@ function JSONList({ data }) {
           <SettingsOutlined sx={{ fontSize: 20, color: O }} />
           <span style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: FONT }}>
             System Info
+          </span>
+          <span onClick={(e) => e.stopPropagation()} style={{ display: "inline-flex" }}>
+            <SystemInfoHelpIcon linkColor={P} />
           </span>
           <span style={{
             fontSize: 11, fontWeight: 600, color: O, background: `${O}14`,
