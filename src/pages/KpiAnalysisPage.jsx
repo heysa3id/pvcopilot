@@ -16,10 +16,12 @@ import BarChart from "@mui/icons-material/BarChart";
 import ChevronLeft from "@mui/icons-material/ChevronLeft";
 import ChevronRight from "@mui/icons-material/ChevronRight";
 import CloseOutlined from "@mui/icons-material/CloseOutlined";
+import CancelOutlined from "@mui/icons-material/CancelOutlined";
 import FilterAltOutlined from "@mui/icons-material/FilterAltOutlined";
 import FilterListOutlined from "@mui/icons-material/FilterListOutlined";
 import HelpOutline from "@mui/icons-material/HelpOutline";
 import BookmarkAddedOutlinedIcon from "@mui/icons-material/BookmarkAddedOutlined";
+import { Slider } from "@/components/ui/slider-number-flow";
 import RotateLeftOutlinedIcon from "@mui/icons-material/RotateLeftOutlined";
 import Button from "@mui/material/Button";
 import TableColumnSelector from "../components/TableColumnSelector";
@@ -505,6 +507,77 @@ function filterRowsByDateRange(headers, rows, dateFrom, dateTo) {
     if (toMs != null && ms > toMs) return false;
     return true;
   });
+}
+
+function computeAllowedDaysByAvailabilityPct(headers, rows, stepMinutes, thresholdPct) {
+  if (!headers?.length || !Array.isArray(rows) || rows.length === 0) return null;
+  if (thresholdPct == null || !Number.isFinite(Number(thresholdPct))) return null;
+  const thr = Math.min(100, Math.max(0, Number(thresholdPct)));
+  const step = Math.max(1, Math.min(1440, Number(stepMinutes) || 10));
+  const timeIdx = getDateColumnIndex(headers);
+  if (timeIdx < 0) return null;
+
+  // Count unique step-buckets per day to avoid duplicates.
+  const stepMs = step * 60 * 1000;
+  const irrIdx = getColumnIndex(headers, ["weather_GHI", "GHI", "weather_GTI", "GTI"]);
+  const IRR_ON_WM2 = 20; // treat irradiance > 20 W/m² as daylight
+
+  const bucketsByDay = new Map(); // dayKey -> Set(bucketMs) (all buckets present)
+  const irrByDayBucket = new Map(); // dayKey -> Map(bucketMs -> maxIrrInBucket)
+  for (const row of rows) {
+    if (!Array.isArray(row)) continue;
+    const ms = parseDateCell(row[timeIdx]);
+    if (Number.isNaN(ms)) continue;
+    const dayKey = toYMD(new Date(ms));
+    if (!dayKey) continue;
+    const bucket = Math.floor(ms / stepMs) * stepMs;
+    if (!bucketsByDay.has(dayKey)) bucketsByDay.set(dayKey, new Set());
+    bucketsByDay.get(dayKey).add(bucket);
+
+    if (irrIdx >= 0) {
+      const irr = parseFloat(row[irrIdx]);
+      const v = Number.isFinite(irr) ? irr : null;
+      if (!irrByDayBucket.has(dayKey)) irrByDayBucket.set(dayKey, new Map());
+      const m = irrByDayBucket.get(dayKey);
+      const prev = m.get(bucket);
+      if (v != null) m.set(bucket, prev == null ? v : Math.max(prev, v));
+    }
+  }
+  if (!bucketsByDay.size) return null;
+
+  const allowedDays = new Set();
+  for (const [dayKey, buckets] of bucketsByDay.entries()) {
+    // Expected buckets only between sunrise & sunset (inferred from irradiance)
+    let expected = null;
+    let observed = null;
+    if (irrIdx >= 0 && irrByDayBucket.has(dayKey)) {
+      const byBucket = irrByDayBucket.get(dayKey);
+      const onBuckets = [];
+      for (const [b, irr] of byBucket.entries()) {
+        if (Number.isFinite(irr) && irr > IRR_ON_WM2) onBuckets.push(b);
+      }
+      if (onBuckets.length) {
+        onBuckets.sort((a, b) => a - b);
+        const start = onBuckets[0];
+        const end = onBuckets[onBuckets.length - 1];
+        expected = Math.max(1, Math.round((end - start) / stepMs) + 1);
+        let count = 0;
+        for (const b of buckets) {
+          if (b >= start && b <= end) count++;
+        }
+        observed = count;
+      }
+    }
+    if (expected == null || observed == null) {
+      // Fallback: if irradiance not available, use full-day expected.
+      expected = Math.max(1, Math.round(1440 / step));
+      observed = buckets.size;
+    }
+
+    const pct = (observed / expected) * 100;
+    if (pct >= thr) allowedDays.add(dayKey);
+  }
+  return allowedDays;
 }
 
 function parseRangeTextBar(text) {
@@ -1958,10 +2031,41 @@ export default function KpiAnalysisPage() {
   const [iecWindSpeedMax, setIecWindSpeedMax] = useState("30");
   const [iecPowerMin, setIecPowerMin] = useState("10");
   const [iecPowerMax, setIecPowerMax] = useState(""); // empty = use max of P_DC in data
+  const [iecDataAvailabilityPct, setIecDataAvailabilityPct] = useState("0"); // percent threshold; 0 = disabled
   const [iecStatusFilter, setIecStatusFilter] = useState("all"); // "all" | "valid"
   const [iecStatusHover, setIecStatusHover] = useState(null); // "all" | "valid" | null
   const [iecHelpOpen, setIecHelpOpen] = useState(false);
   const iecHelpRef = useRef(null);
+  const [ghiPopoverOpen, setGhiPopoverOpen] = useState(false);
+  const [ghiDraftValue, setGhiDraftValue] = useState([0, 0]);
+  const ghiTriggerRef = useRef(null);
+  const ghiPopoverRef = useRef(null);
+  const [airPopoverOpen, setAirPopoverOpen] = useState(false);
+  const [airDraftValue, setAirDraftValue] = useState([0, 0]);
+  const airTriggerRef = useRef(null);
+  const airPopoverRef = useRef(null);
+  const [windPopoverOpen, setWindPopoverOpen] = useState(false);
+  const [windDraftValue, setWindDraftValue] = useState([0, 0]);
+  const windTriggerRef = useRef(null);
+  const windPopoverRef = useRef(null);
+  const [powerPopoverOpen, setPowerPopoverOpen] = useState(false);
+  const [powerDraftValue, setPowerDraftValue] = useState([0, 0]);
+  const powerTriggerRef = useRef(null);
+  const powerPopoverRef = useRef(null);
+  const [availabilityPopoverOpen, setAvailabilityPopoverOpen] = useState(false);
+  const [availabilityDraftValue, setAvailabilityDraftValue] = useState([0]);
+  const availabilityTriggerRef = useRef(null);
+  const availabilityPopoverRef = useRef(null);
+  const [inlineEditField, setInlineEditField] = useState(null); // enables manual typing on dblclick
+  const ghiMinInputRef = useRef(null);
+  const ghiMaxInputRef = useRef(null);
+  const airMinInputRef = useRef(null);
+  const airMaxInputRef = useRef(null);
+  const windMinInputRef = useRef(null);
+  const windMaxInputRef = useRef(null);
+  const powerMinInputRef = useRef(null);
+  const powerMaxInputRef = useRef(null);
+  const availabilityInputRef = useRef(null);
   const [kpiFormulasHelpOpen, setKpiFormulasHelpOpen] = useState(false);
   const kpiFormulasHelpRef = useRef(null);
   // Applied IEC61724 + status filter (used for actual filtering; draft = inputs until Apply)
@@ -1973,13 +2077,14 @@ export default function KpiAnalysisPage() {
   const [appliedIecWindSpeedMax, setAppliedIecWindSpeedMax] = useState("30");
   const [appliedIecPowerMin, setAppliedIecPowerMin] = useState("10");
   const [appliedIecPowerMax, setAppliedIecPowerMax] = useState(null); // null = use max P_DC in data
+  const [appliedIecDataAvailabilityPct, setAppliedIecDataAvailabilityPct] = useState(0); // 0 = disabled
   const [appliedIecStatusFilter, setAppliedIecStatusFilter] = useState("all");
 
   const showToast = useCallback((message, type = "success") => {
     setToast({ message, type, key: Date.now() });
   }, []);
 
-  const IEC_DEFAULTS = useMemo(() => ({ ghiMin: "20", ghiMax: "1500", airMin: "-40", airMax: "60", windMin: "0", windMax: "30", powerMin: "10", powerMax: "", status: "all" }), []);
+  const IEC_DEFAULTS = useMemo(() => ({ ghiMin: "20", ghiMax: "1500", airMin: "-40", airMax: "60", windMin: "0", windMax: "30", powerMin: "10", powerMax: "", dataAvailabilityPct: "0", status: "all" }), []);
   const iecAppliedSignature = useMemo(
     () =>
       [
@@ -1991,6 +2096,7 @@ export default function KpiAnalysisPage() {
         appliedIecWindSpeedMax,
         appliedIecPowerMin,
         appliedIecPowerMax ?? "maxPdc",
+        appliedIecDataAvailabilityPct ?? "noAvail",
         appliedIecStatusFilter,
       ].join("|"),
     [
@@ -2002,6 +2108,7 @@ export default function KpiAnalysisPage() {
       appliedIecWindSpeedMax,
       appliedIecPowerMin,
       appliedIecPowerMax,
+      appliedIecDataAvailabilityPct,
       appliedIecStatusFilter,
     ]
   );
@@ -2014,9 +2121,14 @@ export default function KpiAnalysisPage() {
     setAppliedIecWindSpeedMax(iecWindSpeedMax);
     setAppliedIecPowerMin(iecPowerMin);
     setAppliedIecPowerMax(iecPowerMax !== "" && !Number.isNaN(Number(iecPowerMax)) ? iecPowerMax : null);
+    {
+      const n = Number(iecDataAvailabilityPct);
+      const clamped = Number.isFinite(n) ? Math.min(100, Math.max(0, n)) : 0;
+      setAppliedIecDataAvailabilityPct(clamped);
+    }
     setAppliedIecStatusFilter(iecStatusFilter);
     showToast("IEC61724 and status filters applied; data recalculated.");
-  }, [iecGhiMin, iecGhiMax, iecAirTempMin, iecAirTempMax, iecWindSpeedMin, iecWindSpeedMax, iecPowerMin, iecPowerMax, iecStatusFilter, showToast]);
+  }, [iecGhiMin, iecGhiMax, iecAirTempMin, iecAirTempMax, iecWindSpeedMin, iecWindSpeedMax, iecPowerMin, iecPowerMax, iecDataAvailabilityPct, iecStatusFilter, showToast]);
   const handleIecReset = useCallback(() => {
     const d = IEC_DEFAULTS;
     setIecGhiMin(d.ghiMin);
@@ -2027,6 +2139,7 @@ export default function KpiAnalysisPage() {
     setIecWindSpeedMax(d.windMax);
     setIecPowerMin(d.powerMin);
     setIecPowerMax(d.powerMax);
+    setIecDataAvailabilityPct(d.dataAvailabilityPct);
     setIecStatusFilter(d.status);
     setAppliedIecGhiMin(d.ghiMin);
     setAppliedIecGhiMax(d.ghiMax);
@@ -2036,6 +2149,7 @@ export default function KpiAnalysisPage() {
     setAppliedIecWindSpeedMax(d.windMax);
     setAppliedIecPowerMin(d.powerMin);
     setAppliedIecPowerMax(null);
+    setAppliedIecDataAvailabilityPct(Number(d.dataAvailabilityPct) || 0);
     setAppliedIecStatusFilter(d.status);
     showToast("IEC61724 filters reset to defaults and applied.");
   }, [IEC_DEFAULTS, showToast]);
@@ -2066,6 +2180,46 @@ export default function KpiAnalysisPage() {
       }
     } catch (_) {}
   }, []);
+
+  useEffect(() => {
+    if (!availabilityPopoverOpen) return;
+    const raw = Number(iecDataAvailabilityPct);
+    const v = Number.isFinite(raw) ? Math.min(100, Math.max(0, Math.round(raw))) : 0;
+    setAvailabilityDraftValue([v]);
+    const onDown = (e) => {
+      const t = e.target;
+      if (availabilityPopoverRef.current && availabilityPopoverRef.current.contains(t)) return;
+      if (availabilityTriggerRef.current && availabilityTriggerRef.current.contains(t)) return;
+      setAvailabilityPopoverOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [availabilityPopoverOpen, iecDataAvailabilityPct]);
+
+  useEffect(() => {
+    if (!inlineEditField) return;
+    const map = {
+      ghiMin: ghiMinInputRef,
+      ghiMax: ghiMaxInputRef,
+      airMin: airMinInputRef,
+      airMax: airMaxInputRef,
+      windMin: windMinInputRef,
+      windMax: windMaxInputRef,
+      powerMin: powerMinInputRef,
+      powerMax: powerMaxInputRef,
+      availability: availabilityInputRef,
+    };
+    const ref = map[inlineEditField];
+    if (ref?.current) {
+      // next tick to ensure readOnly flips before focusing
+      setTimeout(() => {
+        try {
+          ref.current.focus();
+          ref.current.select?.();
+        } catch (_) {}
+      }, 0);
+    }
+  }, [inlineEditField]);
 
   const handlePvUpload = useCallback(
     async (file) => {
@@ -2102,6 +2256,11 @@ export default function KpiAnalysisPage() {
     [pvData, dateFrom, dateTo]
   );
 
+  const pvRawFilteredRowsForAvailability = useMemo(
+    () => (pvRawData ? filterRowsByDateRange(pvRawData.headers, pvRawData.rows, dateFrom, dateTo) : []),
+    [pvRawData, dateFrom, dateTo]
+  );
+
   // Max P_DC in current (date-filtered) data for Power (kW) filter default
   const maxPdcInData = useMemo(() => {
     if (!pvData?.headers?.length || !pvFilteredRows.length) return null;
@@ -2114,6 +2273,150 @@ export default function KpiAnalysisPage() {
     }
     return max === -Infinity ? null : max;
   }, [pvData, pvFilteredRows]);
+
+  const commitInlineEdit = useCallback((field) => {
+    const clampInt = (n, min, max) => Math.round(Math.min(max, Math.max(min, n)));
+    const maxP = Math.max(0, Number(maxPdcInData) || 0);
+
+    if (field === "ghiMin" || field === "ghiMax") {
+      const a = Number(field === "ghiMin" ? iecGhiMin : iecGhiMax);
+      const v = Number.isFinite(a) ? clampInt(a, 0, 2000) : (field === "ghiMin" ? 0 : 2000);
+      if (field === "ghiMin") setIecGhiMin(String(v)); else setIecGhiMax(String(v));
+      const lo = Number(iecGhiMin), hi = Number(iecGhiMax);
+      if (Number.isFinite(lo) && Number.isFinite(hi) && lo > hi) { setIecGhiMin(String(hi)); setIecGhiMax(String(lo)); }
+    }
+    if (field === "airMin" || field === "airMax") {
+      const a = Number(field === "airMin" ? iecAirTempMin : iecAirTempMax);
+      const v = Number.isFinite(a) ? clampInt(a, -50, 80) : (field === "airMin" ? -50 : 80);
+      if (field === "airMin") setIecAirTempMin(String(v)); else setIecAirTempMax(String(v));
+      const lo = Number(iecAirTempMin), hi = Number(iecAirTempMax);
+      if (Number.isFinite(lo) && Number.isFinite(hi) && lo > hi) { setIecAirTempMin(String(hi)); setIecAirTempMax(String(lo)); }
+    }
+    if (field === "windMin" || field === "windMax") {
+      const a = Number(field === "windMin" ? iecWindSpeedMin : iecWindSpeedMax);
+      const v = Number.isFinite(a) ? clampInt(a, 0, 50) : (field === "windMin" ? 0 : 50);
+      if (field === "windMin") setIecWindSpeedMin(String(v)); else setIecWindSpeedMax(String(v));
+      const lo = Number(iecWindSpeedMin), hi = Number(iecWindSpeedMax);
+      if (Number.isFinite(lo) && Number.isFinite(hi) && lo > hi) { setIecWindSpeedMin(String(hi)); setIecWindSpeedMax(String(lo)); }
+    }
+    if (field === "powerMin" || field === "powerMax") {
+      if (field === "powerMin") {
+        const a = Number(iecPowerMin);
+        const v = Number.isFinite(a) ? clampInt(a, 0, maxP) : 0;
+        setIecPowerMin(String(v));
+      } else {
+        // allow empty max (means "auto/max(P_DC)")
+        if (String(iecPowerMax ?? "").trim() === "") {
+          setIecPowerMax("");
+        } else {
+          const a = Number(iecPowerMax);
+          const v = Number.isFinite(a) ? clampInt(a, 0, maxP) : maxP;
+          setIecPowerMax(String(v));
+        }
+      }
+      const lo = Number(iecPowerMin);
+      const hi = iecPowerMax === "" ? maxP : Number(iecPowerMax);
+      if (Number.isFinite(lo) && Number.isFinite(hi) && lo > hi) { setIecPowerMin(String(Math.round(hi))); setIecPowerMax(String(Math.round(lo))); }
+    }
+    if (field === "availability") {
+      const a = Number(iecDataAvailabilityPct);
+      const v = Number.isFinite(a) ? clampInt(a, 0, 100) : 0;
+      setIecDataAvailabilityPct(String(v));
+    }
+    setInlineEditField(null);
+  }, [
+    iecGhiMin,
+    iecGhiMax,
+    iecAirTempMin,
+    iecAirTempMax,
+    iecWindSpeedMin,
+    iecWindSpeedMax,
+    iecPowerMin,
+    iecPowerMax,
+    iecDataAvailabilityPct,
+    maxPdcInData,
+  ]);
+
+  useEffect(() => {
+    if (!ghiPopoverOpen) return;
+    const rawMin = Number(iecGhiMin);
+    const rawMax = Number(iecGhiMax);
+    let lo = Number.isFinite(rawMin) ? rawMin : 0;
+    let hi = Number.isFinite(rawMax) ? rawMax : 0;
+    lo = Math.min(2000, Math.max(0, lo));
+    hi = Math.min(2000, Math.max(0, hi));
+    if (lo > hi) [lo, hi] = [hi, lo];
+    setGhiDraftValue([Math.round(lo), Math.round(hi)]);
+    const onDown = (e) => {
+      const t = e.target;
+      if (ghiPopoverRef.current && ghiPopoverRef.current.contains(t)) return;
+      if (ghiTriggerRef.current && ghiTriggerRef.current.contains(t)) return;
+      setGhiPopoverOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [ghiPopoverOpen, iecGhiMin, iecGhiMax]);
+
+  useEffect(() => {
+    if (!airPopoverOpen) return;
+    const rawMin = Number(iecAirTempMin);
+    const rawMax = Number(iecAirTempMax);
+    let lo = Number.isFinite(rawMin) ? rawMin : -50;
+    let hi = Number.isFinite(rawMax) ? rawMax : 80;
+    lo = Math.min(80, Math.max(-50, lo));
+    hi = Math.min(80, Math.max(-50, hi));
+    if (lo > hi) [lo, hi] = [hi, lo];
+    setAirDraftValue([Math.round(lo), Math.round(hi)]);
+    const onDown = (e) => {
+      const t = e.target;
+      if (airPopoverRef.current && airPopoverRef.current.contains(t)) return;
+      if (airTriggerRef.current && airTriggerRef.current.contains(t)) return;
+      setAirPopoverOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [airPopoverOpen, iecAirTempMin, iecAirTempMax]);
+
+  useEffect(() => {
+    if (!windPopoverOpen) return;
+    const rawMin = Number(iecWindSpeedMin);
+    const rawMax = Number(iecWindSpeedMax);
+    let lo = Number.isFinite(rawMin) ? rawMin : 0;
+    let hi = Number.isFinite(rawMax) ? rawMax : 50;
+    lo = Math.min(50, Math.max(0, lo));
+    hi = Math.min(50, Math.max(0, hi));
+    if (lo > hi) [lo, hi] = [hi, lo];
+    setWindDraftValue([Math.round(lo), Math.round(hi)]);
+    const onDown = (e) => {
+      const t = e.target;
+      if (windPopoverRef.current && windPopoverRef.current.contains(t)) return;
+      if (windTriggerRef.current && windTriggerRef.current.contains(t)) return;
+      setWindPopoverOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [windPopoverOpen, iecWindSpeedMin, iecWindSpeedMax]);
+
+  useEffect(() => {
+    if (!powerPopoverOpen) return;
+    const max = Math.max(0, Number(maxPdcInData) || 0);
+    const rawMin = Number(iecPowerMin);
+    const rawMax = iecPowerMax === "" ? max : Number(iecPowerMax);
+    let lo = Number.isFinite(rawMin) ? rawMin : 0;
+    let hi = Number.isFinite(rawMax) ? rawMax : max;
+    lo = Math.min(max, Math.max(0, lo));
+    hi = Math.min(max, Math.max(0, hi));
+    if (lo > hi) [lo, hi] = [hi, lo];
+    setPowerDraftValue([Math.round(lo), Math.round(hi)]);
+    const onDown = (e) => {
+      const t = e.target;
+      if (powerPopoverRef.current && powerPopoverRef.current.contains(t)) return;
+      if (powerTriggerRef.current && powerTriggerRef.current.contains(t)) return;
+      setPowerPopoverOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [powerPopoverOpen, iecPowerMin, iecPowerMax, maxPdcInData]);
 
   // IEC61724 filter (uses APPLIED bounds; Apply button commits draft inputs)
   const pvIecFilteredRows = useMemo(() => {
@@ -2165,6 +2468,86 @@ export default function KpiAnalysisPage() {
     });
   }, [pvData, pvIecFilteredRows, appliedIecStatusFilter]);
 
+  const allowedDaysByAvailability = useMemo(() => {
+    if (!pvRawData?.headers?.length || !pvRawFilteredRowsForAvailability.length) return null;
+    if (!Number.isFinite(Number(appliedIecDataAvailabilityPct)) || Number(appliedIecDataAvailabilityPct) <= 0) return null;
+
+    // Apply the same IEC/status rules to the *loaded* (non-resampled) data before counting availability.
+    const headers = pvRawData.headers;
+    const ghiIdx = getColumnIndex(headers, ["GHI", "weather_GHI"]);
+    const airTempIdx = getColumnIndex(headers, ["Air_Temp", "weather_Air_Temp"]);
+    const windIdx = getColumnIndex(headers, ["Wind_speed", "weather_Wind_speed"]);
+    const pdcIdx = getColumnIndex(headers, ["P_DC"]);
+    const statusIdx = getColumnIndex(headers, ["status"]);
+    const ghiMin = Number(appliedIecGhiMin);
+    const ghiMax = Number(appliedIecGhiMax);
+    const airMin = Number(appliedIecAirTempMin);
+    const airMax = Number(appliedIecAirTempMax);
+    const windMin = Number(appliedIecWindSpeedMin);
+    const windMax = Number(appliedIecWindSpeedMax);
+    const powerMin = Number(appliedIecPowerMin) || 0;
+    const powerMax = appliedIecPowerMax != null && appliedIecPowerMax !== "" ? Number(appliedIecPowerMax) : maxPdcInData;
+
+    const filtered = pvRawFilteredRowsForAvailability.filter((row) => {
+      if (!Array.isArray(row)) return false;
+      if (ghiIdx >= 0) {
+        const v = parseFloat(row[ghiIdx]);
+        if (Number.isFinite(v) && (v < ghiMin || v > ghiMax)) return false;
+      }
+      if (airTempIdx >= 0) {
+        const v = parseFloat(row[airTempIdx]);
+        if (Number.isFinite(v) && (v < airMin || v > airMax)) return false;
+      }
+      if (windIdx >= 0) {
+        const v = parseFloat(row[windIdx]);
+        if (Number.isFinite(v) && (v < windMin || v > windMax)) return false;
+      }
+      if (pdcIdx >= 0 && powerMax != null && Number.isFinite(powerMax)) {
+        const v = parseFloat(row[pdcIdx]);
+        if (Number.isFinite(v) && (v < powerMin || v > powerMax)) return false;
+      }
+      if (appliedIecStatusFilter === "valid" && statusIdx >= 0) {
+        const v = String(row[statusIdx] ?? "").toLowerCase().trim();
+        if (v !== "valid") return false;
+      }
+      return true;
+    });
+
+    return computeAllowedDaysByAvailabilityPct(headers, filtered, resamplingStepMinutes, appliedIecDataAvailabilityPct);
+  }, [
+    pvRawData,
+    pvRawFilteredRowsForAvailability,
+    resamplingStepMinutes,
+    appliedIecDataAvailabilityPct,
+    appliedIecGhiMin,
+    appliedIecGhiMax,
+    appliedIecAirTempMin,
+    appliedIecAirTempMax,
+    appliedIecWindSpeedMin,
+    appliedIecWindSpeedMax,
+    appliedIecPowerMin,
+    appliedIecPowerMax,
+    appliedIecStatusFilter,
+    maxPdcInData,
+  ]);
+
+  const pvAvailabilityFilteredRows = useMemo(() => {
+    if (!pvData?.headers?.length || !pvStatusFilteredRows.length) return pvStatusFilteredRows;
+    // If availability threshold is active but no days meet it, allowedDaysByAvailability will be an empty Set
+    // and we should filter everything out (not fall back to unfiltered rows).
+    if (!allowedDaysByAvailability) return pvStatusFilteredRows;
+    const timeIdx = getDateColumnIndex(pvData.headers);
+    if (timeIdx < 0) return pvStatusFilteredRows;
+    return pvStatusFilteredRows.filter((row) => {
+      if (!Array.isArray(row)) return false;
+      const ms = parseDateCell(row[timeIdx]);
+      if (Number.isNaN(ms)) return false;
+      const dayKey = toYMD(new Date(ms));
+      if (!dayKey) return false;
+      return allowedDaysByAvailability.has(dayKey);
+    });
+  }, [pvData, pvStatusFilteredRows, allowedDaysByAvailability]);
+
   // tot_power from system info (config.tot_power or top-level tot_power)
   const totPower = useMemo(() => {
     if (!sysData || typeof sysData !== "object") return null;
@@ -2175,18 +2558,18 @@ export default function KpiAnalysisPage() {
 
   // Hourly resample (mean for numeric, first for others) before daily KPI
   const pvHourlyForKpi = useMemo(() => {
-    if (!pvData?.headers?.length || !pvStatusFilteredRows.length) return null;
-    const out = resampleRowsToHourly(pvData.headers, pvStatusFilteredRows);
+    if (!pvData?.headers?.length || !pvAvailabilityFilteredRows.length) return null;
+    const out = resampleRowsToHourly(pvData.headers, pvAvailabilityFilteredRows);
     return out ? out.rows : null;
-  }, [pvData, pvStatusFilteredRows]);
+  }, [pvData, pvAvailabilityFilteredRows]);
 
   // Daily resample + E_DC, Ya, Yr, PR (for KPI page); uses hourly-resampled data when available
   const dailyKpiData = useMemo(() => {
     if (!pvData?.headers?.length || totPower == null) return null;
-    const rowsForDaily = pvHourlyForKpi ?? pvStatusFilteredRows;
+    const rowsForDaily = pvHourlyForKpi ?? pvAvailabilityFilteredRows;
     if (!rowsForDaily.length) return null;
     return resampleRowsToDaily(pvData.headers, rowsForDaily, totPower, sysData);
-  }, [pvData, pvStatusFilteredRows, pvHourlyForKpi, totPower, sysData]);
+  }, [pvData, pvAvailabilityFilteredRows, pvHourlyForKpi, totPower, sysData]);
 
   // KPI aggregation level for Analysis card (daily, monthly, yearly)
   const [kpiAggregation, setKpiAggregation] = useState("daily");
@@ -2246,6 +2629,7 @@ export default function KpiAnalysisPage() {
       `Air Temp ∈ [${appliedIecAirTempMin}, ${appliedIecAirTempMax}] °C`,
       `Wind speed ∈ [${appliedIecWindSpeedMin}, ${appliedIecWindSpeedMax}] m/s`,
       `Power ∈ [${appliedIecPowerMin}, ${powerMaxDisplay}] kW`,
+      `Data availability ≥ ${appliedIecDataAvailabilityPct != null ? `${appliedIecDataAvailabilityPct}%` : "—"}`,
       `Status: ${appliedIecStatusFilter === "valid" ? "Valid only" : "All statuses"}`,
     ];
     return {
@@ -2267,6 +2651,7 @@ export default function KpiAnalysisPage() {
     appliedIecWindSpeedMax,
     appliedIecPowerMin,
     appliedIecPowerMax,
+    appliedIecDataAvailabilityPct,
     appliedIecStatusFilter,
     maxPdcInData,
   ]);
@@ -2570,7 +2955,7 @@ export default function KpiAnalysisPage() {
               onDateToChange={setDateTo}
               onClear={() => { setDateFrom(null); setDateTo(null); }}
               totalRows={pvData.rows?.length ?? 0}
-              filteredRows={pvStatusFilteredRows.length}
+              filteredRows={pvAvailabilityFilteredRows.length}
               accentColor={O}
               resamplingStepMinutes={resamplingStepMinutes}
               onResamplingStepChange={setResamplingStepMinutes}
@@ -2727,19 +3112,105 @@ export default function KpiAnalysisPage() {
               </div>
               <div style={{ marginTop: 4, paddingTop: 14, borderTop: "1px solid #E2E8F0", display: "flex", flexDirection: "column", gap: 10, width: "100%" }}>
                 <div style={{ display: "flex", flexDirection: "row", alignItems: "center", justifyContent: "flex-start", gap: 16, flexWrap: "nowrap", width: "100%", minWidth: 0 }}>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14, alignItems: "stretch", flex: "1 1 auto", minWidth: 0 }}>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 14, alignItems: "stretch", flex: "1 1 auto", minWidth: 0 }}>
                   {/* GHI */}
                   <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "3px 4px", background: "#fff", borderRadius: 6, border: "1px solid #E2E8F0", minWidth: 0, width: "92%", maxWidth: "100%", boxSizing: "border-box" }}>
                     <span style={{ fontFamily: FONT, fontSize: 7, fontWeight: 600, color: "#64748B", letterSpacing: "0.02em", textAlign: "center", width: "100%" }}>GHI (W/m²)</span>
-                    <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-                      <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
-                        <input type="text" inputMode="decimal" className="kpi-iec-num-input" value={iecGhiMin} onChange={(e) => setIecGhiMin(e.target.value)} style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box" }} />
+                    <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 2 }}>
+                      <div ref={ghiTriggerRef} style={{ flex: 1, minWidth: 0, position: "relative" }}>
+                        <input
+                          type="text"
+                          ref={ghiMinInputRef}
+                          readOnly={inlineEditField !== "ghiMin"}
+                          className="kpi-iec-num-input"
+                          value={iecGhiMin}
+                          onChange={(e) => setIecGhiMin(e.target.value)}
+                          onClick={(e) => { if (e.detail > 1) return; if (inlineEditField) return; setGhiPopoverOpen(true); }}
+                          onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); setInlineEditField("ghiMin"); }}
+                          onBlur={() => inlineEditField === "ghiMin" && commitInlineEdit("ghiMin")}
+                          onKeyDown={(e) => e.key === "Enter" && commitInlineEdit("ghiMin")}
+                          style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box", cursor: inlineEditField === "ghiMin" ? "text" : "pointer" }}
+                        />
                       </div>
                       <div style={{ width: 16, height: 26, display: "flex", alignItems: "center", justifyContent: "center", color: "#cbd5e1", flexShrink: 0, fontSize: 9 }}>→</div>
                       <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
-                        <input type="text" inputMode="decimal" className="kpi-iec-num-input" value={iecGhiMax} onChange={(e) => setIecGhiMax(e.target.value)} style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box" }} />
+                        <input
+                          type="text"
+                          ref={ghiMaxInputRef}
+                          readOnly={inlineEditField !== "ghiMax"}
+                          className="kpi-iec-num-input"
+                          value={iecGhiMax}
+                          onChange={(e) => setIecGhiMax(e.target.value)}
+                          onClick={(e) => { if (e.detail > 1) return; if (inlineEditField) return; setGhiPopoverOpen(true); }}
+                          onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); setInlineEditField("ghiMax"); }}
+                          onBlur={() => inlineEditField === "ghiMax" && commitInlineEdit("ghiMax")}
+                          onKeyDown={(e) => e.key === "Enter" && commitInlineEdit("ghiMax")}
+                          style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box", cursor: inlineEditField === "ghiMax" ? "text" : "pointer" }}
+                        />
                       </div>
+                      {ghiPopoverOpen && (
+                        <div
+                          ref={ghiPopoverRef}
+                          style={{
+                            position: "absolute",
+                            top: "100%",
+                            left: "50%",
+                            transform: "translateX(-50%)",
+                            marginTop: 10,
+                            zIndex: 1005,
+                            background: "#fff",
+                            border: "1px solid #E2E8F0",
+                            borderRadius: 12,
+                            boxShadow: "0 18px 45px rgba(15, 23, 42, 0.14)",
+                            padding: 14,
+                            width: 320,
+                            overflow: "hidden",
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+                            <span style={{ fontFamily: FONT, fontSize: 12, fontWeight: 500, color: "#0F172A" }}>GHI range (W/m²)</span>
+                            <button
+                              type="button"
+                              onClick={() => setGhiPopoverOpen(false)}
+                              aria-label="Cancel"
+                              style={{ border: "1px solid #E2E8F0", background: "#fff", borderRadius: 8, padding: "4px 8px", fontFamily: FONT, fontSize: 11, fontWeight: 700, color: "#64748B", cursor: "pointer" }}
+                            >
+                              <CancelOutlined sx={{ fontSize: 18 }} />
+                            </button>
+                          </div>
+                          <div className="flex items-center justify-center pt-10 pb-2">
+                            <Slider
+                              value={ghiDraftValue}
+                              onValueChange={(v) => {
+                                setGhiDraftValue(v);
+                                const a = Number(v?.[0]);
+                                const b = Number(v?.[1]);
+                                let lo = Number.isFinite(a) ? a : 0;
+                                let hi = Number.isFinite(b) ? b : 0;
+                                lo = Math.min(2000, Math.max(0, Math.round(lo)));
+                                hi = Math.min(2000, Math.max(0, Math.round(hi)));
+                                if (lo > hi) [lo, hi] = [hi, lo];
+                                setIecGhiMin(String(lo));
+                                setIecGhiMax(String(hi));
+                              }}
+                              min={0}
+                              max={2000}
+                              step={1}
+                              aria-label="GHI range"
+                            />
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, gap: 8 }}>
+                            <button
+                              type="button"
+                              onClick={() => { setIecGhiMin(IEC_DEFAULTS.ghiMin); setIecGhiMax(IEC_DEFAULTS.ghiMax); setGhiPopoverOpen(false); }}
+                              style={{ flex: 1, border: "1px solid #E2E8F0", background: "#fff", borderRadius: 10, padding: "8px 10px", fontFamily: FONT, fontSize: 11, fontWeight: 700, color: "#64748B", cursor: "pointer" }}
+                            >
+                              Reset
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                   </div>
@@ -2747,14 +3218,100 @@ export default function KpiAnalysisPage() {
                   <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "3px 4px", background: "#fff", borderRadius: 6, border: "1px solid #E2E8F0", minWidth: 0, width: "92%", maxWidth: "100%", boxSizing: "border-box" }}>
                     <span style={{ fontFamily: FONT, fontSize: 7, fontWeight: 600, color: "#64748B", letterSpacing: "0.02em", textAlign: "center", width: "100%" }}>T_amb (°C)</span>
-                    <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-                      <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
-                        <input type="text" inputMode="decimal" className="kpi-iec-num-input" value={iecAirTempMin} onChange={(e) => setIecAirTempMin(e.target.value)} style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box" }} />
+                    <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 2 }}>
+                      <div ref={airTriggerRef} style={{ flex: 1, minWidth: 0, position: "relative" }}>
+                        <input
+                          type="text"
+                          ref={airMinInputRef}
+                          readOnly={inlineEditField !== "airMin"}
+                          className="kpi-iec-num-input"
+                          value={iecAirTempMin}
+                          onChange={(e) => setIecAirTempMin(e.target.value)}
+                          onClick={(e) => { if (e.detail > 1) return; if (inlineEditField) return; setAirPopoverOpen(true); }}
+                          onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); setInlineEditField("airMin"); }}
+                          onBlur={() => inlineEditField === "airMin" && commitInlineEdit("airMin")}
+                          onKeyDown={(e) => e.key === "Enter" && commitInlineEdit("airMin")}
+                          style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box", cursor: inlineEditField === "airMin" ? "text" : "pointer" }}
+                        />
                       </div>
                       <div style={{ width: 16, height: 26, display: "flex", alignItems: "center", justifyContent: "center", color: "#cbd5e1", flexShrink: 0, fontSize: 9 }}>→</div>
                       <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
-                        <input type="text" inputMode="decimal" className="kpi-iec-num-input" value={iecAirTempMax} onChange={(e) => setIecAirTempMax(e.target.value)} style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box" }} />
+                        <input
+                          type="text"
+                          ref={airMaxInputRef}
+                          readOnly={inlineEditField !== "airMax"}
+                          className="kpi-iec-num-input"
+                          value={iecAirTempMax}
+                          onChange={(e) => setIecAirTempMax(e.target.value)}
+                          onClick={(e) => { if (e.detail > 1) return; if (inlineEditField) return; setAirPopoverOpen(true); }}
+                          onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); setInlineEditField("airMax"); }}
+                          onBlur={() => inlineEditField === "airMax" && commitInlineEdit("airMax")}
+                          onKeyDown={(e) => e.key === "Enter" && commitInlineEdit("airMax")}
+                          style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box", cursor: inlineEditField === "airMax" ? "text" : "pointer" }}
+                        />
                       </div>
+                      {airPopoverOpen && (
+                        <div
+                          ref={airPopoverRef}
+                          style={{
+                            position: "absolute",
+                            top: "100%",
+                            left: "50%",
+                            transform: "translateX(-50%)",
+                            marginTop: 10,
+                            zIndex: 1005,
+                            background: "#fff",
+                            border: "1px solid #E2E8F0",
+                            borderRadius: 12,
+                            boxShadow: "0 18px 45px rgba(15, 23, 42, 0.14)",
+                            padding: 14,
+                            width: 320,
+                            overflow: "hidden",
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+                            <span style={{ fontFamily: FONT, fontSize: 12, fontWeight: 500, color: "#0F172A" }}>T_amb range (°C)</span>
+                            <button
+                              type="button"
+                              onClick={() => setAirPopoverOpen(false)}
+                              aria-label="Cancel"
+                              style={{ border: "1px solid #E2E8F0", background: "#fff", borderRadius: 8, padding: "4px 8px", fontFamily: FONT, fontSize: 11, fontWeight: 700, color: "#64748B", cursor: "pointer" }}
+                            >
+                              <CancelOutlined sx={{ fontSize: 18 }} />
+                            </button>
+                          </div>
+                          <div className="flex items-center justify-center pt-10 pb-2">
+                            <Slider
+                              value={airDraftValue}
+                              onValueChange={(v) => {
+                                setAirDraftValue(v);
+                                const a = Number(v?.[0]);
+                                const b = Number(v?.[1]);
+                                let lo = Number.isFinite(a) ? a : -50;
+                                let hi = Number.isFinite(b) ? b : 80;
+                                lo = Math.min(80, Math.max(-50, Math.round(lo)));
+                                hi = Math.min(80, Math.max(-50, Math.round(hi)));
+                                if (lo > hi) [lo, hi] = [hi, lo];
+                                setIecAirTempMin(String(lo));
+                                setIecAirTempMax(String(hi));
+                              }}
+                              min={-50}
+                              max={80}
+                              step={1}
+                              aria-label="Air temperature range"
+                            />
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, gap: 8 }}>
+                            <button
+                              type="button"
+                              onClick={() => { setIecAirTempMin(IEC_DEFAULTS.airMin); setIecAirTempMax(IEC_DEFAULTS.airMax); setAirPopoverOpen(false); }}
+                              style={{ flex: 1, border: "1px solid #E2E8F0", background: "#fff", borderRadius: 10, padding: "8px 10px", fontFamily: FONT, fontSize: 11, fontWeight: 700, color: "#64748B", cursor: "pointer" }}
+                            >
+                              Reset
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                   </div>
@@ -2762,14 +3319,100 @@ export default function KpiAnalysisPage() {
                   <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "3px 4px", background: "#fff", borderRadius: 6, border: "1px solid #E2E8F0", minWidth: 0, width: "92%", maxWidth: "100%", boxSizing: "border-box" }}>
                     <span style={{ fontFamily: FONT, fontSize: 7, fontWeight: 600, color: "#64748B", letterSpacing: "0.02em", textAlign: "center", width: "100%" }}>Wind (m/s)</span>
-                    <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-                      <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
-                        <input type="text" inputMode="decimal" className="kpi-iec-num-input" value={iecWindSpeedMin} onChange={(e) => setIecWindSpeedMin(e.target.value)} style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box" }} />
+                    <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 2 }}>
+                      <div ref={windTriggerRef} style={{ flex: 1, minWidth: 0, position: "relative" }}>
+                        <input
+                          type="text"
+                          ref={windMinInputRef}
+                          readOnly={inlineEditField !== "windMin"}
+                          className="kpi-iec-num-input"
+                          value={iecWindSpeedMin}
+                          onChange={(e) => setIecWindSpeedMin(e.target.value)}
+                          onClick={(e) => { if (e.detail > 1) return; if (inlineEditField) return; setWindPopoverOpen(true); }}
+                          onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); setInlineEditField("windMin"); }}
+                          onBlur={() => inlineEditField === "windMin" && commitInlineEdit("windMin")}
+                          onKeyDown={(e) => e.key === "Enter" && commitInlineEdit("windMin")}
+                          style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box", cursor: inlineEditField === "windMin" ? "text" : "pointer" }}
+                        />
                       </div>
                       <div style={{ width: 16, height: 26, display: "flex", alignItems: "center", justifyContent: "center", color: "#cbd5e1", flexShrink: 0, fontSize: 9 }}>→</div>
                       <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
-                        <input type="text" inputMode="decimal" className="kpi-iec-num-input" value={iecWindSpeedMax} onChange={(e) => setIecWindSpeedMax(e.target.value)} style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box" }} />
+                        <input
+                          type="text"
+                          ref={windMaxInputRef}
+                          readOnly={inlineEditField !== "windMax"}
+                          className="kpi-iec-num-input"
+                          value={iecWindSpeedMax}
+                          onChange={(e) => setIecWindSpeedMax(e.target.value)}
+                          onClick={(e) => { if (e.detail > 1) return; if (inlineEditField) return; setWindPopoverOpen(true); }}
+                          onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); setInlineEditField("windMax"); }}
+                          onBlur={() => inlineEditField === "windMax" && commitInlineEdit("windMax")}
+                          onKeyDown={(e) => e.key === "Enter" && commitInlineEdit("windMax")}
+                          style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box", cursor: inlineEditField === "windMax" ? "text" : "pointer" }}
+                        />
                       </div>
+                      {windPopoverOpen && (
+                        <div
+                          ref={windPopoverRef}
+                          style={{
+                            position: "absolute",
+                            top: "100%",
+                            left: "50%",
+                            transform: "translateX(-50%)",
+                            marginTop: 10,
+                            zIndex: 1005,
+                            background: "#fff",
+                            border: "1px solid #E2E8F0",
+                            borderRadius: 12,
+                            boxShadow: "0 18px 45px rgba(15, 23, 42, 0.14)",
+                            padding: 14,
+                            width: 320,
+                            overflow: "hidden",
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+                            <span style={{ fontFamily: FONT, fontSize: 12, fontWeight: 500, color: "#0F172A" }}>Wind range (m/s)</span>
+                            <button
+                              type="button"
+                              onClick={() => setWindPopoverOpen(false)}
+                              aria-label="Cancel"
+                              style={{ border: "1px solid #E2E8F0", background: "#fff", borderRadius: 8, padding: "4px 8px", fontFamily: FONT, fontSize: 11, fontWeight: 700, color: "#64748B", cursor: "pointer" }}
+                            >
+                              <CancelOutlined sx={{ fontSize: 18 }} />
+                            </button>
+                          </div>
+                          <div className="flex items-center justify-center pt-10 pb-2">
+                            <Slider
+                              value={windDraftValue}
+                              onValueChange={(v) => {
+                                setWindDraftValue(v);
+                                const a = Number(v?.[0]);
+                                const b = Number(v?.[1]);
+                                let lo = Number.isFinite(a) ? a : 0;
+                                let hi = Number.isFinite(b) ? b : 50;
+                                lo = Math.min(50, Math.max(0, Math.round(lo)));
+                                hi = Math.min(50, Math.max(0, Math.round(hi)));
+                                if (lo > hi) [lo, hi] = [hi, lo];
+                                setIecWindSpeedMin(String(lo));
+                                setIecWindSpeedMax(String(hi));
+                              }}
+                              min={0}
+                              max={50}
+                              step={1}
+                              aria-label="Wind range"
+                            />
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, gap: 8 }}>
+                            <button
+                              type="button"
+                              onClick={() => { setIecWindSpeedMin(IEC_DEFAULTS.windMin); setIecWindSpeedMax(IEC_DEFAULTS.windMax); setWindPopoverOpen(false); }}
+                              style={{ flex: 1, border: "1px solid #E2E8F0", background: "#fff", borderRadius: 10, padding: "8px 10px", fontFamily: FONT, fontSize: 11, fontWeight: 700, color: "#64748B", cursor: "pointer" }}
+                            >
+                              Reset
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                   </div>
@@ -2777,16 +3420,189 @@ export default function KpiAnalysisPage() {
                   <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "3px 4px", background: "#fff", borderRadius: 6, border: "1px solid #E2E8F0", minWidth: 0, width: "92%", maxWidth: "100%", boxSizing: "border-box" }}>
                     <span style={{ fontFamily: FONT, fontSize: 7, fontWeight: 600, color: "#64748B", letterSpacing: "0.02em", textAlign: "center", width: "100%" }}>Power (kW)</span>
-                    <div style={{ display: "flex", alignItems: "center", gap: 2 }}>
-                      <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
-                        <input type="text" inputMode="decimal" className="kpi-iec-num-input" value={iecPowerMin} onChange={(e) => setIecPowerMin(e.target.value)} style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box" }} />
+                    <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 2 }}>
+                      <div ref={powerTriggerRef} style={{ flex: 1, minWidth: 0, position: "relative" }}>
+                        <input
+                          type="text"
+                          ref={powerMinInputRef}
+                          readOnly={inlineEditField !== "powerMin"}
+                          className="kpi-iec-num-input"
+                          value={iecPowerMin}
+                          onChange={(e) => setIecPowerMin(e.target.value)}
+                          onClick={(e) => { if (e.detail > 1) return; if (inlineEditField) return; setPowerPopoverOpen(true); }}
+                          onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); setInlineEditField("powerMin"); }}
+                          onBlur={() => inlineEditField === "powerMin" && commitInlineEdit("powerMin")}
+                          onKeyDown={(e) => e.key === "Enter" && commitInlineEdit("powerMin")}
+                          style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box", cursor: inlineEditField === "powerMin" ? "text" : "pointer" }}
+                        />
                       </div>
                       <div style={{ width: 16, height: 26, display: "flex", alignItems: "center", justifyContent: "center", color: "#cbd5e1", flexShrink: 0, fontSize: 9 }}>→</div>
                       <div style={{ flex: 1, minWidth: 0, position: "relative" }}>
-                        <input type="text" inputMode="decimal" className="kpi-iec-num-input" value={iecPowerMax !== "" ? iecPowerMax : (maxPdcInData != null ? String(maxPdcInData) : "")} onChange={(e) => setIecPowerMax(e.target.value)} placeholder={maxPdcInData != null ? String(maxPdcInData) : "—"} style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box" }} />
+                        <input
+                          type="text"
+                          ref={powerMaxInputRef}
+                          readOnly={inlineEditField !== "powerMax"}
+                          className="kpi-iec-num-input"
+                          value={iecPowerMax !== "" ? iecPowerMax : (maxPdcInData != null ? String(maxPdcInData) : "")}
+                          onChange={(e) => setIecPowerMax(e.target.value)}
+                          onClick={(e) => { if (e.detail > 1) return; if (inlineEditField) return; setPowerPopoverOpen(true); }}
+                          onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); setInlineEditField("powerMax"); }}
+                          onBlur={() => inlineEditField === "powerMax" && commitInlineEdit("powerMax")}
+                          onKeyDown={(e) => e.key === "Enter" && commitInlineEdit("powerMax")}
+                          placeholder={maxPdcInData != null ? String(maxPdcInData) : "—"}
+                          style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box", cursor: inlineEditField === "powerMax" ? "text" : "pointer" }}
+                        />
                       </div>
+                      {powerPopoverOpen && (
+                        <div
+                          ref={powerPopoverRef}
+                          style={{
+                            position: "absolute",
+                            top: "100%",
+                            left: "50%",
+                            transform: "translateX(-50%)",
+                            marginTop: 10,
+                            zIndex: 1005,
+                            background: "#fff",
+                            border: "1px solid #E2E8F0",
+                            borderRadius: 12,
+                            boxShadow: "0 18px 45px rgba(15, 23, 42, 0.14)",
+                            padding: 14,
+                            width: 320,
+                            overflow: "hidden",
+                          }}
+                        >
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+                            <span style={{ fontFamily: FONT, fontSize: 12, fontWeight: 500, color: "#0F172A" }}>Power range (kW)</span>
+                            <button
+                              type="button"
+                              onClick={() => setPowerPopoverOpen(false)}
+                              aria-label="Cancel"
+                              style={{ border: "1px solid #E2E8F0", background: "#fff", borderRadius: 8, padding: "4px 8px", fontFamily: FONT, fontSize: 11, fontWeight: 700, color: "#64748B", cursor: "pointer" }}
+                            >
+                              <CancelOutlined sx={{ fontSize: 18 }} />
+                            </button>
+                          </div>
+                          <div className="flex items-center justify-center pt-10 pb-2">
+                            <Slider
+                              value={powerDraftValue}
+                              onValueChange={(v) => {
+                                setPowerDraftValue(v);
+                                const a = Number(v?.[0]);
+                                const b = Number(v?.[1]);
+                                const max = Math.max(0, Number(maxPdcInData) || 0);
+                                let lo = Number.isFinite(a) ? a : 0;
+                                let hi = Number.isFinite(b) ? b : max;
+                                lo = Math.min(max, Math.max(0, Math.round(lo)));
+                                hi = Math.min(max, Math.max(0, Math.round(hi)));
+                                if (lo > hi) [lo, hi] = [hi, lo];
+                                setIecPowerMin(String(lo));
+                                setIecPowerMax(String(hi));
+                              }}
+                              min={0}
+                              max={Math.max(1, Math.round(Number(maxPdcInData) || 0))}
+                              step={1}
+                              aria-label="Power range"
+                            />
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, gap: 8 }}>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIecPowerMin(IEC_DEFAULTS.powerMin);
+                                setIecPowerMax(IEC_DEFAULTS.powerMax);
+                                setPowerPopoverOpen(false);
+                              }}
+                              style={{ flex: 1, border: "1px solid #E2E8F0", background: "#fff", borderRadius: 10, padding: "8px 10px", fontFamily: FONT, fontSize: 11, fontWeight: 700, color: "#64748B", cursor: "pointer" }}
+                            >
+                              Reset
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
+                  </div>
+                  {/* Data Availability (%) */}
+                  <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "3px 4px", background: "#fff", borderRadius: 6, border: "1px solid #E2E8F0", minWidth: 0, width: "92%", maxWidth: "100%", boxSizing: "border-box" }}>
+                      <span style={{ fontFamily: FONT, fontSize: 7, fontWeight: 600, color: "#64748B", letterSpacing: "0.02em", textAlign: "center", width: "100%" }}>Data Availability (%)</span>
+                      <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 2 }}>
+                        <div ref={availabilityTriggerRef} style={{ flex: 1, minWidth: 0, position: "relative" }}>
+                          <input
+                            type="text"
+                            ref={availabilityInputRef}
+                            readOnly={inlineEditField !== "availability"}
+                            className="kpi-iec-num-input"
+                            value={iecDataAvailabilityPct}
+                            onChange={(e) => setIecDataAvailabilityPct(e.target.value)}
+                            onClick={(e) => { if (e.detail > 1) return; if (inlineEditField) return; setAvailabilityPopoverOpen(true); }}
+                            onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); setInlineEditField("availability"); }}
+                            onBlur={() => inlineEditField === "availability" && commitInlineEdit("availability")}
+                            onKeyDown={(e) => e.key === "Enter" && commitInlineEdit("availability")}
+                            placeholder="Click to set"
+                            style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box", cursor: inlineEditField === "availability" ? "text" : "pointer" }}
+                          />
+                        </div>
+                        <div style={{ width: 16, height: 26, display: "flex", alignItems: "center", justifyContent: "center", color: "#cbd5e1", flexShrink: 0, fontSize: 10 }}>%</div>
+                        {availabilityPopoverOpen && (
+                          <div
+                            ref={availabilityPopoverRef}
+                            style={{
+                              position: "absolute",
+                              top: "100%",
+                              left: "50%",
+                              transform: "translateX(-50%)",
+                              marginTop: 10,
+                              zIndex: 1005,
+                              background: "#fff",
+                              border: "1px solid #E2E8F0",
+                              borderRadius: 12,
+                              boxShadow: "0 18px 45px rgba(15, 23, 42, 0.14)",
+                              padding: 14,
+                              width: 280,
+                              overflow: "hidden",
+                            }}
+                          >
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+                              <span style={{ fontFamily: FONT, fontSize: 12, fontWeight: 500, color: "#0F172A" }}>Data availability Treshhold (%)</span>
+                              <button
+                                type="button"
+                                onClick={() => setAvailabilityPopoverOpen(false)}
+                                aria-label="Cancel"
+                                style={{ border: "1px solid #E2E8F0", background: "#fff", borderRadius: 8, padding: "4px 8px", fontFamily: FONT, fontSize: 11, fontWeight: 700, color: "#64748B", cursor: "pointer" }}
+                              >
+                                <CancelOutlined sx={{ fontSize: 18 }} />
+                              </button>
+                            </div>
+                            <div className="flex items-center justify-center pt-8 pb-2">
+                              <Slider
+                                value={availabilityDraftValue}
+                                onValueChange={(v) => {
+                                  setAvailabilityDraftValue(v);
+                                  const n = Number(v?.[0]);
+                                  const clamped = Number.isFinite(n) ? Math.min(100, Math.max(0, Math.round(n))) : 0;
+                                  setIecDataAvailabilityPct(String(clamped));
+                                }}
+                                min={0}
+                                max={100}
+                                step={1}
+                                aria-label="Data availability"
+                              />
+                            </div>
+                            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, gap: 8 }}>
+                              <button
+                                type="button"
+                                onClick={() => { setIecDataAvailabilityPct("0"); setAvailabilityPopoverOpen(false); }}
+                                style={{ flex: 1, border: "1px solid #E2E8F0", background: "#fff", borderRadius: 10, padding: "8px 10px", fontFamily: FONT, fontSize: 11, fontWeight: 700, color: "#64748B", cursor: "pointer" }}
+                              >
+                                Reset
+                              </button>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
@@ -2807,23 +3623,21 @@ export default function KpiAnalysisPage() {
                       padding: "0 15px",
                       fontFamily: FONT,
                       fontSize: 11,
-                      fontWeight: 600,
+                      fontWeight: 500,
                       color:
                         iecStatusFilter === "all"
                           ? "#5f7696"
-                          : "#929fb4",
+                          : "#CBD5E1",
                       background:
                         iecStatusFilter === "all"
                           ? iecStatusHover === "all"
                             ? "#c5def8"
                             : "#cfe4fa"
-                          : iecStatusHover === "all"
-                          ? "#e5e7eb"
-                          : "#f1f5f9",
+                          : "#F8FAFC",
                       border:
                         iecStatusFilter === "all"
                           ? "1px solid #d7e5f4"
-                          : "1px solid #d4d7dd",
+                          : "1px solid #E2E8F0",
                       borderRadius: 9999,
                       cursor: "pointer",
                       boxShadow: "none",
@@ -2846,23 +3660,21 @@ export default function KpiAnalysisPage() {
                       padding: "0 15px",
                       fontFamily: FONT,
                       fontSize: 11,
-                      fontWeight: 600,
+                      fontWeight: 500,
                       color:
                         iecStatusFilter === "valid"
                           ? "#4f8a68"
-                          : "#8ba099",
+                          : "#CBD5E1",
                       background:
                         iecStatusFilter === "valid"
                           ? iecStatusHover === "valid"
                             ? "#e6f4ec"
                             : "#edf8f2"
-                          : iecStatusHover === "valid"
-                          ? "#e5e7eb"
-                          : "#f1f5f9",
+                          : "#F8FAFC",
                       border:
                         iecStatusFilter === "valid"
                           ? "1px solid #cfe8dc"
-                          : "1px solid #d4d7dd",
+                          : "1px solid #E2E8F0",
                       borderRadius: 9999,
                       cursor: "pointer",
                       boxShadow: "none",
@@ -2877,7 +3689,7 @@ export default function KpiAnalysisPage() {
                 <div style={{ display: "flex", alignItems: "center", gap: 8, marginLeft: "auto" }}>
                   <span style={{ fontSize: 10, color: "#64748B", fontFamily: FONT }}>Rows outside ranges excluded.</span>
                   <span style={{ fontSize: 10, fontWeight: 600, color: KPI, background: `${KPI}14`, padding: "2px 8px", borderRadius: 6, fontFamily: MONO }}>
-                    {pvStatusFilteredRows.length} / {pvFilteredRows.length} rows
+                    {pvAvailabilityFilteredRows.length} / {pvFilteredRows.length} rows
                   </span>
                 </div>
               </div>
@@ -2909,7 +3721,7 @@ export default function KpiAnalysisPage() {
                 icon={<SolarPowerOutlined sx={{ fontSize: 20, color: O }} />}
                 color={O}
                 headers={pvData.headers}
-                rows={pvStatusFilteredRows}
+                rows={pvAvailabilityFilteredRows}
                 resampled={pvData.resampled}
                 originalRows={pvData.originalRows}
                 resampledStepMinutes={pvData.resampledStepMinutes}
@@ -2932,7 +3744,7 @@ export default function KpiAnalysisPage() {
                   title="PV & Weather Data"
                   color={O}
                   headers={pvData.headers}
-                  rows={pvStatusFilteredRows}
+                  rows={pvAvailabilityFilteredRows}
                   fullRowsForGaps={pvFilteredRows}
                   defaultYHeader="P_DC"
                   defaultRightYHeader="weather_GTI"
