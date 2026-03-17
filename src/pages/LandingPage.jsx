@@ -1,4 +1,4 @@
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { cloneElement, useEffect, useRef, useState } from "react";
 import {
   CloudDownloadOutlined,
@@ -361,6 +361,15 @@ function ToolCard({ icon, title, subtitle, color, desc, tags, path }) {
 }
 
 function PlatformModuleCard({ number, icon, title, subtitle, desc, tags, path, expanded, onMouseEnter, onMouseLeave, isWorkflow }) {
+  const navigate = useNavigate();
+
+  const handleCardClick = (e) => {
+    if (path && !e.target.closest("a")) {
+      e.stopPropagation();
+      navigate(path);
+    }
+  };
+
   const cardContent = (
     <>
       {/* Collapsed: vertical label + number */}
@@ -407,27 +416,35 @@ function PlatformModuleCard({ number, icon, title, subtitle, desc, tags, path, e
         </div>
       </div>
 
-      {/* Expanded: badge top-left, icon top-right, label → title → desc → tags → link */}
-      <div style={{
-        position: "absolute",
-        inset: 0,
-        zIndex: 2,
-        padding: "28px 32px 28px 32px",
-        display: "flex",
-        flexDirection: "column",
-        opacity: expanded ? 1 : 0,
-        pointerEvents: expanded ? "auto" : "none",
-        transition: "opacity 0.25s ease",
-        overflow: "hidden",
-      }}>
+      {/* Expanded: badge top-left, icon top-right, label → title → desc → tags → link — whole area clickable to open module */}
+      <div
+        className="platform-module-card-inner"
+        role={path ? "button" : undefined}
+        tabIndex={path && expanded ? 0 : undefined}
+        onClick={handleCardClick}
+        onKeyDown={path && expanded ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigate(path); } } : undefined}
+        style={{
+          position: "absolute",
+          inset: 0,
+          zIndex: 2,
+          padding: "28px 32px 28px 32px",
+          display: "flex",
+          flexDirection: "column",
+          opacity: expanded ? 1 : 0,
+          pointerEvents: expanded ? "auto" : "none",
+          transition: "opacity 0.25s ease",
+          overflow: "hidden",
+          cursor: path ? "pointer" : "default",
+        }}
+      >
         {/* Icon top-right (white) */}
         {icon && (
-          <div style={{ position: "absolute", top: 28, right: 28, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div className="platform-module-card-icon" style={{ position: "absolute", top: 28, right: 28, display: "flex", alignItems: "center", justifyContent: "center" }}>
             {cloneElement(icon, { sx: { ...icon.props?.sx, color: "#fff", fontSize: 26 } })}
           </div>
         )}
         {/* Badge */}
-        <div style={{
+        <div className="platform-module-badge" style={{
           width: 48,
           height: 48,
           borderRadius: 999,
@@ -444,16 +461,16 @@ function PlatformModuleCard({ number, icon, title, subtitle, desc, tags, path, e
           {number}
         </div>
         {/* Category label */}
-        <div style={{ fontSize: 12, fontWeight: 600, color: G, marginBottom: 6, letterSpacing: "0.02em" }}>
+        <div className="platform-module-subtitle" style={{ fontSize: 12, fontWeight: 600, color: G, marginBottom: 6, letterSpacing: "0.02em" }}>
           {subtitle || "Core workflow module"}
         </div>
         {/* Title */}
-        <h2 style={{ fontFamily: "Inter, Arial, sans-serif", margin: "0 0 10px", fontSize: "clamp(1.4rem, 2.8vw, 1.85rem)", lineHeight: 1.05, fontWeight: 800, letterSpacing: "-0.03em", color: "#f3f4f6" }}>{title}</h2>
+        <h2 className="platform-module-title" style={{ fontFamily: "Inter, Arial, sans-serif", margin: "0 0 10px", fontSize: "clamp(1.4rem, 2.8vw, 1.85rem)", lineHeight: 1.05, fontWeight: 800, letterSpacing: "-0.03em", color: "#f3f4f6" }}>{title}</h2>
         {/* Description */}
-        {desc && <p style={{ margin: "0 0 16px", fontSize: 13, lineHeight: 1.5, color: "rgba(243,244,246,0.7)", flex: 1 }}>{desc}</p>}
+        {desc && <p className="platform-module-desc" style={{ margin: "0 0 16px", fontSize: 13, lineHeight: 1.5, color: "rgba(243,244,246,0.7)", flex: 1 }}>{desc}</p>}
         {/* Tags as pill badges */}
         {tags && tags.length > 0 && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
+          <div className="platform-module-tags" style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
             {tags.slice(0, 4).map(t => (
               <span key={t} style={{
                 padding: "6px 14px",
@@ -469,9 +486,9 @@ function PlatformModuleCard({ number, icon, title, subtitle, desc, tags, path, e
             ))}
           </div>
         )}
-        {/* Link */}
+        {/* Link - flexShrink: 0 so it stays visible */}
         {path ? (
-          <Link to={path}
+          <Link to={path} onClick={e => e.stopPropagation()} className="platform-module-link"
             onMouseEnter={e => {
               e.currentTarget.style.color = G;
               e.currentTarget.style.transform = "translateX(2px)";
@@ -485,11 +502,12 @@ function PlatformModuleCard({ number, icon, title, subtitle, desc, tags, path, e
             display: "inline-flex", alignItems: "center", gap: 10,
             color: "#dec89a", textDecoration: "none", fontSize: 14, fontWeight: 800,
             transition: "color 0.25s ease, transform 0.25s ease",
+            flexShrink: 0,
           }}>
             Open Module <span style={{ fontSize: 16, lineHeight: 1 }}>→</span>
           </Link>
         ) : (
-          <span style={{ display: "inline-flex", alignItems: "center", gap: 10, fontSize: 14, fontWeight: 800, color: "#dec89a" }}>Open Module →</span>
+          <span className="platform-module-link" style={{ display: "inline-flex", alignItems: "center", gap: 10, fontSize: 14, fontWeight: 800, color: "#dec89a", flexShrink: 0 }}>Open Module →</span>
         )}
       </div>
     </>
@@ -568,7 +586,8 @@ export default function LandingPage() {
       <section id="hero" style={{
         position: "relative", overflow: "hidden",
         background: "linear-gradient(135deg, #0F172A 0%, #1E293B 50%, #0F172A 100%)",
-        padding: "100px 24px 100px", minHeight: 540,
+        padding: "clamp(72px, 12vw, 100px) 16px clamp(72px, 12vw, 100px)",
+        minHeight: "min(100vh, 540px)",
       }}>
         {/* Sun trajectory: sunrise → noon → sunset */}
         <SolarTrajectory />
@@ -576,10 +595,10 @@ export default function LandingPage() {
         {/* Canvas particle network */}
         <HeroParticles />
 
-        <div style={{ position: "relative", zIndex: 1, maxWidth: 860, margin: "0 auto", textAlign: "center" }}>
+        <div style={{ position: "relative", zIndex: 1, maxWidth: 860, margin: "0 auto", textAlign: "center", padding: "0 8px" }}>
           {/* Hero logo */}
-          <div style={{ marginBottom: 28 }}>
-            <img src="/logoWhite.svg" alt="PVCopilot" style={{ height: 141, objectFit: "contain" }} />
+          <div style={{ marginBottom: "clamp(16px, 3vw, 28px)" }}>
+            <img src="/logoWhite.svg" alt="PVCopilot" style={{ height: "clamp(80px, 18vw, 141px)", objectFit: "contain" }} />
           </div>
 
           <h1 style={{
@@ -606,7 +625,7 @@ export default function LandingPage() {
           </p>
 
           {/* CTAs — pill buttons */}
-          <div style={{ display: "flex", gap: 14, justifyContent: "center", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap" }}>
             <Link to="/lcoe-tool" style={{
               padding: "13px 34px", background: G, color: "#0F172A",
               textDecoration: "none", borderRadius: 9999, fontWeight: 700,
@@ -634,8 +653,8 @@ export default function LandingPage() {
 
           {/* Stat badges */}
           <div style={{
-            display: "flex", gap: 32, justifyContent: "center", flexWrap: "wrap",
-            marginTop: 56, paddingTop: 32,
+            display: "flex", gap: "clamp(20px, 4vw, 32px)", justifyContent: "center", flexWrap: "wrap",
+            marginTop: "clamp(32px, 6vw, 56px)", paddingTop: "clamp(20px, 4vw, 32px)",
             borderTop: "1px solid rgba(255,255,255,.06)",
           }}>
             {[
@@ -644,8 +663,8 @@ export default function LandingPage() {
               { value: "20+", label: "Algorithms Implemented" },
               { value: "10+", label: "PV Performance KPIs" },
             ].map(s => (
-              <div key={s.label} style={{ textAlign: "center" }}>
-                <div style={{ fontSize: 22, fontWeight: 800, color: "#FFFFFF", fontFamily: "Inter, Arial, sans-serif" }}>
+              <div key={s.label} style={{ textAlign: "center", minWidth: 0 }}>
+                <div style={{ fontSize: "clamp(18px, 3vw, 22px)", fontWeight: 800, color: "#FFFFFF", fontFamily: "Inter, Arial, sans-serif" }}>
                   {s.value}
                 </div>
                 <div style={{ fontSize: 11, color: "#64748B", marginTop: 2 }}>{s.label}</div>
@@ -674,6 +693,9 @@ export default function LandingPage() {
           .tf-header { grid-template-columns: 1fr; }
           .tf-grid { gap: 12px; }
           .tf-card.tf-light { padding: 18px; }
+        }
+        @media (max-width: 768px) {
+          .tf-grid { grid-template-columns: 1fr; }
         }
         @media (max-width: 640px) {
           .tf-section { padding: 28px 12px 44px; }
@@ -829,17 +851,27 @@ export default function LandingPage() {
       </section>
 
       {/* ━━━ PROCESSING WORKFLOW — horizontal flowchart (8 stages, chevrons) ━━━ */}
+      <style>{`
+        .workflow-pipe-wrap { overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; scrollbar-width: thin; padding-bottom: 8px; }
+        .workflow-pipe-wrap::-webkit-scrollbar { height: 6px; }
+        .workflow-pipe-wrap::-webkit-scrollbar-thumb { background: #E2E8F0; border-radius: 3px; }
+        @media (max-width: 640px) {
+          .workflow-step { width: 88px !important; min-width: 88px !important; }
+          .workflow-blob { width: 72px !important; height: 72px !important; margin-bottom: 8px !important; }
+          .workflow-label { font-size: 10px !important; }
+        }
+      `}</style>
       <section
         id="workflow"
         style={{
-          padding: "72px 24px 56px",
+          padding: "clamp(40px, 8vw, 72px) 16px clamp(40px, 6vw, 56px)",
           background: "#FFFFFF",
           borderTop: "1px solid #E2E8F0",
         }}
       >
         <div style={{ maxWidth: 1140, margin: "0 auto" }}>
           {/* Header row */}
-          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 24, marginBottom: 48 }}>
+          <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 24, marginBottom: 48, padding: "0 8px" }}>
             <div style={{ maxWidth: 480, textAlign: "left", paddingLeft: 0, marginLeft: 0 }}>
               <span style={{
                 display: "inline-block", fontSize: 11, fontWeight: 700, color: G,
@@ -858,13 +890,14 @@ export default function LandingPage() {
             </p>
           </div>
 
-          <div style={{
+          <div className="workflow-pipe-wrap" style={{
             display: "flex",
             flexDirection: "row",
             alignItems: "flex-start",
-            justifyContent: "center",
-            flexWrap: "wrap",
+            justifyContent: "flex-start",
+            flexWrap: "nowrap",
             gap: 6,
+            paddingBottom: 8,
           }}>
             {PIPE.map((step, i) => {
               const gradientId = `badge-grad-${i}`;
@@ -873,7 +906,7 @@ export default function LandingPage() {
               const badgeEnd = "#FF8C00";
               return (
                 <span key={step.id} style={{ display: "flex", alignItems: "center", flexShrink: 0 }}>
-                  <div style={{
+                  <div className="workflow-step" style={{
                     display: "flex",
                     flexDirection: "column",
                     alignItems: "center",
@@ -881,7 +914,7 @@ export default function LandingPage() {
                     minWidth: 120,
                   }}>
                     {/* Blob background with icon */}
-                    <div style={{
+                    <div className="workflow-blob" style={{
                       position: "relative",
                       width: 100,
                       height: 100,
@@ -929,7 +962,7 @@ export default function LandingPage() {
                       </span>
                     </div>
                     {/* Label */}
-                    <div style={{
+                    <div className="workflow-label" style={{
                       fontSize: 12,
                       fontWeight: 700,
                       color: "#0F172A",
@@ -972,9 +1005,33 @@ export default function LandingPage() {
       </section>
 
       {/* ━━━ PLATFORM MODULES — hover-to-expand cards ━━━ */}
+      <style>{`
+        .platform-modules-outer { width: 100%; min-width: 0; overflow: hidden; }
+        .platform-modules-cards-wrap {
+          overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch; scrollbar-width: thin;
+          min-width: 0; max-width: 100%; padding: 0 4px 8px;
+        }
+        .platform-modules-cards-wrap::-webkit-scrollbar { height: 6px; }
+        .platform-modules-cards-wrap::-webkit-scrollbar-thumb { background: rgba(255,255,255,.2); border-radius: 3px; }
+        @media (max-width: 768px) {
+          .platform-modules-cards-wrap { padding-left: 12px; padding-right: 12px; }
+          .platform-module-card-wrap { min-width: 48px !important; max-width: 48px !important; flex: 0 0 48px !important; width: 48px !important; }
+          .platform-module-card-wrap.platform-module-card-expanded { min-width: 260px !important; max-width: 280px !important; flex: 0 0 260px !important; width: 260px !important; }
+          /* Smaller text in expanded card so "Open Module" button stays visible */
+          .platform-module-card-expanded .platform-module-card-inner { padding: 10px 12px 10px !important; }
+          .platform-module-card-expanded .platform-module-card-icon { top: 10px !important; right: 10px !important; }
+          .platform-module-card-expanded .platform-module-badge { width: 36px !important; height: 36px !important; font-size: 11px !important; margin-bottom: 8px !important; }
+          .platform-module-card-expanded .platform-module-subtitle { font-size: 9px !important; margin-bottom: 2px !important; }
+          .platform-module-card-expanded .platform-module-title { font-size: 0.95rem !important; line-height: 1.1 !important; margin-bottom: 4px !important; }
+          .platform-module-card-expanded .platform-module-desc { font-size: 10px !important; line-height: 1.35 !important; margin-bottom: 6px !important; flex: 0 0 auto !important; display: -webkit-box !important; -webkit-line-clamp: 3 !important; -webkit-box-orient: vertical !important; overflow: hidden !important; }
+          .platform-module-card-expanded .platform-module-tags { gap: 4px !important; margin-bottom: 8px !important; }
+          .platform-module-card-expanded .platform-module-tags span { font-size: 8px !important; padding: 2px 6px !important; }
+          .platform-module-card-expanded .platform-module-link { font-size: 11px !important; }
+        }
+      `}</style>
       <section id="modules" style={{
         position: "relative",
-        padding: "72px 24px 80px",
+        padding: "clamp(40px, 8vw, 72px) 16px clamp(48px, 8vw, 80px)",
         background: "linear-gradient(160deg, #0F172A 0%, #131c2e 30%, #1a1710 60%, #0F172A 100%)",
         overflow: "hidden",
       }}>
@@ -991,9 +1048,9 @@ export default function LandingPage() {
           background: "radial-gradient(ellipse at center, rgba(255,180,0,0.05) 0%, transparent 60%)",
           filter: "blur(50px)", pointerEvents: "none",
         }} />
-        <div style={{ position: "relative", zIndex: 1, maxWidth: 1200, margin: "0 auto" }}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16, marginBottom: 32 }}>
-            <div style={{ maxWidth: 520, textAlign: "left", paddingLeft: 0, marginLeft: 0 }}>
+        <div style={{ position: "relative", zIndex: 1, maxWidth: 1200, margin: "0 auto", minWidth: 0 }} className="platform-modules-outer">
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 16, marginBottom: 32, padding: "0 8px" }}>
+            <div style={{ maxWidth: 520, textAlign: "left", paddingLeft: 0, marginLeft: 0, minWidth: 0 }}>
               <span style={{
                 display: "inline-block", fontSize: 11, fontWeight: 700, color: G,
                 letterSpacing: ".12em", textTransform: "uppercase",
@@ -1028,22 +1085,29 @@ export default function LandingPage() {
             </div>
           </div>
 
-          <div id="platform-modules-cards" style={{
+          <div id="platform-modules-cards" className="platform-modules-cards-wrap" style={{
             display: "flex",
             flexDirection: "row",
             alignItems: "stretch",
             gap: 16,
             width: "100%",
             minHeight: 336,
+            flexWrap: "nowrap",
           }}>
             {PLATFORM_MODULES.map((mod, index) => (
               <div
                 key={mod.number}
+                className={`platform-module-card-wrap${hoveredModuleIndex === index ? " platform-module-card-expanded" : ""}`}
+                role="button"
+                tabIndex={0}
+                onClick={() => setHoveredModuleIndex(index)}
+                onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setHoveredModuleIndex(index); } }}
                 style={{
                   flex: hoveredModuleIndex === index ? 1 : 0,
                   minWidth: hoveredModuleIndex === index ? 320 : 64,
                   width: hoveredModuleIndex === index ? undefined : 64,
                   transition: "flex 0.35s ease, min-width 0.35s ease, width 0.35s ease",
+                  cursor: "pointer",
                 }}
               >
                 <PlatformModuleCard
@@ -1067,11 +1131,11 @@ export default function LandingPage() {
 
       {/* ━━━ TEAM — profile card (image left, content right) ━━━ */}
       <section id="team" style={{
-        padding: "72px 24px 80px",
+        padding: "clamp(40px, 8vw, 72px) 16px clamp(48px, 8vw, 80px)",
         background: "#FFFFFF",
         borderTop: "1px solid #E2E8F0",
       }}>
-        <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+        <div style={{ maxWidth: 1100, margin: "0 auto", padding: "0 8px" }}>
           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 24, marginBottom: 48 }}>
             <div style={{ maxWidth: 480 }}>
               <span style={{
@@ -1120,7 +1184,7 @@ export default function LandingPage() {
             </div>
             {/* Right: name, title, description, social, CTA */}
             <div style={{
-              flex: 1, minWidth: 260, padding: "24px 36px 24px",
+              flex: 1, minWidth: 0, padding: "clamp(20px, 4vw, 24px) clamp(20px, 4vw, 36px) 24px",
               display: "flex", flexDirection: "column", justifyContent: "space-between",
             }}>
               <div>
@@ -1223,12 +1287,19 @@ export default function LandingPage() {
         }
         .partners-track:hover { animation-play-state: paused; }
       `}</style>
+      <style>{`
+        @media (max-width: 640px) {
+          .footer-grid { grid-template-columns: 1fr !important; gap: 32px !important; text-align: center !important; }
+          .footer-grid .footer-brand { text-align: center; }
+          .footer-grid .footer-brand p { margin-left: auto; margin-right: auto; }
+        }
+      `}</style>
       <section id="partners" style={{
-        padding: "56px 24px 64px",
+        padding: "clamp(32px, 6vw, 56px) 16px clamp(40px, 8vw, 64px)",
         background: "#FFFFFF",
         borderTop: "1px solid #E2E8F0",
       }}>
-        <div style={{ maxWidth: 1100, margin: "0 auto", textAlign: "center", marginBottom: 32 }}>
+        <div style={{ maxWidth: 1100, margin: "0 auto", textAlign: "center", marginBottom: 32, padding: "0 8px" }}>
           <h2 style={{
             fontSize: 22, fontWeight: 800, color: "#0F172A",
             letterSpacing: "-.02em", marginBottom: 8,
@@ -1239,7 +1310,7 @@ export default function LandingPage() {
             Collaborating with leading institutions in solar research and digital innovation.
           </p>
         </div>
-        <div style={{ overflow: "hidden", width: "100%", marginLeft: -24, marginRight: -24 }}>
+        <div style={{ overflow: "hidden", width: "100%", marginLeft: -16, marginRight: -16 }}>
           <div
             className="partners-track"
             style={{
@@ -1299,7 +1370,7 @@ export default function LandingPage() {
         <div style={{ position: "relative", zIndex: 1 }}>
         {/* CTA banner */}
         <div style={{
-          padding: "56px 24px", textAlign: "center",
+          padding: "clamp(32px, 6vw, 56px) 16px", textAlign: "center",
           borderBottom: "1px solid rgba(255,255,255,.06)",
         }}>
           <h3 style={{ fontSize: 28, fontWeight: 800, color: "#FFFFFF", marginBottom: 12, letterSpacing: "-.02em" }}>
@@ -1331,13 +1402,13 @@ export default function LandingPage() {
         </div>
 
         {/* Footer columns */}
-        <div style={{
-          maxWidth: 1100, margin: "0 auto", padding: "48px 24px 40px",
+        <div className="footer-grid" style={{
+          maxWidth: 1100, margin: "0 auto", padding: "clamp(32px, 6vw, 48px) 16px 40px",
           display: "grid", gridTemplateColumns: "2fr 1fr 1fr 1fr",
           gap: 40,
         }}>
           {/* Brand column */}
-          <div>
+          <div className="footer-brand">
             <img src="/logoWhite.svg" alt="PVCopilot" style={{ height: 45, objectFit: "contain", marginBottom: 16 }} />
             <p style={{ fontSize: 13, lineHeight: 1.7, color: "#64748B", maxWidth: 280 }}>
               Your Solar PV O&M Digital Assistant. Automated data processing platform
@@ -1425,7 +1496,7 @@ export default function LandingPage() {
         {/* Bottom bar */}
         <div style={{
           borderTop: "1px solid rgba(255,255,255,.06)",
-          padding: "20px 24px",
+          padding: "16px",
           maxWidth: 1100, margin: "0 auto",
           display: "flex", alignItems: "center", justifyContent: "space-between",
           flexWrap: "wrap", gap: 12,
