@@ -509,7 +509,7 @@ function filterRowsByDateRange(headers, rows, dateFrom, dateTo) {
   });
 }
 
-function computeAllowedDaysByAvailabilityPct(headers, rows, stepMinutes, thresholdPct) {
+function computeAllowedDaysByAvailabilityPct(headers, rows, stepMinutes, thresholdPct, rowsForDaylightWindow = null) {
   if (!headers?.length || !Array.isArray(rows) || rows.length === 0) return null;
   if (thresholdPct == null || !Number.isFinite(Number(thresholdPct))) return null;
   const thr = Math.min(100, Math.max(0, Number(thresholdPct)));
@@ -522,8 +522,7 @@ function computeAllowedDaysByAvailabilityPct(headers, rows, stepMinutes, thresho
   const irrIdx = getColumnIndex(headers, ["weather_GHI", "GHI", "weather_GTI", "GTI"]);
   const IRR_ON_WM2 = 20; // treat irradiance > 20 W/m² as daylight
 
-  const bucketsByDay = new Map(); // dayKey -> Set(bucketMs) (all buckets present)
-  const irrByDayBucket = new Map(); // dayKey -> Map(bucketMs -> maxIrrInBucket)
+  const bucketsByDay = new Map(); // dayKey -> Set(bucketMs) (OBSERVED buckets)
   for (const row of rows) {
     if (!Array.isArray(row)) continue;
     const ms = parseDateCell(row[timeIdx]);
@@ -533,7 +532,18 @@ function computeAllowedDaysByAvailabilityPct(headers, rows, stepMinutes, thresho
     const bucket = Math.floor(ms / stepMs) * stepMs;
     if (!bucketsByDay.has(dayKey)) bucketsByDay.set(dayKey, new Set());
     bucketsByDay.get(dayKey).add(bucket);
+  }
+  if (!bucketsByDay.size) return null;
 
+  const daylightSource = Array.isArray(rowsForDaylightWindow) && rowsForDaylightWindow.length ? rowsForDaylightWindow : rows;
+  const irrByDayBucket = new Map(); // dayKey -> Map(bucketMs -> maxIrrInBucket) (DAYLIGHT WINDOW source)
+  for (const row of daylightSource) {
+    if (!Array.isArray(row)) continue;
+    const ms = parseDateCell(row[timeIdx]);
+    if (Number.isNaN(ms)) continue;
+    const dayKey = toYMD(new Date(ms));
+    if (!dayKey) continue;
+    const bucket = Math.floor(ms / stepMs) * stepMs;
     if (irrIdx >= 0) {
       const irr = parseFloat(row[irrIdx]);
       const v = Number.isFinite(irr) ? irr : null;
@@ -543,7 +553,6 @@ function computeAllowedDaysByAvailabilityPct(headers, rows, stepMinutes, thresho
       if (v != null) m.set(bucket, prev == null ? v : Math.max(prev, v));
     }
   }
-  if (!bucketsByDay.size) return null;
 
   const allowedDays = new Set();
   for (const [dayKey, buckets] of bucketsByDay.entries()) {
@@ -2488,7 +2497,7 @@ export default function KpiAnalysisPage() {
     const powerMin = Number(appliedIecPowerMin) || 0;
     const powerMax = appliedIecPowerMax != null && appliedIecPowerMax !== "" ? Number(appliedIecPowerMax) : maxPdcInData;
 
-    const filtered = pvRawFilteredRowsForAvailability.filter((row) => {
+    const filteredNoStatus = pvRawFilteredRowsForAvailability.filter((row) => {
       if (!Array.isArray(row)) return false;
       if (ghiIdx >= 0) {
         const v = parseFloat(row[ghiIdx]);
@@ -2506,14 +2515,23 @@ export default function KpiAnalysisPage() {
         const v = parseFloat(row[pdcIdx]);
         if (Number.isFinite(v) && (v < powerMin || v > powerMax)) return false;
       }
-      if (appliedIecStatusFilter === "valid" && statusIdx >= 0) {
-        const v = String(row[statusIdx] ?? "").toLowerCase().trim();
-        if (v !== "valid") return false;
-      }
       return true;
     });
 
-    return computeAllowedDaysByAvailabilityPct(headers, filtered, resamplingStepMinutes, appliedIecDataAvailabilityPct);
+    const filteredObserved =
+      appliedIecStatusFilter === "valid" && statusIdx >= 0
+        ? filteredNoStatus.filter((row) => String(row?.[statusIdx] ?? "").toLowerCase().trim() === "valid")
+        : filteredNoStatus;
+
+    // Daylight window should be inferred from the non-status-filtered data, but observed availability
+    // should respect the status filter (valid-only when selected).
+    return computeAllowedDaysByAvailabilityPct(
+      headers,
+      filteredObserved,
+      resamplingStepMinutes,
+      appliedIecDataAvailabilityPct,
+      filteredNoStatus
+    );
   }, [
     pvRawData,
     pvRawFilteredRowsForAvailability,
