@@ -16,6 +16,9 @@ import ChevronRight from "@mui/icons-material/ChevronRight";
 import CloseOutlined from "@mui/icons-material/CloseOutlined";
 import FileDownloadOutlined from "@mui/icons-material/FileDownloadOutlined";
 import HelpOutline from "@mui/icons-material/HelpOutline";
+import FunctionsOutlined from "@mui/icons-material/FunctionsOutlined";
+import AddOutlined from "@mui/icons-material/AddOutlined";
+import RemoveOutlined from "@mui/icons-material/RemoveOutlined";
 import BookmarkAddedOutlinedIcon from "@mui/icons-material/BookmarkAddedOutlined";
 import RotateLeftOutlinedIcon from "@mui/icons-material/RotateLeftOutlined";
 import Button from "@mui/material/Button";
@@ -91,10 +94,67 @@ function getColumnIndex(headers, candidates) {
   return -1;
 }
 
+function parseRuleDate(str) {
+  if (!str) return null;
+  const s = String(str).trim().replace(" ", "T");
+  const d = new Date(s);
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function LossFactorRuleRangeEditor({ rule, onChange }) {
+  const fromValue = rule.start ? rule.start.replace(" ", "T") : "";
+  const toValue = rule.end ? rule.end.replace(" ", "T") : "";
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+      <input
+        type="datetime-local"
+        value={fromValue}
+        onChange={(e) => {
+          const v = e.target.value;
+          onChange({ ...rule, start: v ? v.replace("T", " ") : "" });
+        }}
+        style={{
+          flex: 1,
+          fontFamily: MONO,
+          fontSize: 11,
+          padding: "6px 8px",
+          borderRadius: 8,
+          border: "1px solid #E2E8F0",
+          background: "#F9FAFB",
+          color: "#0F172A",
+          outline: "none",
+        }}
+      />
+      <span style={{ fontSize: 11, color: "#94a3b8", fontFamily: MONO }}>→</span>
+      <input
+        type="datetime-local"
+        value={toValue}
+        onChange={(e) => {
+          const v = e.target.value;
+          onChange({ ...rule, end: v ? v.replace("T", " ") : "" });
+        }}
+        style={{
+          flex: 1,
+          fontFamily: MONO,
+          fontSize: 11,
+          padding: "6px 8px",
+          borderRadius: 8,
+          border: "1px solid #E2E8F0",
+          background: "#F9FAFB",
+          color: "#0F172A",
+          outline: "none",
+        }}
+      />
+    </div>
+  );
+}
+
 /**
  * Compute Tcell and PVWatts for each row (same formulas as backend datafiltering.py).
  * config: { coef_a, coef_b, delta, tot_power, temp_coef [, loss_factor ] } (numbers).
- * lossFactor: optional multiplier at end of PVWatts formula (default 0.97).
+ * lossFactor: optional multiplier at end of PVWatts formula (default 0.97), or
+ * { defaultFactor: number, rules: Array<{ start: string, end: string, factor: number }> }.
  * Returns array of objects: all original row columns (by header name) plus PVWatts.
  */
 function computePdcComparison(headers, rows, config, lossFactor = 0.97) {
@@ -105,8 +165,10 @@ function computePdcComparison(headers, rows, config, lossFactor = 0.97) {
   const delta = Number(cfg.delta);
   const tot_power = Number(cfg.tot_power);
   const temp_coef = Number(cfg.temp_coef);
-  const num = Number(lossFactor);
-  const factor = (Number.isFinite(num) && num >= 0) ? num : 0.97;
+  const lfObj = lossFactor && typeof lossFactor === "object" && !Array.isArray(lossFactor) ? lossFactor : null;
+  const num = Number(lfObj ? lfObj.defaultFactor : lossFactor);
+  const defaultFactor = (Number.isFinite(num) && num >= 0) ? num : 0.97;
+  const rules = Array.isArray(lfObj?.rules) ? lfObj.rules : null;
   if ([coef_a, coef_b, delta, tot_power, temp_coef].some((n) => !Number.isFinite(n))) return null;
 
   const timeIdx = getDateColumnIndex(headers);
@@ -115,6 +177,22 @@ function computePdcComparison(headers, rows, config, lossFactor = 0.97) {
   const windIdx = getColumnIndex(headers, ["Wind_speed", "weather_Wind_speed"]);
   const pdcIdx = getColumnIndex(headers, ["P_DC"]);
   if (timeIdx < 0 || airIdx < 0 || gtiIdx < 0 || windIdx < 0 || pdcIdx < 0) return null;
+
+  function resolveLossFactorForTime(timeVal) {
+    if (!rules?.length) return defaultFactor;
+    const base = timeVal != null ? new Date(String(timeVal).trim().replace(" ", "T")) : null;
+    if (!base || Number.isNaN(base.getTime())) return defaultFactor;
+    for (const r of rules) {
+      const start = parseRuleDate(r.start);
+      const end = parseRuleDate(r.end);
+      if (!start || !end) continue;
+      if (base >= start && base <= end) {
+        const f = Number(r.factor);
+        return Number.isFinite(f) && f >= 0 ? f : defaultFactor;
+      }
+    }
+    return defaultFactor;
+  }
 
   const result = [];
   for (const row of rows) {
@@ -125,6 +203,7 @@ function computePdcComparison(headers, rows, config, lossFactor = 0.97) {
     const pdc = parseFloat(row[pdcIdx]);
     if (!Number.isFinite(gti) || !Number.isFinite(airTemp) || !Number.isFinite(wind)) continue;
     const tcell = airTemp + (gti * Math.exp(coef_a + coef_b * wind)) + (gti * delta / 1000);
+    const factor = resolveLossFactorForTime(row[timeIdx]);
     const pvWatts = (gti * tot_power * (1 + (temp_coef * 1e-2) * (tcell - 25))) * factor;
     const rowObj = {};
     for (let i = 0; i < headers.length; i++) rowObj[headers[i]] = row[i];
@@ -2470,6 +2549,9 @@ export default function DataFilteringPage() {
   const [dateTo, setDateTo] = useState(null);
   const [resamplingStepMinutes, setResamplingStepMinutes] = useState(10);
   const [lossFactor, setLossFactor] = useState("0.97");
+  const [lossFactorAdvanced, setLossFactorAdvanced] = useState(false);
+  const [lossFactorRules, setLossFactorRules] = useState([]);
+  const [pvwattsCardCollapsed, setPvwattsCardCollapsed] = useState(false);
   const [filterThreshold, setFilterThreshold] = useState("0.2");
   const [timeWeightEnabled, setTimeWeightEnabled] = useState(false);
   const [timeWeightMin, setTimeWeightMin] = useState("0.2");
@@ -2491,6 +2573,11 @@ export default function DataFilteringPage() {
   const showToast = useCallback((message, type = "success") => {
     setToast({ message, type, key: Date.now() });
   }, []);
+
+  // Collapse is only available in Advanced mode; keep card expanded otherwise.
+  useEffect(() => {
+    if (!lossFactorAdvanced) setPvwattsCardCollapsed(false);
+  }, [lossFactorAdvanced]);
 
   // Restore PV and system files from cache on mount (after reload)
   useEffect(() => {
@@ -2561,8 +2648,11 @@ export default function DataFilteringPage() {
 
   const comparisonData = useMemo(() => {
     if (!pvData?.headers?.length || !pvFilteredRows.length || !sysData) return null;
-    return computePdcComparison(pvData.headers, pvFilteredRows, sysData, lossFactor);
-  }, [pvData, pvFilteredRows, sysData, lossFactor]);
+    const lossFactorConfig = lossFactorAdvanced
+      ? { defaultFactor: Number(lossFactor), rules: lossFactorRules }
+      : lossFactor;
+    return computePdcComparison(pvData.headers, pvFilteredRows, sysData, lossFactorConfig);
+  }, [pvData, pvFilteredRows, sysData, lossFactor, lossFactorAdvanced, lossFactorRules]);
 
   const filterResult = useMemo(() => {
     if (!comparisonData || comparisonData.length === 0) return null;
@@ -2994,158 +3084,377 @@ export default function DataFilteringPage() {
                     padding: "16px 20px",
                     marginTop: 20,
                     display: "flex",
-                    flexDirection: "row",
-                    alignItems: "center",
-                    justifyContent: "space-between",
-                    gap: 24,
-                    flexWrap: "wrap",
+                    flexDirection: "column",
+                    gap: 6,
+                    position: "relative",
                   }}
                 >
-                  <div style={{ flex: "1 1 280px", fontFamily: FONT, fontSize: 12, color: "#334155", lineHeight: 1.6, position: "relative" }}>
-                    <div style={{ display: "inline-flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-                      <span style={{ fontWeight: 700, color: "#0F172A", fontSize: 12 }}>PVWatts formula</span>
-                      <span
-                        ref={pvwattsFormulaHelpTriggerRef}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => setPvwattsFormulaHelpOpen((v) => !v)}
-                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setPvwattsFormulaHelpOpen((v) => !v); }}
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          width: 20,
-                          height: 20,
-                          borderRadius: "50%",
-                          color: "#64748B",
-                          cursor: "pointer",
-                          outline: "none",
-                        }}
-                        aria-label="Explain PVWatts model"
-                      >
-                        <HelpOutline sx={{ fontSize: 18 }} />
-                      </span>
-                      {pvwattsFormulaHelpOpen && (
-                        <div
-                          ref={pvwattsFormulaHelpRef}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                    <div style={{ fontFamily: FONT, fontSize: 12, color: "#334155", lineHeight: 1.6, position: "relative" }}>
+                      <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <FunctionsOutlined sx={{ fontSize: 16, color: DF }} />
+                        <span style={{ fontWeight: 700, color: "#0F172A", fontSize: 12 }}>PVWatts formula</span>
+                        <span
+                          ref={pvwattsFormulaHelpTriggerRef}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => setPvwattsFormulaHelpOpen((v) => !v)}
+                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setPvwattsFormulaHelpOpen((v) => !v); }}
                           style={{
-                            position: "absolute",
-                            top: "100%",
-                            left: 0,
-                            marginTop: 8,
-                            zIndex: 1001,
-                            background: "#fff",
-                            borderRadius: 12,
-                            border: "1px solid #E2E8F0",
-                            boxShadow: "0 12px 40px rgba(0,0,0,0.15)",
-                            padding: 14,
-                            maxWidth: 380,
-                            fontFamily: FONT,
-                            fontSize: 11,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            width: 20,
+                            height: 20,
+                            borderRadius: "50%",
+                            color: "#64748B",
+                            cursor: "pointer",
+                            outline: "none",
+                          }}
+                          aria-label="Explain PVWatts model"
+                        >
+                          <HelpOutline sx={{ fontSize: 18 }} />
+                        </span>
+                        {pvwattsFormulaHelpOpen && (
+                          <div
+                            ref={pvwattsFormulaHelpRef}
+                            style={{
+                              position: "absolute",
+                              top: "100%",
+                              left: 0,
+                              marginTop: 8,
+                              zIndex: 1001,
+                              background: "#fff",
+                              borderRadius: 12,
+                              border: "1px solid #E2E8F0",
+                              boxShadow: "0 12px 40px rgba(0,0,0,0.15)",
+                              padding: 14,
+                              maxWidth: 380,
+                              fontFamily: FONT,
+                              fontSize: 11,
+                              color: "#475569",
+                              lineHeight: 1.55,
+                            }}
+                          >
+                            <div style={{ fontWeight: 700, color: "#0F172A", marginBottom: 6 }}>PVWatts model</div>
+                            <p style={{ margin: "0 0 8px 0" }}>
+                              PVWatts is an NREL point-value model that predicts DC power from <strong>effective irradiance</strong> (e.g. GTI) and <strong>cell temperature</strong>. The power equation scales reference power by irradiance and applies a temperature coefficient; at low irradiance (≤125 W/m²) a different scaling is used. Cell temperature is estimated from ambient air temperature, plane-of-array irradiance, and wind speed (e.g. Sandia-style module temperature model).
+                            </p>
+                            <p style={{ margin: "0 0 8px 0" }}>
+                              <strong>References:</strong>
+                            </p>
+                            <ul style={{ margin: 0, paddingLeft: 18 }}>
+                              <li>
+                                <a href="https://pvpmc.sandia.gov/modeling-guide/2-dc-module-iv/point-value-models/pvwatts/" target="_blank" rel="noopener noreferrer" style={{ color: DF, textDecoration: "underline" }}>PVWatts (power equation)</a>
+                              </li>
+                              <li>
+                                <a href="https://pvpmc.sandia.gov/modeling-guide/2-dc-module-iv/module-temperature/sandia-module-temperature-model/" target="_blank" rel="noopener noreferrer" style={{ color: DF, textDecoration: "underline" }}>Sandia module temperature model</a>
+                              </li>
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, position: "relative" }}>
+                          <label style={{ fontFamily: FONT, fontSize: 12, fontWeight: 600, color: "#64748B" }} htmlFor="loss-factor-input">
+                            <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                              <button
+                                type="button"
+                                title={lossFactorAdvanced ? "Simple" : "Advanced"}
+                                aria-label="Advanced loss factor rules"
+                                onClick={() => {
+                                  setLossFactorAdvanced((v) => !v);
+                                  setLossFactorRules((prev) => {
+                                    if (prev?.length) return prev;
+                                    const first = Array.isArray(pvFilteredRows) && pvFilteredRows.length > 0 ? pvFilteredRows[0] : null;
+                                    const last = Array.isArray(pvFilteredRows) && pvFilteredRows.length > 0 ? pvFilteredRows[pvFilteredRows.length - 1] : null;
+                                    const timeCol = pvData?.headers?.length ? getDateColumnIndex(pvData.headers) : 0;
+                                    const start = first && Array.isArray(first) ? String(first[timeCol] ?? "") : "";
+                                    const end = last && Array.isArray(last) ? String(last[timeCol] ?? "") : "";
+                                    return [
+                                      {
+                                        id: Date.now(),
+                                        start,
+                                        end,
+                                        factor: Number(lossFactor),
+                                      },
+                                    ];
+                                  });
+                                }}
+                                style={{
+                                  width: 22,
+                                  height: 22,
+                                  borderRadius: 999,
+                                  border: `1px solid ${lossFactorAdvanced ? `${DF}55` : "#E2E8F0"}`,
+                                  background: lossFactorAdvanced ? `${DF}12` : "#F8FAFC",
+                                  color: lossFactorAdvanced ? DF : "#64748B",
+                                  display: "inline-flex",
+                                  alignItems: "center",
+                                  justifyContent: "center",
+                                  cursor: "pointer",
+                                  padding: 0,
+                                  boxShadow: lossFactorAdvanced ? `0 0 0 1px ${DF}22` : "none",
+                                }}
+                              >
+                                {lossFactorAdvanced ? <RemoveOutlined sx={{ fontSize: 16, color: "inherit" }} /> : <AddOutlined sx={{ fontSize: 16, color: "inherit" }} />}
+                              </button>
+                              <span>loss_factor</span>
+                            </span>
+                          </label>
+                          <span
+                            ref={lossFactorHelpTriggerRef}
+                            role="button"
+                            tabIndex={0}
+                            onClick={() => setLossFactorHelpOpen((v) => !v)}
+                            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setLossFactorHelpOpen((v) => !v); }}
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              width: 20,
+                              height: 20,
+                              borderRadius: "50%",
+                              color: "#64748B",
+                              cursor: "pointer",
+                              outline: "none",
+                            }}
+                            aria-label="Explain loss factor"
+                          >
+                            <HelpOutline sx={{ fontSize: 18 }} />
+                          </span>
+                          {lossFactorHelpOpen && (
+                            <div
+                              ref={lossFactorHelpRef}
+                              style={{
+                                position: "absolute",
+                                top: "100%",
+                                left: 0,
+                                marginTop: 8,
+                                zIndex: 1001,
+                                background: "#fff",
+                                borderRadius: 12,
+                                border: "1px solid #E2E8F0",
+                                boxShadow: "0 12px 40px rgba(0,0,0,0.15)",
+                                padding: 14,
+                                maxWidth: 340,
+                                fontFamily: FONT,
+                                fontSize: 11,
+                                color: "#475569",
+                                lineHeight: 1.55,
+                              }}
+                            >
+                              <div style={{ fontWeight: 700, color: "#0F172A", marginBottom: 6 }}>What is loss factor?</div>
+                              <p style={{ margin: "0 0 8px 0" }}>
+                                The loss factor is a multiplier applied at the end of the PVWatts formula. It can represent <strong>calculation error of the PVWatts model</strong>, <strong>soiling conditions</strong> of the system, or <strong>degradation</strong>. Typical values are around 0.95–1.0 (e.g. 0.97 = 3% losses).
+                              </p>
+                              <p style={{ margin: 0 }}>
+                                The next version of PVCopilot will compute this value automatically.
+                              </p>
+                            </div>
+                          )}
+                          {!lossFactorAdvanced && (
+                            <input
+                              id="loss-factor-input"
+                              type="number"
+                              min={0}
+                              max={2}
+                              step={0.01}
+                              value={lossFactor}
+                              onChange={(e) => setLossFactor(e.target.value)}
+                              style={{
+                                width: 72,
+                                padding: "8px 10px",
+                                borderRadius: 10,
+                                border: "1.5px solid #E2E8F0",
+                                fontFamily: MONO,
+                                fontSize: 12,
+                                color: "#0F172A",
+                                background: "#FAFBFC",
+                              }}
+                            />
+                          )}
+                        </div>
+                      {lossFactorAdvanced && (
+                        <span
+                          style={{
+                            fontFamily: MONO,
+                            fontSize: 10,
+                            padding: "3px 8px",
+                            borderRadius: 999,
+                            border: "1px solid rgba(148, 163, 184, 0.8)",
+                            background: "#F8FAFC",
                             color: "#475569",
-                            lineHeight: 1.55,
+                            whiteSpace: "nowrap",
                           }}
                         >
-                          <div style={{ fontWeight: 700, color: "#0F172A", marginBottom: 6 }}>PVWatts model</div>
-                          <p style={{ margin: "0 0 8px 0" }}>
-                            PVWatts is an NREL point-value model that predicts DC power from <strong>effective irradiance</strong> (e.g. GTI) and <strong>cell temperature</strong>. The power equation scales reference power by irradiance and applies a temperature coefficient; at low irradiance (≤125 W/m²) a different scaling is used. Cell temperature is estimated from ambient air temperature, plane-of-array irradiance, and wind speed (e.g. Sandia-style module temperature model).
-                          </p>
-                          <p style={{ margin: "0 0 8px 0" }}>
-                            <strong>References:</strong>
-                          </p>
-                          <ul style={{ margin: 0, paddingLeft: 18 }}>
-                            <li>
-                              <a href="https://pvpmc.sandia.gov/modeling-guide/2-dc-module-iv/point-value-models/pvwatts/" target="_blank" rel="noopener noreferrer" style={{ color: DF, textDecoration: "underline" }}>PVWatts (power equation)</a>
-                            </li>
-                            <li>
-                              <a href="https://pvpmc.sandia.gov/modeling-guide/2-dc-module-iv/module-temperature/sandia-module-temperature-model/" target="_blank" rel="noopener noreferrer" style={{ color: DF, textDecoration: "underline" }}>Sandia module temperature model</a>
-                            </li>
-                          </ul>
-                        </div>
+                          {lossFactorRules.length || 0} rule{lossFactorRules.length === 1 ? "" : "s"}
+                        </span>
                       )}
-                    </div>
-                    <div style={{ color: "#64748B", fontSize: 11 }}>
-                      PVWatts = GTI × tot_power × (1 + (temp_coef/100) × (Tcell − 25)) ×{" "}
-                      <span style={{ color: "#0F172A", fontWeight: 600 }}>loss_factor</span>
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 16, flexShrink: 0, flexWrap: "wrap" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10, position: "relative" }}>
-                      <label style={{ fontFamily: FONT, fontSize: 12, fontWeight: 600, color: "#64748B" }} htmlFor="loss-factor-input">
-                        loss_factor
-                      </label>
-                      <span
-                        ref={lossFactorHelpTriggerRef}
-                        role="button"
-                        tabIndex={0}
-                        onClick={() => setLossFactorHelpOpen((v) => !v)}
-                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setLossFactorHelpOpen((v) => !v); }}
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          width: 20,
-                          height: 20,
-                          borderRadius: "50%",
-                          color: "#64748B",
-                          cursor: "pointer",
-                          outline: "none",
-                        }}
-                        aria-label="Explain loss factor"
-                      >
-                        <HelpOutline sx={{ fontSize: 18 }} />
-                      </span>
-                      {lossFactorHelpOpen && (
-                        <div
-                          ref={lossFactorHelpRef}
+
+                      {lossFactorAdvanced && (
+                        <button
+                          type="button"
+                          onClick={() => setPvwattsCardCollapsed((v) => !v)}
+                          aria-label={pvwattsCardCollapsed ? "Expand PVWatts formula" : "Collapse PVWatts formula"}
                           style={{
-                            position: "absolute",
-                            top: "100%",
-                            left: 0,
-                            marginTop: 8,
-                            zIndex: 1001,
-                            background: "#fff",
-                            borderRadius: 12,
+                            width: 30,
+                            height: 30,
+                            borderRadius: 10,
                             border: "1px solid #E2E8F0",
-                            boxShadow: "0 12px 40px rgba(0,0,0,0.15)",
-                            padding: 14,
-                            maxWidth: 340,
-                            fontFamily: FONT,
-                            fontSize: 11,
-                            color: "#475569",
-                            lineHeight: 1.55,
+                            background: "#F8FAFC",
+                            color: "#64748B",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            cursor: "pointer",
+                            padding: 0,
                           }}
                         >
-                          <div style={{ fontWeight: 700, color: "#0F172A", marginBottom: 6 }}>What is loss factor?</div>
-                          <p style={{ margin: "0 0 8px 0" }}>
-                            The loss factor is a multiplier applied at the end of the PVWatts formula. It can represent <strong>calculation error of the PVWatts model</strong>, <strong>soiling conditions</strong> of the system, or <strong>degradation</strong>. Typical values are around 0.95–1.0 (e.g. 0.97 = 3% losses).
-                          </p>
-                          <p style={{ margin: 0 }}>
-                            The next version of PVCopilot will compute this value automatically.
-                          </p>
-                        </div>
+                          {pvwattsCardCollapsed ? <ExpandMoreIcon sx={{ fontSize: 18 }} /> : <ExpandLessIcon sx={{ fontSize: 18 }} />}
+                        </button>
                       )}
-                      <input
-                        id="loss-factor-input"
-                        type="number"
-                        min={0}
-                        max={2}
-                        step={0.01}
-                        value={lossFactor}
-                        onChange={(e) => setLossFactor(e.target.value)}
-                        style={{
-                          width: 72,
-                          padding: "8px 10px",
-                          borderRadius: 10,
-                          border: "1.5px solid #E2E8F0",
-                          fontFamily: MONO,
-                          fontSize: 14,
-                          color: "#0F172A",
-                          background: "#FAFBFC",
-                        }}
-                      />
                     </div>
                   </div>
+
+                  <div style={{ color: "#64748B", fontSize: 11, fontFamily: FONT, marginTop: -2 }}>
+                    PVWatts = GTI × tot_power × (1 + (temp_coef/100) × (Tcell − 25)) ×{" "}
+                    <span style={{ color: "#0F172A", fontWeight: 600 }}>loss_factor</span>
+                  </div>
+
+                  {lossFactorAdvanced && !pvwattsCardCollapsed && (
+                    <div
+                      style={{
+                        marginTop: 6,
+                        width: "100%",
+                        padding: "10px 12px",
+                        borderRadius: 12,
+                        border: "1px solid #E2E8F0",
+                        background: "#FFFFFF",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: 10,
+                        boxShadow: "0 0 0 1px rgba(148, 163, 184, 0.18), 0 8px 18px rgba(15, 23, 42, 0.06)",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                          <div
+                            style={{
+                              width: 26,
+                              height: 26,
+                              borderRadius: 999,
+                              background: `${DF}12`,
+                              border: `1px solid ${DF}35`,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              boxShadow: `0 0 0 1px ${DF}22`,
+                            }}
+                          >
+                            <FunctionsOutlined sx={{ fontSize: 16, color: DF }} />
+                          </div>
+                          <div>
+                            <div style={{ fontFamily: FONT, fontSize: 12, fontWeight: 700, color: "#1F2937" }}>loss_factor rules</div>
+                            <div style={{ fontFamily: FONT, fontSize: 10, color: "#94a3b8", marginTop: 2 }}>
+                              Apply loss_factor by date range (first matching rule wins)
+                            </div>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const last = lossFactorRules[lossFactorRules.length - 1];
+                            const nextId = (last?.id ?? 0) + 1;
+                            setLossFactorRules([
+                              ...lossFactorRules,
+                              {
+                                id: nextId,
+                                start: last?.start ?? "",
+                                end: last?.end ?? "",
+                                factor: Number.isFinite(Number(last?.factor)) ? Number(last.factor) : Number(lossFactor),
+                              },
+                            ]);
+                          }}
+                          style={{
+                            borderRadius: 999,
+                            border: "1px solid #CBD5F5",
+                            background: "linear-gradient(135deg, #FEE2E2 0%, #FFE4E6 100%)",
+                            padding: "3px 12px",
+                            fontFamily: FONT,
+                            fontSize: 11,
+                            fontWeight: 700,
+                            color: DF,
+                            cursor: "pointer",
+                            boxShadow: "0 0 0 1px rgba(254, 205, 211, 0.9), 0 3px 8px rgba(15, 23, 42, 0.12)",
+                          }}
+                        >
+                          + Add rule
+                        </button>
+                      </div>
+
+                      <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 180, overflowY: "auto" }}>
+                        {lossFactorRules.map((rule, idx) => (
+                          <div
+                            key={rule.id ?? idx}
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "minmax(0, 1.6fr) 92px 26px",
+                              gap: 6,
+                              alignItems: "center",
+                            }}
+                          >
+                            <LossFactorRuleRangeEditor
+                              rule={rule}
+                              onChange={(updated) => {
+                                const next = [...lossFactorRules];
+                                next[idx] = updated;
+                                setLossFactorRules(next);
+                              }}
+                            />
+                            <input
+                              type="number"
+                              value={rule.factor ?? ""}
+                              onChange={(e) => {
+                                const next = [...lossFactorRules];
+                                const v = Number(e.target.value);
+                                next[idx] = { ...next[idx], factor: Number.isNaN(v) ? "" : v };
+                                setLossFactorRules(next);
+                              }}
+                              placeholder="factor"
+                              style={{
+                                fontFamily: MONO,
+                                fontSize: 11,
+                                padding: "6px 8px",
+                                borderRadius: 8,
+                                border: "1px solid #E2E8F0",
+                                background: "#F9FAFB",
+                                color: "#0F172A",
+                                outline: "none",
+                              }}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (lossFactorRules.length === 1) return;
+                                setLossFactorRules(lossFactorRules.filter((r) => r.id !== rule.id));
+                              }}
+                              style={{
+                                border: "none",
+                                background: "transparent",
+                                cursor: lossFactorRules.length === 1 ? "not-allowed" : "pointer",
+                                color: lossFactorRules.length === 1 ? "#CBD5E1" : "#94a3b8",
+                                fontSize: 14,
+                              }}
+                              aria-label="Remove rule"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
 
