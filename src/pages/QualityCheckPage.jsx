@@ -588,17 +588,22 @@ function UploadZone({ label, icon, accept, color, file, onLoad, onFileUpload, on
 // ── CSV Table (scrollable, 10 visible rows) ─────────────────────────────────
 const ROW_NUM_ID = "_rowNum";
 
-function CSVTable({ title, icon, color, headers, rows, resampled, originalRows, resampledStepMinutes = 10, defaultVisibleLabels }) {
+function CSVTable({ title, icon, color, headers, rows, resampled, originalRows, resampledStepMinutes = 10, defaultVisibleLabels, columnDisplayNames }) {
   const [expanded, setExpanded] = useState(false);
   const safeHeaders = Array.isArray(headers) ? headers : [];
   const safeRows = Array.isArray(rows) ? rows : [];
+  const displayNames = columnDisplayNames && typeof columnDisplayNames === "object" ? columnDisplayNames : {};
 
   const columns = useMemo(
     () => [
       { id: ROW_NUM_ID, label: "#" },
-      ...safeHeaders.map((h, i) => ({ id: i, label: String(h ?? "").trim() || `Column ${i + 1}` })),
+      ...safeHeaders.map((h, i) => {
+        const raw = String(h ?? "").trim() || `Column ${i + 1}`;
+        const label = displayNames[raw] ?? displayNames[raw.toLowerCase()] ?? raw;
+        return { id: i, label };
+      }),
     ],
-    [safeHeaders]
+    [safeHeaders, displayNames]
   );
   const defaultVisibleIds = useMemo(() => {
     if (defaultVisibleLabels && defaultVisibleLabels.length > 0 && columns.length > 1) {
@@ -715,7 +720,7 @@ function findColIndex(headers, ...names) {
   return -1;
 }
 
-// ── Sync chart: dual Y-axis — PV time/P_DC (left) + Weather time/GHI (right) ─────
+// ── Sync chart: dual Y-axis — PV time/Power (left) + Weather time/POA (right) ─────
 function SyncChart({ pvHeaders, pvRows, weatherHeaders, weatherRows }) {
   const safePvH = Array.isArray(pvHeaders) ? pvHeaders : [];
   const safePvR = Array.isArray(pvRows) ? pvRows : [];
@@ -724,10 +729,10 @@ function SyncChart({ pvHeaders, pvRows, weatherHeaders, weatherRows }) {
 
   const config = useMemo(() => {
     const timeColPv = safePvH.length > 0 ? 0 : -1;
-    const pdcCol = findColIndex(safePvH, "P_DC", "P DC", "PDC");
+    const pdcCol = findColIndex(safePvH, "P_DC", "P DC", "PDC", "P", "Power");
     const timeColWeather = safeWh.length > 0 ? 0 : -1;
-    const ghiCol = findColIndex(safeWh, "GHI", "Ghi");
-    if (timeColPv < 0 || pdcCol < 0 || timeColWeather < 0 || ghiCol < 0) return null;
+    const irrCol = findColIndex(safeWh, "POA", "Poa", "poa", "GTI", "GHI", "Ghi");
+    if (timeColPv < 0 || pdcCol < 0 || timeColWeather < 0 || irrCol < 0) return null;
 
     const pvTimes = safePvR.map((r) => (Array.isArray(r) ? r[timeColPv] : ""));
     const pvPdc = safePvR.map((r) => {
@@ -735,8 +740,8 @@ function SyncChart({ pvHeaders, pvRows, weatherHeaders, weatherRows }) {
       return isNaN(v) ? null : v;
     });
     const weatherTimes = safeWr.map((r) => (Array.isArray(r) ? r[timeColWeather] : ""));
-    const weatherGhi = safeWr.map((r) => {
-      const v = parseFloat(Array.isArray(r) ? r[ghiCol] : "");
+    const weatherIrr = safeWr.map((r) => {
+      const v = parseFloat(Array.isArray(r) ? r[irrCol] : "");
       return isNaN(v) ? null : v;
     });
 
@@ -745,20 +750,20 @@ function SyncChart({ pvHeaders, pvRows, weatherHeaders, weatherRows }) {
       y: pvPdc,
       type: "scatter",
       mode: "lines",
-      name: safePvH[pdcCol] ?? "P_DC",
+      name: safePvH[pdcCol] ?? "Power",
       line: { color: O, width: 1.5, shape: "spline", smoothing: 1.2 },
       yaxis: "y",
-      hovertemplate: "<b>P_DC</b>: %{y}<extra></extra>",
+      hovertemplate: `<b>${safePvH[pdcCol] ?? "Power"}</b>: %{y}<extra></extra>`,
     };
-    const traceGhi = {
+    const traceIrr = {
       x: weatherTimes,
-      y: weatherGhi,
+      y: weatherIrr,
       type: "scatter",
       mode: "lines",
-      name: safeWh[ghiCol] ?? "GHI",
+      name: safeWh[irrCol] ?? "POA",
       line: { color: B, width: 1.5, shape: "spline", smoothing: 1.2 },
       yaxis: "y2",
-      hovertemplate: "<b>GHI</b>: %{y}<extra></extra>",
+      hovertemplate: `<b>${safeWh[irrCol] ?? "POA"}</b>: %{y}<extra></extra>`,
     };
 
     const layout = {
@@ -779,7 +784,7 @@ function SyncChart({ pvHeaders, pvRows, weatherHeaders, weatherRows }) {
         side: "left",
       },
       yaxis2: {
-        title: { text: safeWh[ghiCol] ?? "GHI", font: { family: FONT, size: 12, color: B } },
+        title: { text: safeWh[irrCol] ?? "POA", font: { family: FONT, size: 12, color: B } },
         gridcolor: "rgba(0,0,0,0)",
         tickfont: { family: MONO, size: 10, color: "#94a3b8" },
         side: "right",
@@ -791,7 +796,7 @@ function SyncChart({ pvHeaders, pvRows, weatherHeaders, weatherRows }) {
       font: { family: FONT },
     };
 
-    return { data: [tracePdc, traceGhi], layout };
+    return { data: [tracePdc, traceIrr], layout };
   }, [safePvH, safePvR, safeWh, safeWr]);
 
   if (!config) return null;
@@ -822,10 +827,10 @@ function SyncChart({ pvHeaders, pvRows, weatherHeaders, weatherRows }) {
         </div>
         <div style={{ display: "flex", flexDirection: "column" }}>
           <span style={{ fontFamily: FONT, fontSize: 14, fontWeight: 800, color: "#0F172A" }}>
-            P_DC vs GHI
+            Power vs POA
           </span>
           <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>
-            PV power (left axis) and global horizontal irradiance (right axis) over time.
+            PV Power (left axis) and plane-of-array irradiance (right axis) over time.
           </span>
         </div>
       </div>
@@ -951,7 +956,7 @@ function linearRegression(x, y) {
   return { slope, intercept, r2 };
 }
 
-// ── Correlation chart: x = GHI, y = P_DC (aligned by time, same filtered data) ───
+// ── Correlation chart: x = POA, y = Power (aligned by time, same filtered data) ───
 function CorrelationChart({ pvHeaders, pvRows, weatherHeaders, weatherRows }) {
   const safePvH = Array.isArray(pvHeaders) ? pvHeaders : [];
   const safePvR = Array.isArray(pvRows) ? pvRows : [];
@@ -960,40 +965,40 @@ function CorrelationChart({ pvHeaders, pvRows, weatherHeaders, weatherRows }) {
 
   const config = useMemo(() => {
     const timeColPv = safePvH.length > 0 ? 0 : -1;
-    const pdcCol = findColIndex(safePvH, "P_DC", "P DC", "PDC");
+    const pdcCol = findColIndex(safePvH, "P_DC", "P DC", "PDC", "P", "Power");
     const timeColWeather = safeWh.length > 0 ? 0 : -1;
-    const ghiCol = findColIndex(safeWh, "GHI", "Ghi");
-    if (timeColPv < 0 || pdcCol < 0 || timeColWeather < 0 || ghiCol < 0) return null;
+    const irrCol = findColIndex(safeWh, "POA", "Poa", "poa", "GTI", "GHI", "Ghi");
+    if (timeColPv < 0 || pdcCol < 0 || timeColWeather < 0 || irrCol < 0) return null;
 
-    // Map time -> GHI from weather
-    const timeToGhi = new Map();
+    // Map time -> POA (or fallback) from weather
+    const timeToIrr = new Map();
     for (const r of safeWr) {
       const t = Array.isArray(r) ? String(r[timeColWeather] ?? "").trim() : "";
-      const g = parseFloat(Array.isArray(r) ? r[ghiCol] : "");
-      if (t && !isNaN(g) && isFinite(g)) timeToGhi.set(t, g);
+      const g = parseFloat(Array.isArray(r) ? r[irrCol] : "");
+      if (t && !isNaN(g) && isFinite(g)) timeToIrr.set(t, g);
     }
 
-    const ghiArr = [];
+    const irrArr = [];
     const pdcArr = [];
     for (const r of safePvR) {
       const t = Array.isArray(r) ? String(r[timeColPv] ?? "").trim() : "";
       const pdc = parseFloat(Array.isArray(r) ? r[pdcCol] : "");
       if (t === "" || isNaN(pdc) || !isFinite(pdc)) continue;
-      const ghi = timeToGhi.get(t);
-      if (ghi == null) continue;
-      ghiArr.push(ghi);
+      const irr = timeToIrr.get(t);
+      if (irr == null) continue;
+      irrArr.push(irr);
       pdcArr.push(pdc);
     }
-    if (ghiArr.length === 0) return null;
+    if (irrArr.length === 0) return null;
 
-    const { slope, intercept, r2 } = linearRegression(ghiArr, pdcArr);
-    const minX = Math.min(...ghiArr);
-    const maxX = Math.max(...ghiArr);
+    const { slope, intercept, r2 } = linearRegression(irrArr, pdcArr);
+    const minX = Math.min(...irrArr);
+    const maxX = Math.max(...irrArr);
     const lineX = [minX, maxX];
     const lineY = [slope * minX + intercept, slope * maxX + intercept];
 
     const traceScatter = {
-      x: ghiArr,
+      x: irrArr,
       y: pdcArr,
       type: "scattergl",
       mode: "markers",
@@ -1005,7 +1010,7 @@ function CorrelationChart({ pvHeaders, pvRows, weatherHeaders, weatherRows }) {
         line: { width: 1, color: "rgba(255,255,255,0.9)" },
         symbol: "circle",
       },
-      hovertemplate: "<b>GHI</b>: %{x:.2f}<br><b>P_DC</b>: %{y:.2f}<extra></extra>",
+      hovertemplate: `<b>${safeWh[irrCol] ?? "POA"}</b>: %{x:.2f}<br><b>${safePvH[pdcCol] ?? "Power"}</b>: %{y:.2f}<extra></extra>`,
     };
 
     const traceLine = {
@@ -1039,7 +1044,7 @@ function CorrelationChart({ pvHeaders, pvRows, weatherHeaders, weatherRows }) {
       },
       xaxis: {
         title: {
-          text: safeWh[ghiCol] ?? "GHI",
+          text: safeWh[irrCol] ?? "POA",
           font: { family: FONT, size: 13, color: "#334155", standoff: 10 },
         },
         gridcolor: "#E2E8F0",
@@ -1054,7 +1059,7 @@ function CorrelationChart({ pvHeaders, pvRows, weatherHeaders, weatherRows }) {
       },
       yaxis: {
         title: {
-          text: safePvH[pdcCol] ?? "P_DC",
+          text: safePvH[pdcCol] ?? "Power",
           font: { family: FONT, size: 13, color: "#334155", standoff: 10 },
         },
         gridcolor: "#E2E8F0",
@@ -1103,7 +1108,7 @@ function CorrelationChart({ pvHeaders, pvRows, weatherHeaders, weatherRows }) {
         </div>
         <div style={{ display: "flex", flexDirection: "column" }}>
           <span style={{ fontFamily: FONT, fontSize: 14, fontWeight: 800, color: "#0F172A" }}>
-            Correlation: GHI vs P_DC
+            Correlation: POA vs P_DC
           </span>
           <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>
             Scatter of PV power vs irradiance (points aligned by time). Same date range as above.
@@ -1129,7 +1134,7 @@ function SyncedLineChart({ merged }) {
   if (!merged || merged.length === 0) return null;
   const x = merged.map((d) => d.time);
   const pdc = merged.map((d) => d.pdc);
-  const ghi = merged.map((d) => d.ghi);
+  const poa = merged.map((d) => d.poa);
 
   const data = [
     {
@@ -1137,20 +1142,20 @@ function SyncedLineChart({ merged }) {
       y: pdc,
       type: "scatter",
       mode: "lines",
-      name: "P_DC (synced)",
+      name: "Power (synced)",
       line: { color: O, width: 1.6, shape: "spline", smoothing: 1.2 },
       yaxis: "y",
-      hovertemplate: "<b>P_DC</b>: %{y:.2f}<extra></extra>",
+      hovertemplate: "<b>Power</b>: %{y:.2f}<extra></extra>",
     },
     {
       x,
-      y: ghi,
+      y: poa,
       type: "scatter",
       mode: "lines",
-      name: "GHI (synced)",
+      name: "POA (synced)",
       line: { color: B, width: 1.6, shape: "spline", smoothing: 1.2 },
       yaxis: "y2",
-      hovertemplate: "<b>GHI</b>: %{y:.2f}<extra></extra>",
+      hovertemplate: "<b>POA</b>: %{y:.2f}<extra></extra>",
     },
   ];
 
@@ -1171,13 +1176,13 @@ function SyncedLineChart({ merged }) {
       tickfont: { family: MONO, size: 10, color: "#94a3b8" },
     },
     yaxis: {
-      title: { text: "P_DC", font: { family: FONT, size: 12, color: O } },
+      title: { text: "Power", font: { family: FONT, size: 12, color: O } },
       gridcolor: "#F1F5F9",
       tickfont: { family: MONO, size: 10, color: "#94a3b8" },
       side: "left",
     },
     yaxis2: {
-      title: { text: "GHI", font: { family: FONT, size: 12, color: B } },
+      title: { text: "POA", font: { family: FONT, size: 12, color: B } },
       gridcolor: "rgba(0,0,0,0)",
       tickfont: { family: MONO, size: 10, color: "#94a3b8" },
       side: "right",
@@ -1218,7 +1223,7 @@ function SyncedLineChart({ merged }) {
             Synced Data — Time Series
           </span>
           <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>
-            PV P_DC and Weather GHI after applying time-shift rules.
+            PV Power and Weather POA after applying time-shift rules.
           </span>
         </div>
       </div>
@@ -1238,7 +1243,7 @@ function SyncedLineChart({ merged }) {
 
 function SyncedCorrelationChart({ merged }) {
   if (!merged || merged.length === 0) return null;
-  const x = merged.map((d) => d.ghi);
+  const x = merged.map((d) => d.poa);
   const y = merged.map((d) => d.pdc);
   const { slope, intercept, r2 } = linearRegression(x, y);
   const minX = Math.min(...x);
@@ -1259,7 +1264,7 @@ function SyncedCorrelationChart({ merged }) {
       line: { width: 1, color: "rgba(255,255,255,0.9)" },
       symbol: "circle",
     },
-    hovertemplate: "<b>GHI (synced)</b>: %{x:.2f}<br><b>P_DC</b>: %{y:.2f}<extra></extra>",
+    hovertemplate: "<b>POA (synced)</b>: %{x:.2f}<br><b>Power</b>: %{y:.2f}<extra></extra>",
   };
 
   const traceLine = {
@@ -1289,7 +1294,7 @@ function SyncedCorrelationChart({ merged }) {
     },
     xaxis: {
       title: {
-        text: "GHI (synced)",
+        text: "POA (synced)",
         font: { family: FONT, size: 13, color: "#334155", standoff: 10 },
       },
       gridcolor: "#E2E8F0",
@@ -1303,7 +1308,7 @@ function SyncedCorrelationChart({ merged }) {
     },
     yaxis: {
       title: {
-        text: "P_DC",
+        text: "Power",
         font: { family: FONT, size: 13, color: "#334155", standoff: 10 },
       },
       gridcolor: "#E2E8F0",
@@ -1349,7 +1354,7 @@ function SyncedCorrelationChart({ merged }) {
             Synced Data — Correlation
           </span>
           <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>
-            Correlation of P_DC vs GHI after applying time-shift rules.
+            Correlation of Power vs POA after applying time-shift rules.
           </span>
         </div>
       </div>
@@ -2258,7 +2263,7 @@ function JSONList({ data }) {
         onClick={() => setExpanded(!expanded)}
         style={{
           display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "14px 20px", cursor: "pointer", userSelect: "none",
+          padding: "12px 14px", cursor: "pointer", userSelect: "none",
           borderBottom: expanded ? "1px solid #E2E8F0" : "none",
         }}
       >
@@ -2283,11 +2288,11 @@ function JSONList({ data }) {
         }
       </div>
       {expanded && (
-        <div style={{ padding: "8px 0" }}>
+        <div style={{ padding: "6px 0" }}>
           {Object.entries(data).map(([key, val]) => (
             <div key={key} style={{
               display: "flex", alignItems: "flex-start", gap: 12,
-              padding: "8px 20px", fontSize: 13, fontFamily: FONT,
+              padding: "6px 14px", fontSize: 13, fontFamily: FONT,
             }}>
               <span style={{
                 minWidth: 180, fontWeight: 600, color: "#64748B",
@@ -2387,12 +2392,30 @@ function saveCache(key, value) {
   }
 }
 
+/** Required PV CSV columns (case-insensitive). */
+const PV_REQUIRED_HEADERS = ["time", "current", "voltage", "power", "module_temp"];
+function isValidPvHeaders(headers) {
+  if (!Array.isArray(headers) || headers.length === 0) return false;
+  const lower = headers.map((h) => String(h ?? "").trim().toLowerCase().replace(/-/g, "_"));
+  return PV_REQUIRED_HEADERS.every((r) => lower.includes(r));
+}
+
+/** Required Weather CSV columns (case-insensitive). */
+const WEATHER_REQUIRED_HEADERS = ["time", "poa", "ghi", "dni", "dhi", "air_temp", "rh", "pressure", "wind_speed", "rain"];
+function isValidWeatherHeaders(headers) {
+  if (!Array.isArray(headers) || headers.length === 0) return false;
+  const lower = headers.map((h) => String(h ?? "").trim().toLowerCase().replace(/-/g, "_"));
+  return WEATHER_REQUIRED_HEADERS.every((r) => lower.includes(r));
+}
+
 // ── Main Page ────────────────────────────────────────────────────────────────
 export default function QualityCheckPage() {
   const [pvFile, setPvFile] = useState(null);
   const [pvRawData, setPvRawData] = useState(null);
+  const [pvLoadError, setPvLoadError] = useState(null);
   const [weatherFile, setWeatherFile] = useState(null);
   const [weatherRawData, setWeatherRawData] = useState(null);
+  const [weatherLoadError, setWeatherLoadError] = useState(null);
   const [sysFile, setSysFile] = useState(null);
   const [sysData, setSysData] = useState(null);
   const [toast, setToast] = useState(null);
@@ -2679,6 +2702,12 @@ export default function QualityCheckPage() {
                   showToast(`"${file.name}" appears empty or has no data rows.`, "error");
                   return;
                 }
+                if (!isValidPvHeaders(data.headers)) {
+                  setPvLoadError(true);
+                  showToast("The PV Data (.csv) file should include the following columns: Time, Current, Voltage, Power, and Module_Temp. For the best experience, click Load Template, then Download it and adapt your data to match the template structure.", "error");
+                  return;
+                }
+                setPvLoadError(null);
                 const raw = { headers: data.headers, rows: data.rows };
                 setPvFile(file.name);
                 setPvRawData(raw);
@@ -2690,7 +2719,7 @@ export default function QualityCheckPage() {
               }
             }}
             onClear={() => {
-              setPvFile(null); setPvRawData(null);
+              setPvFile(null); setPvRawData(null); setPvLoadError(null);
               saveCache(CACHE_PV, null);
             }}
             onError={(msg) => showToast(msg, "error")}
@@ -2722,6 +2751,12 @@ export default function QualityCheckPage() {
                   showToast(`"${file.name}" appears empty or has no data rows.`, "error");
                   return;
                 }
+                if (!isValidWeatherHeaders(data.headers)) {
+                  setWeatherLoadError(true);
+                  showToast("The Weather Data (.csv) file should include the following columns: Time, POA, GHI, DNI, DHI, Air_Temp, RH, Pressure, Wind_speed, and Rain. For the best experience, click Load Template, then Download it and adapt your data to match the template structure.", "error");
+                  return;
+                }
+                setWeatherLoadError(null);
                 const raw = { headers: data.headers, rows: data.rows };
                 setWeatherFile(file.name);
                 setWeatherRawData(raw);
@@ -2733,7 +2768,7 @@ export default function QualityCheckPage() {
               }
             }}
             onClear={() => {
-              setWeatherFile(null); setWeatherRawData(null);
+              setWeatherFile(null); setWeatherRawData(null); setWeatherLoadError(null);
               saveCache(CACHE_WEATHER, null);
             }}
             onError={(msg) => showToast(msg, "error")}
@@ -2799,6 +2834,43 @@ export default function QualityCheckPage() {
               onResamplingStepChange={setResamplingStepMinutes}
             />
           )}
+          {pvLoadError && (
+            <div style={{
+              background: "#FEF2F2",
+              borderRadius: 16,
+              border: "1px solid #FECACA",
+              boxShadow: "0 18px 45px rgba(15, 23, 42, 0.08)",
+              padding: "20px 24px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+              marginBottom: 20,
+            }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                <div style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 10,
+                  background: "#FEE2E2",
+                  border: "1px solid #FECACA",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}>
+                  <span style={{ fontSize: 20, color: "#DC2626" }}>!</span>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: FONT, fontSize: 14, fontWeight: 700, color: "#0F172A", marginBottom: 6 }}>
+                    Invalid PV data format
+                  </div>
+                  <p style={{ fontFamily: FONT, fontSize: 13, color: "#475569", lineHeight: 1.6, margin: 0 }}>
+                    Load a CSV file with columns <strong>Time</strong>, <strong>Current</strong>, <strong>Voltage</strong>, <strong>Power</strong>, <strong>Module_Temp</strong>. You can use &quot;Load template&quot; or download the template from the <strong>PV Data (CSV)</strong> card above.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
           {pvData && (
             <div style={{
               background: "#ffffff",
@@ -2841,15 +2913,64 @@ export default function QualityCheckPage() {
                 resampled={pvData.resampled}
                 originalRows={pvData.originalRows}
                 resampledStepMinutes={pvData.resampledStepMinutes}
-                defaultVisibleLabels={["time", "I1", "U_DC", "P_DC", "T1"]}
+                defaultVisibleLabels={["Time", "Current", "Voltage", "Power", "Module_Temp"]}
+                columnDisplayNames={{
+                  Time: "Time",
+                  Current: "Current",
+                  Voltage: "Voltage",
+                  Power: "Power",
+                  Module_Temp: "Module_Temp",
+                  time: "Time",
+                  current: "Current",
+                  voltage: "Voltage",
+                  power: "Power",
+                  module_temp: "Module_Temp",
+                }}
               />
               <CSVChart
                 title="PV Data"
                 color={O}
                 headers={pvData.headers}
                 rows={pvFilteredRows}
-                defaultYHeader="P_DC"
+                defaultYHeader="Power"
               />
+            </div>
+          )}
+          {weatherLoadError && (
+            <div style={{
+              background: "#FEF2F2",
+              borderRadius: 16,
+              border: "1px solid #FECACA",
+              boxShadow: "0 18px 45px rgba(15, 23, 42, 0.08)",
+              padding: "20px 24px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+              marginBottom: 20,
+            }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                <div style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 10,
+                  background: "#FEE2E2",
+                  border: "1px solid #FECACA",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}>
+                  <span style={{ fontSize: 20, color: "#DC2626" }}>!</span>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: FONT, fontSize: 14, fontWeight: 700, color: "#0F172A", marginBottom: 6 }}>
+                    Invalid Weather data format
+                  </div>
+                  <p style={{ fontFamily: FONT, fontSize: 13, color: "#475569", lineHeight: 1.6, margin: 0 }}>
+                    Load a CSV file with columns <strong>Time</strong>, <strong>POA</strong>, <strong>GHI</strong>, <strong>DNI</strong>, <strong>DHI</strong>, <strong>Air_Temp</strong>, <strong>RH</strong>, <strong>Pressure</strong>, <strong>Wind_speed</strong>, <strong>Rain</strong>. You can use &quot;Load template&quot; or download the template from the <strong>Weather Data (CSV)</strong> card above.
+                  </p>
+                </div>
+              </div>
             </div>
           )}
           {weatherData && (
@@ -2894,7 +3015,7 @@ export default function QualityCheckPage() {
                 resampled={weatherData.resampled}
                 originalRows={weatherData.originalRows}
                 resampledStepMinutes={weatherData.resampledStepMinutes}
-                defaultVisibleLabels={["time", "ghi", "gti", "air_temp", "wind speed", "wind_speed"]}
+                defaultVisibleLabels={["Time", "POA", "GHI", "Air_Temp", "RH"]}
               />
               <CSVChart
                 title="Weather Data"
@@ -3077,27 +3198,42 @@ export default function QualityCheckPage() {
                           setSyncRules(next);
                         }}
                       />
-                      <input
-                        type="number"
-                        value={rule.shiftMinutes}
-                        onChange={(e) => {
-                          const next = [...syncRules];
-                          const minutes = Number(e.target.value);
-                          next[idx] = { ...next[idx], shiftMinutes: Number.isNaN(minutes) ? 0 : minutes };
-                          setSyncRules(next);
-                        }}
-                        placeholder="+/- minutes"
-                        style={{
+                      <div style={{ position: "relative" }}>
+                        <input
+                          type="number"
+                          value={rule.shiftMinutes}
+                          onChange={(e) => {
+                            const next = [...syncRules];
+                            const minutes = Number(e.target.value);
+                            next[idx] = { ...next[idx], shiftMinutes: Number.isNaN(minutes) ? 0 : minutes };
+                            setSyncRules(next);
+                          }}
+                          placeholder="+/- minutes"
+                          style={{
+                            fontFamily: MONO,
+                            fontSize: 11,
+                            padding: "6px 28px 6px 8px",
+                            borderRadius: 8,
+                            border: "1px solid #CBD5F5",
+                            background: "#F9FAFB",
+                            color: "#0F172A",
+                            outline: "none",
+                            width: "100%",
+                          }}
+                        />
+                        <span style={{
+                          position: "absolute",
+                          right: 8,
+                          top: "50%",
+                          transform: "translateY(-50%)",
                           fontFamily: MONO,
-                          fontSize: 11,
-                          padding: "6px 8px",
-                          borderRadius: 8,
-                          border: "1px solid #CBD5F5",
-                          background: "#F9FAFB",
-                          color: "#0F172A",
-                          outline: "none",
-                        }}
-                      />
+                          fontSize: 10,
+                          color: "#94a3b8",
+                          pointerEvents: "none",
+                        }}>
+                          min
+                        </span>
+                      </div>
                       <button
                         type="button"
                         onClick={() => {
@@ -3126,9 +3262,9 @@ export default function QualityCheckPage() {
                   const whH = Array.isArray(weatherData.headers) ? weatherData.headers : [];
                   const timeColPvIdx = pvH.length > 0 ? 0 : -1;
                   const timeColWhIdx = whH.length > 0 ? 0 : -1;
-                  const pdcIdx = findColIndex(pvH, "P_DC", "P DC", "PDC");
-                  const ghiIdx = findColIndex(whH, "GHI", "Ghi");
-                  if (timeColPvIdx < 0 || timeColWhIdx < 0 || pdcIdx < 0 || ghiIdx < 0) return null;
+                  const pdcIdx = findColIndex(pvH, "P_DC", "P DC", "PDC", "P", "Power");
+                  const irrIdx = findColIndex(whH, "POA", "Poa", "poa", "GTI", "GHI", "Ghi");
+                  if (timeColPvIdx < 0 || timeColWhIdx < 0 || pdcIdx < 0 || irrIdx < 0) return null;
 
                   const pvTimes = pvFilteredRows.map((r) => (Array.isArray(r) ? r[timeColPvIdx] : ""));
                   const whTimesShifted = applySyncRulesToTimes(
@@ -3152,27 +3288,27 @@ export default function QualityCheckPage() {
                     if (Number.isNaN(pdcVal) || !Number.isFinite(pdcVal)) return;
                     const whRow = whMap.get(t);
                     if (!Array.isArray(whRow)) return;
-                    const ghiRaw = whRow[ghiIdx];
-                    const ghiVal = parseFloat(ghiRaw);
-                    if (Number.isNaN(ghiVal) || !Number.isFinite(ghiVal)) return;
-                    merged.push({ time: t, pdc: pdcVal, ghi: ghiVal, pvRow, whRow });
+                    const irrRaw = whRow[irrIdx];
+                    const irrVal = parseFloat(irrRaw);
+                    if (Number.isNaN(irrVal) || !Number.isFinite(irrVal)) return;
+                    merged.push({ time: t, pdc: pdcVal, poa: irrVal, pvRow, whRow });
                   });
 
                   if (merged.length === 0) return null;
 
-                  const xs = merged.map((d) => d.ghi);
+                  const xs = merged.map((d) => d.poa);
                   const ys = merged.map((d) => d.pdc);
                   const stats = xs.length >= 2 ? linearRegression(xs, ys) : { r2: 0 };
                   const r2Display = Number.isFinite(stats.r2) ? stats.r2.toFixed(3) : "0.000";
                   // Correlation before syncing (raw alignment by exact timestamp)
-                  const rawTimeToGhi = new Map();
+                  const rawTimeToIrr = new Map();
                   weatherFilteredRows.forEach((row) => {
                     if (!Array.isArray(row)) return;
                     const t = String(row[timeColWhIdx] ?? "").trim();
-                    const gRaw = row[ghiIdx];
+                    const gRaw = row[irrIdx];
                     const gVal = parseFloat(gRaw);
                     if (!t || Number.isNaN(gVal) || !Number.isFinite(gVal)) return;
-                    rawTimeToGhi.set(t, gVal);
+                    rawTimeToIrr.set(t, gVal);
                   });
                   const baseXs = [];
                   const baseYs = [];
@@ -3182,7 +3318,7 @@ export default function QualityCheckPage() {
                     const pRaw = row[pdcIdx];
                     const pVal = parseFloat(pRaw);
                     if (!t || Number.isNaN(pVal) || !Number.isFinite(pVal)) return;
-                    const gVal = rawTimeToGhi.get(t);
+                    const gVal = rawTimeToIrr.get(t);
                     if (gVal == null) return;
                     baseXs.push(gVal);
                     baseYs.push(pVal);

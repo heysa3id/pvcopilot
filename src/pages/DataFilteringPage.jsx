@@ -176,7 +176,7 @@ function computePdcComparison(headers, rows, config, lossFactor = 0.97) {
   const airIdx = getColumnIndex(headers, ["Air_Temp", "weather_Air_Temp"]);
   const gtiIdx = getColumnIndex(headers, ["GTI", "weather_GTI"]);
   const windIdx = getColumnIndex(headers, ["Wind_speed", "weather_Wind_speed"]);
-  const pdcIdx = getColumnIndex(headers, ["P_DC"]);
+  const pdcIdx = getColumnIndex(headers, ["P_DC", "Power"]);
   if (timeIdx < 0 || airIdx < 0 || gtiIdx < 0 || windIdx < 0 || pdcIdx < 0) return null;
 
   function resolveLossFactorForTime(timeVal) {
@@ -3021,18 +3021,18 @@ export default function DataFilteringPage() {
                 originalRows={pvData.originalRows}
                 resampledStepMinutes={pvData.resampledStepMinutes}
                 defaultVisibleLabels={[
-                  "time",
-                  "I1",
-                  "U_DC",
-                  "P_DC",
-                  "T1",
+                  "Time",
+                  "Current",
+                  "Voltage",
+                  "Power",
+                  "Module_Temp",
                   "weather_GHI",
                   "weather_GTI",
                   "weather_air_temp",
                   "weather_wind speed",
                 ]}
               />
-              <FilterCSVChart title="PV & Weather Data" color={O} headers={pvData.headers} rows={pvFilteredRows} defaultYHeader="P_DC" defaultRightYHeader="weather_GTI" />
+              <FilterCSVChart title="PV & Weather Data" color={O} headers={pvData.headers} rows={pvFilteredRows} defaultYHeader="Power" defaultRightYHeader="weather_GTI" />
 
               {/* Data Filtering card */}
               <div

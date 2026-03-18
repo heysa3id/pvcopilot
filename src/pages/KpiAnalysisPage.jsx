@@ -239,11 +239,15 @@ function resampleRowsToHourly(headers, rows) {
 /** Daily aggregation: sum vs mean per column (supports both bare and weather_ prefix). */
 const DAILY_AGG_MAP = {
   P_DC: "sum",
+  Power: "sum",
   P_DC_calculee: "sum",
   E_DC: "sum",
   I_SUM: "sum",
   U_DC: "mean",
+  Current: "mean",
+  Voltage: "mean",
   T1: "mean",
+  Module_Temp: "mean",
   Tcell: "mean",
   GTI: "sum",
   GHI: "sum",
@@ -290,7 +294,7 @@ function resampleRowsToDaily(headers, rows, tot_power, systemConfig) {
   const timeColIdx = getDateColumnIndex(headers);
   if (timeColIdx < 0) return null;
 
-  const pdcIdx = getColumnIndex(headers, ["P_DC"]);
+  const pdcIdx = getColumnIndex(headers, ["P_DC", "Power"]);
   const gtiIdx = getColumnIndex(headers, ["GTI", "weather_GTI"]);
   if (pdcIdx < 0 || gtiIdx < 0) return null;
 
@@ -315,7 +319,7 @@ function resampleRowsToDaily(headers, rows, tot_power, systemConfig) {
 
   // Temperature source column indices.
   const tcellIdx = getColumnIndex(headers, ["Tcell"]);
-  const tModuleIdx = getColumnIndex(headers, ["T_module", "Tmod", "T1"]);
+  const tModuleIdx = getColumnIndex(headers, ["T_module", "Tmod", "T1", "Module_Temp"]);
   const airIdx = getColumnIndex(headers, ["Air_Temp", "weather_Air_Temp"]);
   const windIdx = getColumnIndex(headers, ["Wind_speed", "weather_Wind_speed"]);
 
@@ -2332,7 +2336,7 @@ export default function KpiAnalysisPage() {
   // Max P_DC in current (date-filtered) data for Power (kW) filter default
   const maxPdcInData = useMemo(() => {
     if (!pvData?.headers?.length || !pvFilteredRows.length) return null;
-    const pdcIdx = getColumnIndex(pvData.headers, ["P_DC"]);
+    const pdcIdx = getColumnIndex(pvData.headers, ["P_DC", "Power"]);
     if (pdcIdx < 0) return null;
     let max = -Infinity;
     for (const row of pvFilteredRows) {
@@ -2493,7 +2497,7 @@ export default function KpiAnalysisPage() {
     const ghiIdx = getColumnIndex(headers, ["GHI", "weather_GHI"]);
     const airTempIdx = getColumnIndex(headers, ["Air_Temp", "weather_Air_Temp"]);
     const windIdx = getColumnIndex(headers, ["Wind_speed", "weather_Wind_speed"]);
-    const pdcIdx = getColumnIndex(headers, ["P_DC"]);
+    const pdcIdx = getColumnIndex(headers, ["P_DC", "Power"]);
     const ghiMin = Number(appliedIecGhiMin);
     const ghiMax = Number(appliedIecGhiMax);
     const airMin = Number(appliedIecAirTempMin);
@@ -3771,11 +3775,11 @@ export default function KpiAnalysisPage() {
                 originalRows={pvData.originalRows}
                 resampledStepMinutes={pvData.resampledStepMinutes}
                 defaultVisibleLabels={[
-                  "time",
-                  "I1",
-                  "U_DC",
-                  "P_DC",
-                  "T1",
+                  "Time",
+                  "Current",
+                  "Voltage",
+                  "Power",
+                  "Module_Temp",
                   "weather_GHI",
                   "weather_GTI",
                   "weather_air_temp",
@@ -3791,7 +3795,7 @@ export default function KpiAnalysisPage() {
                   headers={pvData.headers}
                   rows={pvAvailabilityFilteredRows}
                   fullRowsForGaps={pvFilteredRows}
-                  defaultYHeader="P_DC"
+                  defaultYHeader="Power"
                   defaultRightYHeader="weather_GTI"
                 />
             </div>
