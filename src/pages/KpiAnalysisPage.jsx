@@ -20,6 +20,7 @@ import CancelOutlined from "@mui/icons-material/CancelOutlined";
 import FilterAltOutlined from "@mui/icons-material/FilterAltOutlined";
 import FilterListOutlined from "@mui/icons-material/FilterListOutlined";
 import HelpOutline from "@mui/icons-material/HelpOutline";
+import TipsAndUpdates from "@mui/icons-material/TipsAndUpdates";
 import BookmarkAddedOutlinedIcon from "@mui/icons-material/BookmarkAddedOutlined";
 import { Slider } from "@/components/ui/slider-number-flow";
 import RotateLeftOutlinedIcon from "@mui/icons-material/RotateLeftOutlined";
@@ -74,6 +75,19 @@ function readFileAsText(file) {
     r.onerror = () => reject(new Error("Could not read file"));
     r.readAsText(file);
   });
+}
+
+/** Required columns for PV & Weather filtered CSV (template pv_weather_filtered_pvcopilot.csv). Case-insensitive. */
+const FILTERED_CSV_REQUIRED_HEADERS = [
+  "time", "current", "voltage", "power", "module_temp",
+  "weather_poa", "weather_ghi", "weather_dni", "weather_dhi",
+  "weather_air_temp", "weather_rh", "weather_pressure", "weather_wind_speed", "weather_rain",
+  "pvwatts", "rel_error", "status",
+];
+function isValidFilteredCsvHeaders(headers) {
+  if (!Array.isArray(headers) || headers.length === 0) return false;
+  const lower = headers.map((h) => String(h ?? "").trim().toLowerCase().replace(/-/g, "_"));
+  return FILTERED_CSV_REQUIRED_HEADERS.every((r) => lower.includes(r));
 }
 
 // ── PV data helpers (self-contained for KPI page; separate from Data Filtering) ──
@@ -256,6 +270,7 @@ const DAILY_AGG_MAP = {
   Air_Temp: "mean",
   Wind_speed: "mean",
   weather_GTI: "sum",
+  weather_POA: "sum",
   weather_GHI: "sum",
   weather_DNI: "sum",
   weather_DHI: "sum",
@@ -295,7 +310,7 @@ function resampleRowsToDaily(headers, rows, tot_power, systemConfig) {
   if (timeColIdx < 0) return null;
 
   const pdcIdx = getColumnIndex(headers, ["P_DC", "Power"]);
-  const gtiIdx = getColumnIndex(headers, ["GTI", "weather_GTI"]);
+  const gtiIdx = getColumnIndex(headers, ["GTI", "weather_GTI", "weather_POA"]);
   if (pdcIdx < 0 || gtiIdx < 0) return null;
 
   // Extract γ (temperature coefficient of power) and thermal model coefficients from system config.
@@ -523,7 +538,7 @@ function computeAllowedDaysByAvailabilityPct(headers, rows, stepMinutes, thresho
 
   // Count unique step-buckets per day to avoid duplicates.
   const stepMs = step * 60 * 1000;
-  const irrIdx = getColumnIndex(headers, ["weather_GHI", "GHI", "weather_GTI", "GTI"]);
+  const irrIdx = getColumnIndex(headers, ["weather_GHI", "GHI", "weather_GTI", "GTI", "weather_POA"]);
   const IRR_ON_WM2 = 20; // treat irradiance > 20 W/m² as daylight
 
   const bucketsByDay = new Map(); // dayKey -> Set(bucketMs) (OBSERVED buckets)
@@ -748,6 +763,7 @@ function KpiUploadZone({
   onError,
   onDownloadSuccess,
   templateFile,
+  footerHint,
 }) {
   const [drag, setDrag] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -995,6 +1011,12 @@ function KpiUploadZone({
             )}
           </div>
         </label>
+      )}
+      {footerHint && (
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #E2E8F0", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+          <TipsAndUpdates sx={{ fontSize: 16, color: "#64748B" }} />
+          <span style={{ fontFamily: FONT, fontSize: 11, color: "#64748B" }}>{footerHint}</span>
+        </div>
       )}
     </div>
   );
@@ -2087,6 +2109,7 @@ const CACHE_KEY_SYSTEM = "pvcopilot_kpi_system_cache";
 export default function KpiAnalysisPage() {
   const [pvFile, setPvFile] = useState(null);
   const [pvRawData, setPvRawData] = useState(null);
+  const [pvLoadError, setPvLoadError] = useState(null);
   const [sysFile, setSysFile] = useState(null);
   const [sysData, setSysData] = useState(null);
   const [toast, setToast] = useState(null);
@@ -2234,8 +2257,13 @@ export default function KpiAnalysisPage() {
         if (name && content) {
           const data = parseCSV(content);
           if (data.headers.length > 0 && data.rows.length > 0) {
-            setPvFile(name);
-            setPvRawData({ headers: data.headers, rows: data.rows });
+            if (isValidFilteredCsvHeaders(data.headers)) {
+              setPvFile(name);
+              setPvRawData({ headers: data.headers, rows: data.rows });
+              setPvLoadError(null);
+            } else {
+              setPvLoadError(true);
+            }
           }
         }
       }
@@ -2301,6 +2329,12 @@ export default function KpiAnalysisPage() {
         showToast(`"${file.name}" appears empty or has no data rows.`, "error");
         return;
       }
+      if (!isValidFilteredCsvHeaders(data.headers)) {
+        setPvLoadError(true);
+        showToast("The PV & Weather Data (.csv) file does not match the expected template. It should include: Time, Current, Voltage, Power, Module_Temp, weather_POA, weather_GHI, weather_DNI, weather_DHI, weather_Air_Temp, weather_RH, weather_Pressure, weather_Wind_speed, weather_Rain, PVWatts, rel_error, status. Use \"Load template\" or download the template from the card above, then adapt your data to match.", "error");
+        return;
+      }
+      setPvLoadError(null);
       setPvFile(file.name);
       setPvRawData({ headers: data.headers, rows: data.rows });
       try {
@@ -2951,6 +2985,7 @@ export default function KpiAnalysisPage() {
         >
           <KpiUploadZone
             label="Load PV & Weather Synced Data (.csv)"
+            footerHint="Generate using tool 'Data Filtering'"
             icon={<SolarPowerOutlined sx={{ fontSize: 24, color: O }} />}
             accept=".csv"
             color={O}
@@ -2961,12 +2996,51 @@ export default function KpiAnalysisPage() {
             onClear={() => {
               setPvFile(null);
               setPvRawData(null);
+              setPvLoadError(null);
               try {
                 localStorage.removeItem(CACHE_KEY_PV);
               } catch (_) {}
             }}
             onError={(msg) => showToast(msg, "error")}
           />
+          {pvLoadError && (
+            <div style={{
+              background: "#FEF2F2",
+              borderRadius: 16,
+              border: "1px solid #FECACA",
+              boxShadow: "0 18px 45px rgba(15, 23, 42, 0.08)",
+              padding: "20px 24px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 12,
+              marginTop: -8,
+              marginBottom: 20,
+            }}>
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+                <div style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: 10,
+                  background: "#FEE2E2",
+                  border: "1px solid #FECACA",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  flexShrink: 0,
+                }}>
+                  <span style={{ fontSize: 20, color: "#DC2626" }}>!</span>
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontFamily: FONT, fontSize: 14, fontWeight: 700, color: "#0F172A", marginBottom: 6 }}>
+                    Invalid PV &amp; Weather data format
+                  </div>
+                  <p style={{ fontFamily: FONT, fontSize: 13, color: "#475569", lineHeight: 1.6, margin: 0 }}>
+                    The uploaded CSV does not match the expected template. It should include columns <strong>Time</strong>, <strong>Current</strong>, <strong>Voltage</strong>, <strong>Power</strong>, <strong>Module_Temp</strong>, <strong>weather_POA</strong>, <strong>weather_GHI</strong>, <strong>weather_DNI</strong>, <strong>weather_DHI</strong>, <strong>weather_Air_Temp</strong>, <strong>weather_RH</strong>, <strong>weather_Pressure</strong>, <strong>weather_Wind_speed</strong>, <strong>weather_Rain</strong>, <strong>PVWatts</strong>, <strong>rel_error</strong>, and <strong>status</strong>. Use &quot;Load template&quot; or download the template from the <strong>Load PV &amp; Weather Synced Data (.csv)</strong> card above.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
           <KpiUploadZone
             label="System Info (.json)"
             icon={<SettingsOutlined sx={{ fontSize: 24, color: O }} />}
@@ -3781,9 +3855,9 @@ export default function KpiAnalysisPage() {
                   "Power",
                   "Module_Temp",
                   "weather_GHI",
-                  "weather_GTI",
-                  "weather_air_temp",
-                  "weather_wind speed",
+                  "weather_POA",
+                  "weather_Air_Temp",
+                  "weather_Wind_speed",
                   "PVWatts",
                   "status",
                 ]}
@@ -3796,7 +3870,7 @@ export default function KpiAnalysisPage() {
                   rows={pvAvailabilityFilteredRows}
                   fullRowsForGaps={pvFilteredRows}
                   defaultYHeader="Power"
-                  defaultRightYHeader="weather_GTI"
+                  defaultRightYHeader="weather_POA"
                 />
             </div>
 

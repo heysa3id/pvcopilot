@@ -2240,82 +2240,17 @@ const tdStyle = {
   color: "#0F172A", whiteSpace: "nowrap",
 };
 
-// ── JSON List ────────────────────────────────────────────────────────────────
-function JSONList({ data }) {
-  const [expanded, setExpanded] = useState(true);
-
-  const renderValue = (val) => {
-    if (val === null || val === undefined) return <span style={{ color: "#94a3b8" }}>null</span>;
-    if (typeof val === "boolean") return <span style={{ color: P, fontWeight: 600 }}>{val.toString()}</span>;
-    if (typeof val === "number") return <span style={{ color: B, fontFamily: MONO }}>{val}</span>;
-    if (typeof val === "string") return <span style={{ color: "#0F172A" }}>{val}</span>;
-    if (Array.isArray(val)) return <span style={{ color: "#64748B", fontFamily: MONO }}>[{val.join(", ")}]</span>;
-    if (typeof val === "object") return <NestedObject obj={val} />;
-    return <span>{String(val)}</span>;
-  };
-
-  return (
-    <div style={{
-      background: "#fff", borderRadius: 14, border: "1px solid #E2E8F0",
-      overflow: "hidden",
-    }}>
-      <div
-        onClick={() => setExpanded(!expanded)}
-        style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "12px 14px", cursor: "pointer", userSelect: "none",
-          borderBottom: expanded ? "1px solid #E2E8F0" : "none",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <SettingsOutlined sx={{ fontSize: 20, color: O }} />
-          <span style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: FONT }}>
-            System Info
-          </span>
-          <span onClick={(e) => e.stopPropagation()} style={{ display: "inline-flex" }}>
-            <SystemInfoHelpIcon linkColor={P} />
-          </span>
-          <span style={{
-            fontSize: 11, fontWeight: 600, color: O, background: `${O}14`,
-            padding: "2px 10px", borderRadius: 20, fontFamily: MONO,
-          }}>
-            {Object.keys(data).length} fields
-          </span>
-        </div>
-        {expanded
-          ? <ExpandLessIcon sx={{ fontSize: 20, color: "#94a3b8" }} />
-          : <ExpandMoreIcon sx={{ fontSize: 20, color: "#94a3b8" }} />
-        }
-      </div>
-      {expanded && (
-        <div style={{ padding: "6px 0" }}>
-          {Object.entries(data).map(([key, val]) => (
-            <div key={key} style={{
-              display: "flex", alignItems: "flex-start", gap: 12,
-              padding: "6px 14px", fontSize: 13, fontFamily: FONT,
-            }}>
-              <span style={{
-                minWidth: 180, fontWeight: 600, color: "#64748B",
-                fontFamily: MONO, fontSize: 12, paddingTop: 1,
-              }}>
-                {key}
-              </span>
-              <span style={{ flex: 1 }}>{renderValue(val)}</span>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function NestedObject({ obj }) {
+// ── System Info display (same as DataFilteringPage) ──
+function QualityNestedObject({ obj }) {
   const [open, setOpen] = useState(false);
   const keys = Object.keys(obj);
   if (!open) {
     return (
       <span
-        onClick={(e) => { e.stopPropagation(); setOpen(true); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen(true);
+        }}
         style={{ color: B, cursor: "pointer", fontSize: 12, fontFamily: MONO }}
       >
         {`{ ${keys.length} fields }`}
@@ -2323,11 +2258,18 @@ function NestedObject({ obj }) {
     );
   }
   return (
-    <div style={{
-      marginTop: 4, paddingLeft: 16, borderLeft: "2px solid #E2E8F0",
-    }}>
+    <div
+      style={{
+        marginTop: 4,
+        paddingLeft: 16,
+        borderLeft: "2px solid #E2E8F0",
+      }}
+    >
       <span
-        onClick={(e) => { e.stopPropagation(); setOpen(false); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen(false);
+        }}
         style={{ fontSize: 11, color: "#94a3b8", cursor: "pointer", fontFamily: MONO }}
       >
         collapse
@@ -2336,17 +2278,115 @@ function NestedObject({ obj }) {
         <div key={k} style={{ display: "flex", gap: 8, padding: "3px 0", fontSize: 12 }}>
           <span style={{ fontWeight: 600, color: "#64748B", fontFamily: MONO }}>{k}:</span>
           <span>
-            {typeof v === "object" && v !== null && !Array.isArray(v)
-              ? <NestedObject obj={v} />
-              : typeof v === "number"
-                ? <span style={{ color: B, fontFamily: MONO }}>{v}</span>
-                : Array.isArray(v)
-                  ? <span style={{ color: "#64748B", fontFamily: MONO }}>[{v.join(", ")}]</span>
-                  : <span style={{ color: "#0F172A" }}>{String(v)}</span>
-            }
+            {typeof v === "object" && v !== null && !Array.isArray(v) ? (
+              <QualityNestedObject obj={v} />
+            ) : typeof v === "number" ? (
+              <span style={{ color: B, fontFamily: MONO }}>{v}</span>
+            ) : Array.isArray(v) ? (
+              <span style={{ color: "#64748B", fontFamily: MONO }}>[{v.join(", ")}]</span>
+            ) : (
+              <span style={{ color: "#0F172A" }}>{String(v)}</span>
+            )}
           </span>
         </div>
       ))}
+    </div>
+  );
+}
+
+function QualitySystemInfo({ data }) {
+  const [expanded, setExpanded] = useState(true);
+
+  const renderValue = (val) => {
+    if (val === null || val === undefined) return <span style={{ color: "#94a3b8" }}>null</span>;
+    if (typeof val === "boolean") return <span style={{ color: P, fontWeight: 600 }}>{val.toString()}</span>;
+    if (typeof val === "number") return <span style={{ color: B, fontFamily: MONO }}>{val}</span>;
+    if (typeof val === "string") return <span style={{ color: "#0F172A" }}>{val}</span>;
+    if (Array.isArray(val)) return <span style={{ color: "#64748B", fontFamily: MONO }}>[{val.join(", ")}]</span>;
+    if (typeof val === "object") return <QualityNestedObject obj={val} />;
+    return <span>{String(val)}</span>;
+  };
+
+  return (
+    <div
+      style={{
+        background: "#fff",
+        borderRadius: 14,
+        border: "1px solid #E2E8F0",
+        overflow: "hidden",
+      }}
+    >
+      <div
+        onClick={() => setExpanded(!expanded)}
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "14px 20px",
+          cursor: "pointer",
+          userSelect: "none",
+          borderBottom: expanded ? "1px solid #E2E8F0" : "none",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10, position: "relative" }}>
+          <SettingsOutlined sx={{ fontSize: 20, color: O }} />
+          <span style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: FONT }}>
+            System Info
+          </span>
+          <span onClick={(e) => e.stopPropagation()} style={{ display: "inline-flex" }}>
+            <SystemInfoHelpIcon linkColor={P} />
+          </span>
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 600,
+              color: O,
+              background: `${O}14`,
+              padding: "2px 10px",
+              borderRadius: 20,
+              fontFamily: MONO,
+            }}
+          >
+            {Object.keys(data).length} fields
+          </span>
+        </div>
+        {expanded ? (
+          <ExpandLessIcon sx={{ fontSize: 20, color: "#94a3b8" }} />
+        ) : (
+          <ExpandMoreIcon sx={{ fontSize: 20, color: "#94a3b8" }} />
+        )}
+      </div>
+      {expanded && (
+        <div style={{ padding: "8px 0" }}>
+          {Object.entries(data).map(([key, val]) => (
+            <div
+              key={key}
+              style={{
+                display: "flex",
+                alignItems: "flex-start",
+                gap: 12,
+                padding: "8px 20px",
+                fontSize: 13,
+                fontFamily: FONT,
+              }}
+            >
+              <span
+                style={{
+                  minWidth: 180,
+                  fontWeight: 600,
+                  color: "#64748B",
+                  fontFamily: MONO,
+                  fontSize: 12,
+                  paddingTop: 1,
+                }}
+              >
+                {key}
+              </span>
+              <span style={{ flex: 1 }}>{renderValue(val)}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -2818,7 +2858,7 @@ export default function QualityCheckPage() {
 
         <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
           {sysData && (
-            <JSONList data={sysData} />
+            <QualitySystemInfo data={sysData} />
           )}
           {(pvData || weatherData) && (
             <DateFilterBar

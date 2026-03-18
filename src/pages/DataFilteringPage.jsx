@@ -17,6 +17,7 @@ import ChevronRight from "@mui/icons-material/ChevronRight";
 import CloseOutlined from "@mui/icons-material/CloseOutlined";
 import FileDownloadOutlined from "@mui/icons-material/FileDownloadOutlined";
 import HelpOutline from "@mui/icons-material/HelpOutline";
+import TipsAndUpdates from "@mui/icons-material/TipsAndUpdates";
 import FunctionsOutlined from "@mui/icons-material/FunctionsOutlined";
 import AddOutlined from "@mui/icons-material/AddOutlined";
 import RemoveOutlined from "@mui/icons-material/RemoveOutlined";
@@ -173,10 +174,10 @@ function computePdcComparison(headers, rows, config, lossFactor = 0.97) {
   if ([coef_a, coef_b, delta, tot_power, temp_coef].some((n) => !Number.isFinite(n))) return null;
 
   const timeIdx = getDateColumnIndex(headers);
-  const airIdx = getColumnIndex(headers, ["Air_Temp", "weather_Air_Temp"]);
-  const gtiIdx = getColumnIndex(headers, ["GTI", "weather_GTI"]);
-  const windIdx = getColumnIndex(headers, ["Wind_speed", "weather_Wind_speed"]);
-  const pdcIdx = getColumnIndex(headers, ["P_DC", "Power"]);
+  const airIdx = getColumnIndex(headers, ["weather_Air_Temp"]);
+  const gtiIdx = getColumnIndex(headers, ["weather_POA", "weather_GTI", "GTI"]);
+  const windIdx = getColumnIndex(headers, ["weather_Wind_speed"]);
+  const pdcIdx = getColumnIndex(headers, ["Power", "P_DC"]);
   if (timeIdx < 0 || airIdx < 0 || gtiIdx < 0 || windIdx < 0 || pdcIdx < 0) return null;
 
   function resolveLossFactorForTime(timeVal) {
@@ -209,8 +210,8 @@ function computePdcComparison(headers, rows, config, lossFactor = 0.97) {
     const rowObj = {};
     for (let i = 0; i < headers.length; i++) rowObj[headers[i]] = row[i];
     rowObj.time = row[timeIdx];
-    rowObj.P_DC = Number.isFinite(pdc) ? pdc : null;
-    rowObj.weather_GTI = Number.isFinite(gti) ? gti : null;
+    rowObj.Power = Number.isFinite(pdc) ? pdc : null;
+    rowObj.weather_POA = Number.isFinite(gti) ? gti : null;
     rowObj.PVWatts = Number.isFinite(pvWatts) ? pvWatts : null;
     result.push(rowObj);
   }
@@ -233,7 +234,7 @@ function timeOfDayWeight(hourFloat, solarNoon = 12, minWeight = 0.2) {
 
 /**
  * Apply PVWatts filter in JS (mirrors backend pvwatts_filter).
- * comparisonData: array of { time, P_DC, PVWatts }.
+ * comparisonData: array of { time, Power, PVWatts }.
  * threshold: max relative error (e.g. 0.2 = 20%).
  * options: { timeWeightMin?: number } - if set (e.g. 0.2), scale error by time-of-day weight.
  * Returns { labeled, filtered, removedTimes }.
@@ -247,7 +248,7 @@ function pvwattsFilterJS(comparisonData, threshold, options = {}) {
 
   const labeled = [];
   for (const d of comparisonData) {
-    const pdc = d.P_DC != null ? Number(d.P_DC) : NaN;
+    const pdc = d.Power != null ? Number(d.Power) : NaN;
     const pv = d.PVWatts != null ? Number(d.PVWatts) : NaN;
     if (!Number.isFinite(pv) || pv <= 0 || !Number.isFinite(pdc)) continue;
     const relError = Math.abs((pdc - pv) / pv);
@@ -506,6 +507,7 @@ function FilterUploadZone({
   onError,
   onDownloadSuccess,
   templateFile,
+  footerHint,
 }) {
   const [drag, setDrag] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -753,6 +755,12 @@ function FilterUploadZone({
             )}
           </div>
         </label>
+      )}
+      {footerHint && (
+        <div style={{ marginTop: 12, paddingTop: 12, borderTop: "1px solid #E2E8F0", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}>
+          <TipsAndUpdates sx={{ fontSize: 16, color: "#64748B" }} />
+          <span style={{ fontFamily: FONT, fontSize: 11, color: "#64748B" }}>{footerHint}</span>
+        </div>
       )}
     </div>
   );
@@ -1588,13 +1596,13 @@ function FilterCSVTable({ title, icon, color, headers, rows, resampled, original
   );
 }
 
-// ── P_DC vs PVWatts comparison chart (Data Filtering only) ──
+// ── Power vs PVWatts comparison chart (Data Filtering only) ──
 function PdcComparisonChart({ comparisonData }) {
   const [expanded, setExpanded] = useState(true);
   if (!comparisonData || comparisonData.length === 0) return null;
 
   const x = comparisonData.map((d) => d.time);
-  const pdcY = comparisonData.map((d) => d.P_DC);
+  const pdcY = comparisonData.map((d) => d.Power);
   const pvWattsY = comparisonData.map((d) => d.PVWatts);
 
   const chartData = [
@@ -1603,9 +1611,9 @@ function PdcComparisonChart({ comparisonData }) {
       y: pdcY,
       type: "scatter",
       mode: "lines",
-      name: "P_DC (measured)",
+      name: "Power (measured)",
       line: { color: O, width: 1.5, shape: "spline", smoothing: 1.2 },
-      hovertemplate: "<b>P_DC</b>: %{y}<extra></extra>",
+      hovertemplate: "<b>Power</b>: %{y}<extra></extra>",
     },
     {
       x,
@@ -1634,7 +1642,7 @@ function PdcComparisonChart({ comparisonData }) {
       >
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <ShowChartOutlined sx={{ fontSize: 20, color: DF }} />
-          <span style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: FONT }}>P_DC vs PVWatts</span>
+          <span style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: FONT }}>Power vs PVWatts</span>
         </div>
         {expanded ? <ExpandLessIcon sx={{ fontSize: 20, color: "#94a3b8" }} /> : <ExpandMoreIcon sx={{ fontSize: 20, color: "#94a3b8" }} />}
       </div>
@@ -1677,7 +1685,7 @@ function PdcFilterChart({ comparisonData, filterResult, resampleMinutes }) {
   const chartSpec = useMemo(() => {
     if (!comparisonData || comparisonData.length === 0) return null;
     const times = comparisonData.map((d) => d.time);
-    const pdcRaw = comparisonData.map((d) => d.P_DC);
+    const pdcRaw = comparisonData.map((d) => d.Power);
     const pvRaw = comparisonData.map((d) => d.PVWatts);
 
     const traces = [
@@ -1703,8 +1711,8 @@ function PdcFilterChart({ comparisonData, filterResult, resampleMinutes }) {
 
     if (filterResult?.filtered?.length) {
       const ft = filterResult.filtered.map((d) => d.time);
-      const fpdc = filterResult.filtered.map((d) => d.P_DC);
-      // Map time -> P_DC for filtered points only (raw values)
+      const fpdc = filterResult.filtered.map((d) => d.Power);
+      // Map time -> Power for filtered points only (raw values)
       const filteredTimeToY = new Map();
       ft.forEach((t, i) => filteredTimeToY.set(t, fpdc[i]));
       // Use full time grid: null where point was removed so line does not link across gaps
@@ -1725,7 +1733,7 @@ function PdcFilterChart({ comparisonData, filterResult, resampleMinutes }) {
       if (removed.length > 0) {
         traces.push({
           x: removed.map((r) => r.time),
-          y: removed.map((r) => r.P_DC),
+          y: removed.map((r) => r.Power),
           type: "scatter",
           mode: "markers",
           name: "Removed Points",
@@ -1793,7 +1801,7 @@ function PdcFilterChart({ comparisonData, filterResult, resampleMinutes }) {
   );
 }
 
-// ── P_DC vs weather_GTI correlation scatter (above Labeled data table), data from labeled_data ──
+// ── Power vs weather_POA correlation scatter (above Labeled data table), data from labeled_data ──
 const CORRELATION_PURPLE = "#7c3aed";
 
 function PdcPvWattsCorrelationChart({ data }) {
@@ -1815,8 +1823,8 @@ function PdcPvWattsCorrelationChart({ data }) {
     const allX = [];
     const allY = [];
     for (const d of filteredByStatus) {
-      const gti = d.weather_GTI != null ? Number(d.weather_GTI) : NaN;
-      const pdc = d.P_DC != null ? Number(d.P_DC) : NaN;
+      const gti = d.weather_POA != null ? Number(d.weather_POA) : NaN;
+      const pdc = d.Power != null ? Number(d.Power) : NaN;
       if (Number.isFinite(gti) && Number.isFinite(pdc)) {
         allX.push(gti);
         allY.push(pdc);
@@ -1847,7 +1855,7 @@ function PdcPvWattsCorrelationChart({ data }) {
           mode: "markers",
           name: "Valid",
           marker: { ...markerBase, color: validColor },
-          hovertemplate: "<b>Valid</b><br>weather_GTI: %{x:.2f}<br>P_DC: %{y:.2f}<extra></extra>",
+          hovertemplate: "<b>Valid</b><br>weather_POA: %{x:.2f}<br>Power: %{y:.2f}<extra></extra>",
         });
       }
       if (removedPoints.x.length > 0) {
@@ -1858,7 +1866,7 @@ function PdcPvWattsCorrelationChart({ data }) {
           mode: "markers",
           name: "Removed",
           marker: { ...markerBase, color: removedColor },
-          hovertemplate: "<b>Removed</b><br>weather_GTI: %{x:.2f}<br>P_DC: %{y:.2f}<extra></extra>",
+          hovertemplate: "<b>Removed</b><br>weather_POA: %{x:.2f}<br>Power: %{y:.2f}<extra></extra>",
         });
       }
     } else {
@@ -1869,7 +1877,7 @@ function PdcPvWattsCorrelationChart({ data }) {
         mode: "markers",
         name: statusFilter === "valid" ? "Valid" : "Removed",
         marker: { ...markerBase, color: statusFilter === "valid" ? validColor : removedColor },
-        hovertemplate: "<b>weather_GTI</b>: %{x:.2f}<br><b>P_DC</b>: %{y:.2f}<extra></extra>",
+        hovertemplate: "<b>weather_POA</b>: %{x:.2f}<br><b>Power</b>: %{y:.2f}<extra></extra>",
       });
     }
     const traceLine = {
@@ -1879,7 +1887,7 @@ function PdcPvWattsCorrelationChart({ data }) {
       mode: "lines",
       name: `Trend (R² = ${r2.toFixed(3)})`,
       line: { color: DF, width: 2.5 },
-      hovertemplate: "Trend: P_DC = %{y:.2f}<extra></extra>",
+      hovertemplate: "Trend: Power = %{y:.2f}<extra></extra>",
     };
 
     const layout = {
@@ -1898,7 +1906,7 @@ function PdcPvWattsCorrelationChart({ data }) {
         borderwidth: 1,
       },
       xaxis: {
-        title: { text: "weather_GTI", font: { family: FONT, size: 13, color: "#334155" } },
+        title: { text: "weather_POA", font: { family: FONT, size: 13, color: "#334155" } },
         gridcolor: "#E2E8F0",
         zerolinecolor: "#E2E8F0",
         tickfont: { family: MONO, size: 11, color: "#64748B" },
@@ -1906,7 +1914,7 @@ function PdcPvWattsCorrelationChart({ data }) {
         linecolor: "#E2E8F0",
       },
       yaxis: {
-        title: { text: "P_DC", font: { family: FONT, size: 13, color: "#334155" } },
+        title: { text: "Power", font: { family: FONT, size: 13, color: "#334155" } },
         gridcolor: "#E2E8F0",
         zerolinecolor: "#E2E8F0",
         tickfont: { family: MONO, size: 11, color: "#64748B" },
@@ -1967,7 +1975,7 @@ function PdcPvWattsCorrelationChart({ data }) {
           </div>
           <div style={{ display: "flex", flexDirection: "column" }}>
             <span style={{ fontFamily: FONT, fontSize: 14, fontWeight: 800, color: "#0F172A" }}>
-              P_DC vs weather_GTI — Correlation
+              Power vs weather_POA — Correlation
             </span>
             <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>
               Data from labeled_data. Filter by status to change points shown.
@@ -2016,7 +2024,7 @@ function PdcPvWattsCorrelationChart({ data }) {
       />
       ) : (
         <div style={{ height: 360, display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", fontFamily: FONT, fontSize: 13 }}>
-          No data points for selected status ({statusFilter}). Choose another filter or ensure labeled_data has weather_GTI and P_DC.
+          No data points for selected status ({statusFilter}). Choose another filter or ensure labeled_data has weather_POA and Power.
         </div>
       ))}
     </div>
@@ -2027,7 +2035,7 @@ function PdcPvWattsCorrelationChart({ data }) {
 const FILTERED_TABLE_COLUMNS = [
   { id: "rowNum", label: "#" },
   { id: "time", label: "Time" },
-  { id: "P_DC", label: "P_DC" },
+  { id: "Power", label: "Power" },
   { id: "PVWatts", label: "PVWatts" },
   { id: "rel_error", label: "rel_error" },
   { id: "status", label: "Status" },
@@ -2063,7 +2071,7 @@ function FilteredDataTable({ data, title = "Filtered Data" }) {
   const renderCell = (colId, d, ri) => {
     if (colId === "rowNum") return ri + 1;
     if (colId === "time") return d.time ?? "";
-    if (colId === "P_DC") return d.P_DC != null ? Number(d.P_DC).toFixed(4) : "";
+    if (colId === "Power") return d.Power != null ? Number(d.Power).toFixed(4) : "";
     if (colId === "PVWatts") return d.PVWatts != null ? Number(d.PVWatts).toFixed(4) : "";
     if (colId === "rel_error") return d.rel_error != null ? (Number(d.rel_error) * 100).toFixed(2) + "%" : "";
     if (colId === "status") return d.status ?? "";
@@ -2406,10 +2414,12 @@ function FilterCSVChart({ title, color, headers, rows, defaultYHeader, defaultRi
   }, [safeHeaders, defaultYHeader, plottableCols]);
 
   const defaultRightIdx = useMemo(() => {
-    if (!defaultRightYHeader || plottableCols.length === 0) return [];
-    const target = String(defaultRightYHeader).trim().toLowerCase();
-    const idx = safeHeaders.findIndex((h, i) => i > 0 && String(h ?? "").trim().toLowerCase() === target);
-    if (idx > 0 && plottableCols.some((c) => c.index === idx)) return [idx];
+    if (plottableCols.length === 0) return [];
+    const candidates = [defaultRightYHeader, "weather_POA"].filter(Boolean).map((h) => String(h).trim().toLowerCase());
+    for (const target of candidates) {
+      const idx = safeHeaders.findIndex((h, i) => i > 0 && String(h ?? "").trim().toLowerCase() === target);
+      if (idx > 0 && plottableCols.some((c) => c.index === idx)) return [idx];
+    }
     return [];
   }, [safeHeaders, defaultRightYHeader, plottableCols]);
 
@@ -2823,7 +2833,7 @@ export default function DataFilteringPage() {
                     PVWatts Model & Comparison
                   </div>
                   <p style={{ fontSize: 12, color: "#475569", lineHeight: 1.7, marginBottom: 10 }}>
-                    Compute cell temperature (Tcell) and theoretical DC power (PVWatts) from weather and PV data using system parameters. Adjust the loss factor to account for model error, soiling, or degradation. Compare measured P_DC to PVWatts at each timestamp.
+                    Compute cell temperature (Tcell) and theoretical DC power (PVWatts) from weather and PV data using system parameters. Adjust the loss factor to account for model error, soiling, or degradation. Compare measured Power to PVWatts at each timestamp.
                   </p>
                   <ul style={{ fontSize: 12, color: "#64748B", lineHeight: 1.6, paddingLeft: 18, margin: 0 }}>
                     <li>Tcell from air temp, GTI, wind speed, and system coefficients.</li>
@@ -2838,7 +2848,7 @@ export default function DataFilteringPage() {
                     Filter Logic
                   </div>
                   <p style={{ fontSize: 12, color: "#475569", lineHeight: 1.7, marginBottom: 10 }}>
-                    Relative error is |P_DC − PVWatts| / PVWatts per row. Rows with relative error ≤ the threshold are labeled valid; the rest are removed. Set the threshold (e.g. 20%) to control how strict the filter is.
+                    Relative error is |Power − PVWatts| / PVWatts per row. Rows with relative error ≤ the threshold are labeled valid; the rest are removed. Set the threshold (e.g. 20%) to control how strict the filter is.
                   </p>
                   <ul style={{ fontSize: 12, color: "#64748B", lineHeight: 1.6, paddingLeft: 18, margin: 0 }}>
                     <li>Configurable threshold (rel. error) as a percentage.</li>
@@ -2853,7 +2863,7 @@ export default function DataFilteringPage() {
                     Visualization & Export
                   </div>
                   <p style={{ fontSize: 12, color: "#475569", lineHeight: 1.7, marginBottom: 10 }}>
-                    Time-series and scatter charts show P_DC vs PVWatts and correlation. A labeled data table lists valid and removed rows. Export the full labeled dataset or only valid/removed rows as CSV.
+                    Time-series and scatter charts show Power vs PVWatts and correlation. A labeled data table lists valid and removed rows. Export the full labeled dataset or only valid/removed rows as CSV.
                   </p>
                   <ul style={{ fontSize: 12, color: "#64748B", lineHeight: 1.6, paddingLeft: 18, margin: 0 }}>
                     <li>Measured vs calculated time-series and filter result chart.</li>
@@ -2918,6 +2928,7 @@ export default function DataFilteringPage() {
         >
           <FilterUploadZone
             label="Load PV & Weather Synced Data (.csv)"
+            footerHint="Generate using tool 'Data Ingestion & Sync'"
             icon={<SolarPowerOutlined sx={{ fontSize: 24, color: O }} />}
             accept=".csv"
             color={O}
@@ -3025,14 +3036,13 @@ export default function DataFilteringPage() {
                   "Current",
                   "Voltage",
                   "Power",
-                  "Module_Temp",
+                  "weather_POA",
                   "weather_GHI",
-                  "weather_GTI",
-                  "weather_air_temp",
-                  "weather_wind speed",
+                  "weather_Air_Temp",
+                  "weather_RH",
                 ]}
               />
-              <FilterCSVChart title="PV & Weather Data" color={O} headers={pvData.headers} rows={pvFilteredRows} defaultYHeader="Power" defaultRightYHeader="weather_GTI" />
+              <FilterCSVChart title="PV & Weather Data" color={O} headers={pvData.headers} rows={pvFilteredRows} defaultYHeader="Power" defaultRightYHeader="weather_POA" />
 
               {/* Data Filtering card */}
               <div
@@ -3501,7 +3511,7 @@ export default function DataFilteringPage() {
                     </div>
                     <div style={{ color: "#64748B", fontSize: 11 }}>
                       <code style={{ display: "block", marginBottom: 2, fontFamily: FONT, fontSize: 11 }}>
-                        df['rel_error'] = abs((df['P_DC'] − df['PVWatts']) / df['P_DC'])
+                        df['rel_error'] = abs((df['Power'] − df['PVWatts']) / df['Power'])
                       </code>
                       <code style={{ display: "block", fontFamily: FONT, fontSize: 11 }}>
                         df['status'] = df['rel_error'].apply(lambda x: 'valid' if x {"<="} threshold else 'removed')
@@ -3556,7 +3566,7 @@ export default function DataFilteringPage() {
                       >
                         <div style={{ fontWeight: 700, color: "#0F172A", marginBottom: 6 }}>How the filter works</div>
                         <p style={{ margin: "0 0 8px 0" }}>
-                          Relative error is computed as <code style={{ fontFamily: MONO, fontSize: 11, background: "#F1F5F9", padding: "1px 4px", borderRadius: 4 }}>|P_DC − PVWatts| / PVWatts</code> for each row. Rows where this value is <strong>≤</strong> the threshold (as a fraction, e.g. 0.2 = 20%) are kept as <strong>valid</strong>; rows above the threshold are marked <strong>removed</strong> and excluded from the filtered dataset.
+                          Relative error is computed as <code style={{ fontFamily: MONO, fontSize: 11, background: "#F1F5F9", padding: "1px 4px", borderRadius: 4 }}>|Power − PVWatts| / PVWatts</code> for each row. Rows where this value is <strong>≤</strong> the threshold (as a fraction, e.g. 0.2 = 20%) are kept as <strong>valid</strong>; rows above the threshold are marked <strong>removed</strong> and excluded from the filtered dataset.
                         </p>
                         <p style={{ margin: 0 }}>
                           Lower thresholds keep only points very close to the PVWatts model; higher thresholds allow more deviation (e.g. 50% keeps points within 50% relative error).
@@ -3730,7 +3740,7 @@ export default function DataFilteringPage() {
                 resampleMinutes={resamplingStepMinutes}
               />
 
-              {/* P_DC vs PVWatts correlation scatter (above Labeled data table) */}
+              {/* Power vs PVWatts correlation scatter (above Labeled data table) */}
               {filterResult?.labeled?.length > 0 && (
                 <PdcPvWattsCorrelationChart data={filterResult.labeled} />
               )}
@@ -3751,8 +3761,8 @@ export default function DataFilteringPage() {
                   const x = [];
                   const y = [];
                   for (const d of arr) {
-                    const gti = d.weather_GTI != null ? Number(d.weather_GTI) : NaN;
-                    const pdc = d.P_DC != null ? Number(d.P_DC) : NaN;
+                    const gti = d.weather_POA != null ? Number(d.weather_POA) : NaN;
+                    const pdc = d.Power != null ? Number(d.Power) : NaN;
                     if (Number.isFinite(gti) && Number.isFinite(pdc)) {
                       x.push(gti);
                       y.push(pdc);
@@ -3773,15 +3783,41 @@ export default function DataFilteringPage() {
                     })()
                   : "—";
                 const rowsToExport = downloadFilter === "all" ? labeled : labeled.filter((d) => d.status === downloadFilter);
-                const exportHeaders = (() => {
-                  const base = Array.isArray(pvData?.headers) ? pvData.headers : [];
-                  const extra = ["PVWatts", "rel_error", "status"].filter((h) => !base.includes(h));
-                  return [...base, ...extra];
-                })();
+                // Target schema for filtered CSV (matches pv_weather_filtered_pvcopilot.csv template)
+                const FILTERED_EXPORT_HEADERS = ["Time", "Current", "Voltage", "Power", "Module_Temp", "weather_POA", "weather_GHI", "weather_DNI", "weather_DHI", "weather_Air_Temp", "weather_RH", "weather_Pressure", "weather_Wind_speed", "weather_Rain", "PVWatts", "rel_error", "status"];
+                const FILTERED_EXPORT_SOURCE_KEYS = {
+                  Time: ["Time", "time"],
+                  Current: ["Current", "I1", "I_SUM"],
+                  Voltage: ["Voltage", "U_DC"],
+                  Power: ["Power", "P_DC"],
+                  Module_Temp: ["Module_Temp", "T1"],
+                  weather_POA: ["weather_POA", "weather_GTI", "GTI"],
+                  weather_GHI: ["weather_GHI"],
+                  weather_DNI: ["weather_DNI"],
+                  weather_DHI: ["weather_DHI"],
+                  weather_Air_Temp: ["weather_Air_Temp"],
+                  weather_RH: ["weather_RH"],
+                  weather_Pressure: ["weather_Pressure"],
+                  weather_Wind_speed: ["weather_Wind_speed"],
+                  weather_Rain: ["weather_Rain"],
+                  PVWatts: ["PVWatts"],
+                  rel_error: ["rel_error"],
+                  status: ["status"],
+                };
                 const handleDownload = () => {
                   const escape = (v) => (v == null ? "" : String(v).includes(",") ? `"${String(v).replace(/"/g, '""')}"` : String(v));
-                  const line = (row) => exportHeaders.map((h) => escape(row[h])).join(",");
-                  const csv = [exportHeaders.join(","), ...rowsToExport.map(line)].join("\n");
+                  const rowToExportRow = (row) => {
+                    const out = {};
+                    for (const h of FILTERED_EXPORT_HEADERS) {
+                      const keys = FILTERED_EXPORT_SOURCE_KEYS[h];
+                      let val = "";
+                      if (keys) for (const k of keys) { if (row[k] !== undefined && row[k] !== null && row[k] !== "") { val = row[k]; break; } }
+                      out[h] = val;
+                    }
+                    return out;
+                  };
+                  const line = (outRow) => FILTERED_EXPORT_HEADERS.map((h) => escape(outRow[h])).join(",");
+                  const csv = [FILTERED_EXPORT_HEADERS.join(","), ...rowsToExport.map((row) => line(rowToExportRow(row)))].join("\n");
                   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement("a");
