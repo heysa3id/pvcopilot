@@ -106,6 +106,7 @@ export function Timeline({ steps }: TimelineProps) {
                 description={step.description}
                 bullets={step.bullets}
                 imagePlaceholderLabel={step.imagePlaceholderLabel}
+                imageSrc={step.imageSrc}
               />
             </div>
           </div>

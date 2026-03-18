@@ -8,6 +8,7 @@ export interface StepCardProps {
   description: string;
   bullets: string[];
   imagePlaceholderLabel: string;
+  imageSrc?: string | string[];
 }
 
 export function StepCard({
@@ -17,6 +18,7 @@ export function StepCard({
   description,
   bullets,
   imagePlaceholderLabel,
+  imageSrc,
 }: StepCardProps) {
   return (
     <div className="w-full rounded-2xl border border-slate-200 bg-white p-6 shadow-sm dark:border-neutral-800 dark:bg-neutral-900 md:p-7">
@@ -37,7 +39,7 @@ export function StepCard({
           </li>
         ))}
       </ul>
-      <ImageHolder label={imagePlaceholderLabel} />
+      <ImageHolder label={imagePlaceholderLabel} imageSrc={imageSrc} />
     </div>
   );
 }

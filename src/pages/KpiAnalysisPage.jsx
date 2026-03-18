@@ -3857,7 +3857,6 @@ export default function KpiAnalysisPage() {
                   "weather_GHI",
                   "weather_POA",
                   "weather_Air_Temp",
-                  "weather_Wind_speed",
                   "PVWatts",
                   "status",
                 ]}

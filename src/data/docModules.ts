@@ -28,7 +28,8 @@ const step = (
   title: string,
   description: string,
   bullets: string[],
-  imageLabel: string
+  imageLabel: string,
+  imageSrc?: string | string[]
 ): TimelineStep => ({
   stepLabel,
   eyebrowLabel: eyebrow,
@@ -37,6 +38,7 @@ const step = (
   description,
   bullets,
   imagePlaceholderLabel: imageLabel,
+  ...(imageSrc != null ? { imageSrc } : {}),
 });
 
 // Data Ingestion & Synchronization
@@ -80,10 +82,65 @@ const POWER_PREDICTION_STEPS: TimelineStep[] = [
 
 // LCOE Tool
 const LCOE_TOOL_STEPS: TimelineStep[] = [
-  step('Step 1', 'LCOE tool', Database, 'Enter project and cost inputs', 'Provide project parameters, CAPEX, OPEX, and financial assumptions required for the LCOE calculation.', ['Project parameters', 'Cost breakdown', 'Financial assumptions'], 'LCOE inputs preview'),
-  step('Step 2', 'LCOE tool', Calculator, 'Set calculation options', 'Choose discount rate, lifetime, and any optional adjustments (e.g. degradation, incentives).', ['Discount rate', 'Lifetime and degradation', 'Incentives and taxes'], 'LCOE options preview'),
-  step('Step 3', 'LCOE tool', PlayCircle, 'Calculate LCOE', 'Run the LCOE calculation. The tool computes levelized cost and related metrics from your inputs.', ['Calculate button', 'Results computation', 'Sensitivity options'], 'LCOE calculation preview'),
-  step('Step 4', 'LCOE tool', FileOutput, 'Review and export', 'Inspect the LCOE results and export reports or tables for business planning and reporting.', ['LCOE results', 'Sensitivity and scenarios', 'Export report'], 'LCOE results preview'),
+  step(
+    'Step 1',
+    'LCOE tool',
+    Database,
+    'Enter system and CAPEX inputs',
+    'You have two options for production data: load a PVsyst report PDF (auto-fills system capacity, yield, PR, annual energy, degradation) or enter values manually in the System tab. Then enter CAPEX either by editing each line item in the CAPEX tab or by loading a template (Save/Load Template buttons).',
+    [
+      'Load PVsyst report PDF or enter system data manually',
+      'System: capacity, specific yield, PR, annual energy, degradation',
+      'CAPEX: enter line items manually or load a template',
+    ],
+    'LCOE — System and CAPEX inputs (PDF or manual, template)',
+    [
+      '/docs/lcoe-step1-system.png',
+      '/docs/lcoe-step1-capex.png',
+      '/docs/lcoe-step1-finance.png',
+    ]
+  ),
+  step(
+    'Step 2',
+    'LCOE tool',
+    Calculator,
+    'Fill finance section, choose currency, and LCOE status logic',
+    'In the Finance tab set O&M cost, discount rate (WACC), project lifetime, and PPA/tariff. Use the currency control on the LCOE hero card to select currency and optional exchange rate. Use the LCOE status badge (Excellent / Acceptable / Low) to open the thresholds popup and set the $/kWh limits that define how LCOE is rated.',
+    [
+      'Fill Finance: O&M, WACC, lifetime, PPA/tariff',
+      'Choose currency (and exchange rate) from the LCOE hero',
+      'Set LCOE status thresholds (Excellent max / Low min $/kWh) via the status badge',
+    ],
+    'LCOE — Finance, currency, and status thresholds',
+    '/docs/lcoe-step2-finance-currency-status.png'
+  ),
+  step(
+    'Step 3',
+    'LCOE tool',
+    PlayCircle,
+    'Analyze results: energy profile and cash flow',
+    'Results update live. Use the chart tabs to inspect the energy degradation profile over the project lifetime and the discounted cash flow. The LCOE hero and KPI cards show LCOE, CAPEX, capacity factor, payback, NPV, and IRR.',
+    [
+      'Live LCOE and KPI cards (CAPEX, capacity factor, payback, NPV, IRR)',
+      'Energy degradation profile chart',
+      'Discounted cash flow chart',
+    ],
+    'LCOE — Energy profile and cash flow charts',
+    '/docs/lcoe-step3-energy-cashflow.png'
+  ),
+  step(
+    'Step 4',
+    'LCOE tool',
+    FileOutput,
+    'Download report',
+    'Export the full LCOE analysis report as PDF from the LCOE hero area. The report includes inputs, LCOE and financial metrics, cost summary, sensitivity (tornado), and methodology.',
+    [
+      'Export LCOE report as PDF from the hero area',
+      'Report includes LCOE, KPIs, cost summary, sensitivity, methodology',
+    ],
+    'LCOE — PDF report download',
+    '/docs/lcoe-step4-download-report.png'
+  ),
 ];
 
 // Workflow
@@ -124,7 +181,7 @@ export const DOC_MODULE_CONTENT: Record<DocModuleId, DocModuleContent> = {
   'lcoe-tool': {
     title: 'LCOE Tool',
     description:
-      'Enter project and cost inputs, set calculation options such as discount rate and lifetime, then run the LCOE calculation. Review results and export reports for business planning.',
+      'Load a PVsyst report PDF or enter system data manually; enter CAPEX manually or load a template. Fill the finance section, choose your currency, and set LCOE status logic (thresholds). Analyze results via the energy profile and cash flow charts, then download the LCOE report as PDF.',
   },
   workflow: {
     title: 'Workflow',
