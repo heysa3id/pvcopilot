@@ -55,6 +55,67 @@ function parseJSON(text) {
   catch { return null; }
 }
 
+function extractUnitFromTemplateLabel(templateLabel) {
+  if (!templateLabel) return null;
+  const s = String(templateLabel);
+  const m = s.match(/\(([^)]+)\)\s*$/);
+  return m?.[1] ?? null;
+}
+
+function inferTemplateKeyFromHeader(headerBase, templateColumns, synonymTable) {
+  const lower = String(headerBase ?? "").trim().toLowerCase();
+  if (!lower) return null;
+
+  // Direct match (e.g. "Module_Temp")
+  for (const key of templateColumns) {
+    if (String(key).toLowerCase() === lower) return key;
+  }
+
+  // Normalized match (e.g. "Module Temp" -> "Module_Temp")
+  const normalized = lower.replace(/\s+/g, "_");
+  if (normalized !== lower) {
+    for (const key of templateColumns) {
+      if (String(key).toLowerCase() === normalized) return key;
+    }
+  }
+
+  // Synonym match (covers inputs like "P_DC" / "GTI" / "GHI")
+  for (const key of templateColumns) {
+    const syn = synonymTable?.[key];
+    if (!Array.isArray(syn) || syn.length === 0) continue;
+    if (syn.some((v) => String(v).toLowerCase() === lower)) return key;
+    if (syn.some((v) => String(v).toLowerCase() === normalized)) return key;
+  }
+
+  return null;
+}
+
+function formatHeaderWithUnit(header) {
+  const original = String(header ?? "").trim();
+  if (!original) return original;
+
+  // Avoid double-appending: if it already ends with "(...)".
+  if (/\([^)]*\)\s*$/.test(original)) return original;
+
+  // Keep original (including any weather_ prefix) for the output label.
+  const base = original.replace(/^weather_/i, "").replace(/^pv_/i, "").trim();
+  const baseForMatch = base.replace(/\s+/g, "_");
+
+  const pvKey = inferTemplateKeyFromHeader(baseForMatch, PV_TEMPLATE_COLUMNS, PV_SYNONYMS);
+  if (pvKey) {
+    const unit = extractUnitFromTemplateLabel(PV_TEMPLATE_LABELS?.[pvKey]);
+    return unit ? `${original} (${unit})` : original;
+  }
+
+  const whKey = inferTemplateKeyFromHeader(baseForMatch, WEATHER_TEMPLATE_COLUMNS, WEATHER_SYNONYMS);
+  if (whKey) {
+    const unit = extractUnitFromTemplateLabel(WEATHER_TEMPLATE_LABELS?.[whKey]);
+    return unit ? `${original} (${unit})` : original;
+  }
+
+  return original;
+}
+
 /** Find column index that looks like date/time (first col or name contains time/date). */
 function getDateColumnIndex(headers) {
   if (!headers || headers.length === 0) return -1;
@@ -600,7 +661,8 @@ function CSVTable({ title, icon, color, headers, rows, resampled, originalRows, 
       { id: ROW_NUM_ID, label: "#" },
       ...safeHeaders.map((h, i) => {
         const raw = String(h ?? "").trim() || `Column ${i + 1}`;
-        const label = displayNames[raw] ?? displayNames[raw.toLowerCase()] ?? raw;
+        const baseLabel = displayNames[raw] ?? displayNames[raw.toLowerCase()] ?? raw;
+        const label = formatHeaderWithUnit(baseLabel);
         return { id: i, label };
       }),
     ],
@@ -774,18 +836,18 @@ function SyncChart({ pvHeaders, pvRows, weatherHeaders, weatherRows }) {
       showlegend: true,
       legend: { x: 1, y: 1, xanchor: "right", font: { family: FONT, size: 11 } },
       xaxis: {
-        title: { text: "Time", font: { family: FONT, size: 12, color: "#94a3b8" } },
+        title: { text: formatHeaderWithUnit("Time"), font: { family: FONT, size: 12, color: "#94a3b8" } },
         gridcolor: "#F1F5F9",
         tickfont: { family: MONO, size: 10, color: "#94a3b8" },
       },
       yaxis: {
-        title: { text: safePvH[pdcCol] ?? "P_DC", font: { family: FONT, size: 12, color: O } },
+        title: { text: formatHeaderWithUnit(safePvH[pdcCol] ?? "P_DC"), font: { family: FONT, size: 12, color: O } },
         gridcolor: "#F1F5F9",
         tickfont: { family: MONO, size: 10, color: "#94a3b8" },
         side: "left",
       },
       yaxis2: {
-        title: { text: safeWh[irrCol] ?? "POA", font: { family: FONT, size: 12, color: B } },
+        title: { text: formatHeaderWithUnit(safeWh[irrCol] ?? "POA"), font: { family: FONT, size: 12, color: B } },
         gridcolor: "rgba(0,0,0,0)",
         tickfont: { family: MONO, size: 10, color: "#94a3b8" },
         side: "right",
@@ -1045,7 +1107,7 @@ function CorrelationChart({ pvHeaders, pvRows, weatherHeaders, weatherRows }) {
       },
       xaxis: {
         title: {
-          text: safeWh[irrCol] ?? "POA",
+          text: formatHeaderWithUnit(safeWh[irrCol] ?? "POA"),
           font: { family: FONT, size: 13, color: "#334155", standoff: 10 },
         },
         gridcolor: "#E2E8F0",
@@ -1060,7 +1122,7 @@ function CorrelationChart({ pvHeaders, pvRows, weatherHeaders, weatherRows }) {
       },
       yaxis: {
         title: {
-          text: safePvH[pdcCol] ?? "Power",
+          text: formatHeaderWithUnit(safePvH[pdcCol] ?? "Power"),
           font: { family: FONT, size: 13, color: "#334155", standoff: 10 },
         },
         gridcolor: "#E2E8F0",
@@ -1177,13 +1239,13 @@ function SyncedLineChart({ merged }) {
       tickfont: { family: MONO, size: 10, color: "#94a3b8" },
     },
     yaxis: {
-      title: { text: "Power", font: { family: FONT, size: 12, color: O } },
+      title: { text: formatHeaderWithUnit("Power"), font: { family: FONT, size: 12, color: O } },
       gridcolor: "#F1F5F9",
       tickfont: { family: MONO, size: 10, color: "#94a3b8" },
       side: "left",
     },
     yaxis2: {
-      title: { text: "POA", font: { family: FONT, size: 12, color: B } },
+      title: { text: formatHeaderWithUnit("POA"), font: { family: FONT, size: 12, color: B } },
       gridcolor: "rgba(0,0,0,0)",
       tickfont: { family: MONO, size: 10, color: "#94a3b8" },
       side: "right",
@@ -1295,7 +1357,7 @@ function SyncedCorrelationChart({ merged }) {
     },
     xaxis: {
       title: {
-        text: "POA (synced)",
+        text: `${formatHeaderWithUnit("POA")} (synced)`,
         font: { family: FONT, size: 13, color: "#334155", standoff: 10 },
       },
       gridcolor: "#E2E8F0",
@@ -1309,7 +1371,7 @@ function SyncedCorrelationChart({ merged }) {
     },
     yaxis: {
       title: {
-        text: "Power",
+        text: formatHeaderWithUnit("Power"),
         font: { family: FONT, size: 13, color: "#334155", standoff: 10 },
       },
       gridcolor: "#E2E8F0",
@@ -1619,12 +1681,12 @@ function CSVChart({ title, color, headers, rows, defaultYHeader }) {
             showlegend: chartData.length > 1,
             legend: { x: 1, y: 1, xanchor: "right", font: { family: FONT, size: 11 } },
             xaxis: {
-              title: { text: safeHeaders[0] ?? "Index", font: { family: FONT, size: 12, color: "#94a3b8" } },
+              title: { text: formatHeaderWithUnit(safeHeaders[0] ?? "Index"), font: { family: FONT, size: 12, color: "#94a3b8" } },
               gridcolor: "#F1F5F9",
               tickfont: { family: MONO, size: 10, color: "#94a3b8" },
             },
             yaxis: {
-              title: { text: selectedIndices.length === 1 ? (safeHeaders[selectedIndices[0]] ?? "") : "Value", font: { family: FONT, size: 12, color: "#94a3b8" } },
+              title: { text: selectedIndices.length === 1 ? formatHeaderWithUnit(safeHeaders[selectedIndices[0]] ?? "") : "Value", font: { family: FONT, size: 12, color: "#94a3b8" } },
               gridcolor: "#F1F5F9",
               tickfont: { family: MONO, size: 10, color: "#94a3b8" },
             },
@@ -2996,7 +3058,13 @@ export default function QualityCheckPage() {
                 resampled={pvData.resampled}
                 originalRows={pvData.originalRows}
                 resampledStepMinutes={pvData.resampledStepMinutes}
-                defaultVisibleLabels={["Time", "Current", "Voltage", "Power", "Module_Temp"]}
+                defaultVisibleLabels={[
+                  formatHeaderWithUnit("Time"),
+                  formatHeaderWithUnit("Current"),
+                  formatHeaderWithUnit("Voltage"),
+                  formatHeaderWithUnit("Power"),
+                  formatHeaderWithUnit("Module_Temp"),
+                ]}
                 columnDisplayNames={{
                   Time: "Time",
                   Current: "Current",
@@ -3098,7 +3166,13 @@ export default function QualityCheckPage() {
                 resampled={weatherData.resampled}
                 originalRows={weatherData.originalRows}
                 resampledStepMinutes={weatherData.resampledStepMinutes}
-                defaultVisibleLabels={["Time", "POA", "GHI", "Air_Temp", "RH"]}
+                defaultVisibleLabels={[
+                  formatHeaderWithUnit("Time"),
+                  formatHeaderWithUnit("POA"),
+                  formatHeaderWithUnit("GHI"),
+                  formatHeaderWithUnit("Air_Temp"),
+                  formatHeaderWithUnit("RH"),
+                ]}
               />
               <CSVChart
                 title="Weather Data"

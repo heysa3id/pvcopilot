@@ -26,6 +26,7 @@ import RotateLeftOutlinedIcon from "@mui/icons-material/RotateLeftOutlined";
 import Button from "@mui/material/Button";
 import TableColumnSelector from "../components/TableColumnSelector";
 import SystemInfoHelpIcon from "../components/SystemInfoHelpIcon";
+import { PV_SYNONYMS, PV_TEMPLATE_COLUMNS, PV_TEMPLATE_LABELS, WEATHER_SYNONYMS, WEATHER_TEMPLATE_COLUMNS, WEATHER_TEMPLATE_LABELS } from "../components/CSVColumnMapper";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -42,6 +43,63 @@ function parseJSON(text) {
   } catch {
     return null;
   }
+}
+
+function extractUnitFromTemplateLabel(templateLabel) {
+  if (!templateLabel) return null;
+  const s = String(templateLabel);
+  const m = s.match(/\(([^)]+)\)\s*$/);
+  return m?.[1] ?? null;
+}
+
+function inferTemplateKeyFromHeader(headerBase, templateColumns, synonymTable) {
+  const lower = String(headerBase ?? "").trim().toLowerCase();
+  if (!lower) return null;
+
+  for (const key of templateColumns) {
+    if (String(key).toLowerCase() === lower) return key;
+  }
+
+  const normalized = lower.replace(/\s+/g, "_");
+  if (normalized !== lower) {
+    for (const key of templateColumns) {
+      if (String(key).toLowerCase() === normalized) return key;
+    }
+  }
+
+  for (const key of templateColumns) {
+    const syn = synonymTable?.[key];
+    if (!Array.isArray(syn) || syn.length === 0) continue;
+    if (syn.some((v) => String(v).toLowerCase() === lower)) return key;
+    if (syn.some((v) => String(v).toLowerCase() === normalized)) return key;
+  }
+
+  return null;
+}
+
+function formatHeaderWithUnit(header) {
+  const original = String(header ?? "").trim();
+  if (!original) return original;
+
+  // Avoid double-appending: if it already ends with "(...)".
+  if (/\([^)]*\)\s*$/.test(original)) return original;
+
+  const base = original.replace(/^weather_/i, "").replace(/^pv_/i, "").trim();
+  const baseForMatch = base.replace(/\s+/g, "_");
+
+  const pvKey = inferTemplateKeyFromHeader(baseForMatch, PV_TEMPLATE_COLUMNS, PV_SYNONYMS);
+  if (pvKey) {
+    const unit = extractUnitFromTemplateLabel(PV_TEMPLATE_LABELS?.[pvKey]);
+    return unit ? `${original} (${unit})` : original;
+  }
+
+  const whKey = inferTemplateKeyFromHeader(baseForMatch, WEATHER_TEMPLATE_COLUMNS, WEATHER_SYNONYMS);
+  if (whKey) {
+    const unit = extractUnitFromTemplateLabel(WEATHER_TEMPLATE_LABELS?.[whKey]);
+    return unit ? `${original} (${unit})` : original;
+  }
+
+  return original;
 }
 
 function parseCSV(text) {
@@ -1506,7 +1564,10 @@ function FilterCSVTable({ title, icon, color, headers, rows, resampled, original
   const columns = useMemo(
     () => [
       { id: ROW_NUM_ID, label: "#" },
-      ...safeHeaders.map((h, i) => ({ id: i, label: String(h ?? "").trim() || `Column ${i + 1}` })),
+      ...safeHeaders.map((h, i) => ({
+        id: i,
+        label: formatHeaderWithUnit(String(h ?? "").trim() || `Column ${i + 1}`),
+      })),
     ],
     [safeHeaders]
   );
@@ -1906,7 +1967,7 @@ function PdcPvWattsCorrelationChart({ data }) {
         borderwidth: 1,
       },
       xaxis: {
-        title: { text: "weather_POA", font: { family: FONT, size: 13, color: "#334155" } },
+        title: { text: formatHeaderWithUnit("weather_POA"), font: { family: FONT, size: 13, color: "#334155" } },
         gridcolor: "#E2E8F0",
         zerolinecolor: "#E2E8F0",
         tickfont: { family: MONO, size: 11, color: "#64748B" },
@@ -1914,7 +1975,7 @@ function PdcPvWattsCorrelationChart({ data }) {
         linecolor: "#E2E8F0",
       },
       yaxis: {
-        title: { text: "Power", font: { family: FONT, size: 13, color: "#334155" } },
+        title: { text: formatHeaderWithUnit("Power"), font: { family: FONT, size: 13, color: "#334155" } },
         gridcolor: "#E2E8F0",
         zerolinecolor: "#E2E8F0",
         tickfont: { family: MONO, size: 11, color: "#64748B" },
@@ -2472,8 +2533,8 @@ function FilterCSVChart({ title, color, headers, rows, defaultYHeader, defaultRi
 
   const hasLeft = selectedIndicesLeft.length > 0;
   const hasRight = selectedIndicesRight.length > 0;
-  const leftTitle = hasLeft && selectedIndicesLeft.length === 1 ? (safeHeaders[selectedIndicesLeft[0]] ?? "Left") : "Left Y-axis";
-  const rightTitle = hasRight && selectedIndicesRight.length === 1 ? (safeHeaders[selectedIndicesRight[0]] ?? "Right") : "Right Y-axis";
+  const leftTitle = hasLeft && selectedIndicesLeft.length === 1 ? formatHeaderWithUnit(safeHeaders[selectedIndicesLeft[0]] ?? "Left") : "Left Y-axis";
+  const rightTitle = hasRight && selectedIndicesRight.length === 1 ? formatHeaderWithUnit(safeHeaders[selectedIndicesRight[0]] ?? "Right") : "Right Y-axis";
 
   if (plottableCols.length === 0) return null;
 
@@ -2515,7 +2576,7 @@ function FilterCSVChart({ title, color, headers, rows, defaultYHeader, defaultRi
                 showlegend: chartData.length > 1,
                 legend: { orientation: "h", x: 0.5, y: 1.02, xanchor: "center", yanchor: "bottom", font: { family: FONT, size: 11 } },
                 xaxis: {
-                  title: { text: safeHeaders[0] ?? "Index", font: { family: FONT, size: 12, color: "#94a3b8" } },
+                  title: { text: formatHeaderWithUnit(safeHeaders[0] ?? "Index"), font: { family: FONT, size: 12, color: "#94a3b8" } },
                   gridcolor: "#F1F5F9",
                   tickfont: { family: MONO, size: 10, color: "#94a3b8" },
                   rangeslider: { visible: false },
@@ -3032,14 +3093,14 @@ export default function DataFilteringPage() {
                 originalRows={pvData.originalRows}
                 resampledStepMinutes={pvData.resampledStepMinutes}
                 defaultVisibleLabels={[
-                  "Time",
-                  "Current",
-                  "Voltage",
-                  "Power",
-                  "weather_POA",
-                  "weather_GHI",
-                  "weather_Air_Temp",
-                  "weather_RH",
+                  formatHeaderWithUnit("Time"),
+                  formatHeaderWithUnit("Current"),
+                  formatHeaderWithUnit("Voltage"),
+                  formatHeaderWithUnit("Power"),
+                  formatHeaderWithUnit("weather_POA"),
+                  formatHeaderWithUnit("weather_GHI"),
+                  formatHeaderWithUnit("weather_Air_Temp"),
+                  formatHeaderWithUnit("weather_RH"),
                 ]}
               />
               <FilterCSVChart title="PV & Weather Data" color={O} headers={pvData.headers} rows={pvFilteredRows} defaultYHeader="Power" defaultRightYHeader="weather_POA" />

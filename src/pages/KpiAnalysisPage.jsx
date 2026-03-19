@@ -27,6 +27,7 @@ import RotateLeftOutlinedIcon from "@mui/icons-material/RotateLeftOutlined";
 import Button from "@mui/material/Button";
 import TableColumnSelector from "../components/TableColumnSelector";
 import SystemInfoHelpIcon from "../components/SystemInfoHelpIcon";
+import { PV_SYNONYMS, PV_TEMPLATE_COLUMNS, PV_TEMPLATE_LABELS, WEATHER_SYNONYMS, WEATHER_TEMPLATE_COLUMNS, WEATHER_TEMPLATE_LABELS } from "../components/CSVColumnMapper";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -44,6 +45,62 @@ function parseJSON(text) {
   } catch {
     return null;
   }
+}
+
+function extractUnitFromTemplateLabel(templateLabel) {
+  if (!templateLabel) return null;
+  const s = String(templateLabel);
+  const m = s.match(/\(([^)]+)\)\s*$/);
+  return m?.[1] ?? null;
+}
+
+function inferTemplateKeyFromHeader(headerBase, templateColumns, synonymTable) {
+  const lower = String(headerBase ?? "").trim().toLowerCase();
+  if (!lower) return null;
+
+  for (const key of templateColumns) {
+    if (String(key).toLowerCase() === lower) return key;
+  }
+
+  const normalized = lower.replace(/\s+/g, "_");
+  if (normalized !== lower) {
+    for (const key of templateColumns) {
+      if (String(key).toLowerCase() === normalized) return key;
+    }
+  }
+
+  for (const key of templateColumns) {
+    const syn = synonymTable?.[key];
+    if (!Array.isArray(syn) || syn.length === 0) continue;
+    if (syn.some((v) => String(v).toLowerCase() === lower)) return key;
+    if (syn.some((v) => String(v).toLowerCase() === normalized)) return key;
+  }
+
+  return null;
+}
+
+function formatHeaderWithUnit(header) {
+  const original = String(header ?? "").trim();
+  if (!original) return original;
+
+  if (/\([^)]*\)\s*$/.test(original)) return original;
+
+  const base = original.replace(/^weather_/i, "").replace(/^pv_/i, "").trim();
+  const baseForMatch = base.replace(/\s+/g, "_");
+
+  const pvKey = inferTemplateKeyFromHeader(baseForMatch, PV_TEMPLATE_COLUMNS, PV_SYNONYMS);
+  if (pvKey) {
+    const unit = extractUnitFromTemplateLabel(PV_TEMPLATE_LABELS?.[pvKey]);
+    return unit ? `${original} (${unit})` : original;
+  }
+
+  const whKey = inferTemplateKeyFromHeader(baseForMatch, WEATHER_TEMPLATE_COLUMNS, WEATHER_SYNONYMS);
+  if (whKey) {
+    const unit = extractUnitFromTemplateLabel(WEATHER_TEMPLATE_LABELS?.[whKey]);
+    return unit ? `${original} (${unit})` : original;
+  }
+
+  return original;
 }
 
 function parseCSV(text) {
@@ -1365,7 +1422,10 @@ function KpiCSVTable({ title, icon, color, headers, rows, resampled, originalRow
   const columns = useMemo(
     () => [
       { id: ROW_NUM_ID, label: "#" },
-      ...safeHeaders.map((h, i) => ({ id: i, label: String(h ?? "").trim() || `Column ${i + 1}` })),
+      ...safeHeaders.map((h, i) => ({
+        id: i,
+        label: formatHeaderWithUnit(String(h ?? "").trim() || `Column ${i + 1}`),
+      })),
     ],
     [safeHeaders]
   );
@@ -1677,9 +1737,9 @@ function KpiCSVChart({
     fixedYAsPercent && fixedYHeader
       ? "Performance Ratio (%)"
       : hasLeft && selectedIndicesLeft.length === 1
-      ? safeHeaders[selectedIndicesLeft[0]] ?? "Left"
+      ? formatHeaderWithUnit(safeHeaders[selectedIndicesLeft[0]] ?? "Left")
       : "Left Y-axis";
-  const rightTitle = hasRight && selectedIndicesRight.length === 1 ? (safeHeaders[selectedIndicesRight[0]] ?? "Right") : "Right Y-axis";
+  const rightTitle = hasRight && selectedIndicesRight.length === 1 ? formatHeaderWithUnit(safeHeaders[selectedIndicesRight[0]] ?? "Right") : "Right Y-axis";
   const leftRange = enableAxisRangeControls ? parseAxisRange(leftYMinInput, leftYMaxInput) : null;
   const rightRange = enableAxisRangeControls && hasRight ? parseAxisRange(rightYMinInput, rightYMaxInput) : null;
   const yaxisLayout = {
@@ -1801,7 +1861,7 @@ function KpiCSVChart({
                     bordercolor: "rgba(0,0,0,0)",
                   },
                   xaxis: {
-                    title: { text: safeHeaders[0] ?? "Index", font: { family: CHART_FONT, size: 11, color: "#94a3b8", weight: 500 } },
+                    title: { text: formatHeaderWithUnit(safeHeaders[0] ?? "Index"), font: { family: CHART_FONT, size: 11, color: "#94a3b8", weight: 500 } },
                     showgrid: false,
                     zeroline: false,
                     showline: false,
@@ -3849,14 +3909,14 @@ export default function KpiAnalysisPage() {
                 originalRows={pvData.originalRows}
                 resampledStepMinutes={pvData.resampledStepMinutes}
                 defaultVisibleLabels={[
-                  "Time",
-                  "Current",
-                  "Voltage",
-                  "Power",
-                  "Module_Temp",
-                  "weather_GHI",
-                  "weather_POA",
-                  "weather_Air_Temp",
+                  formatHeaderWithUnit("Time"),
+                  formatHeaderWithUnit("Current"),
+                  formatHeaderWithUnit("Voltage"),
+                  formatHeaderWithUnit("Power"),
+                  formatHeaderWithUnit("Module_Temp"),
+                  formatHeaderWithUnit("weather_GHI"),
+                  formatHeaderWithUnit("weather_POA"),
+                  formatHeaderWithUnit("weather_Air_Temp"),
                   "PVWatts",
                   "status",
                 ]}
