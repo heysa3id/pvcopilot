@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { AnimatePresence } from 'framer-motion';
 import { Timeline } from '../components/docs/Timeline';
 import {
@@ -10,7 +11,12 @@ import { DocumentationModuleContent } from '../components/docs/DocumentationModu
 import { DOCS_STEPS_BY_MODULE } from '../data/docModules';
 
 export default function DocsPage() {
-  const [activeTool, setActiveTool] = useState<DocModuleId>(DOC_MODULE_ITEMS[0].id);
+  const [searchParams] = useSearchParams();
+  const moduleParam = searchParams.get('module') as DocModuleId | null;
+  const initialModule = DOC_MODULE_ITEMS.find(m => m.id === moduleParam)
+    ? moduleParam!
+    : 'lcoe-tool' as DocModuleId;
+  const [activeTool, setActiveTool] = useState<DocModuleId>(initialModule);
 
   return (
     <div className="w-full bg-white text-slate-900 dark:bg-neutral-950 dark:text-white">

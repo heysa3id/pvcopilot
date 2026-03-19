@@ -486,29 +486,43 @@ function PlatformModuleCard({ number, icon, title, subtitle, desc, tags, path, e
             ))}
           </div>
         )}
-        {/* Link - flexShrink: 0 so it stays visible */}
-        {path ? (
-          <Link to={path} onClick={e => e.stopPropagation()} className="platform-module-link"
-            onMouseEnter={e => {
-              e.currentTarget.style.color = G;
-              e.currentTarget.style.transform = "translateX(2px)";
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.color = "#dec89a";
-              e.currentTarget.style.transform = "translateX(0)";
-            }}
-            style={{
-            fontFamily: "Inter, Arial, sans-serif",
-            display: "inline-flex", alignItems: "center", gap: 10,
-            color: "#dec89a", textDecoration: "none", fontSize: 15, fontWeight: 800,
-            transition: "color 0.25s ease, transform 0.25s ease",
-            flexShrink: 0,
-          }}>
-            Open Module <span style={{ fontSize: 16, lineHeight: 1 }}>→</span>
-          </Link>
-        ) : (
-          <span className="platform-module-link" style={{ display: "inline-flex", alignItems: "center", gap: 10, fontSize: 15, fontWeight: 800, color: "#dec89a", flexShrink: 0 }}>Open Module →</span>
-        )}
+        {/* Links - flexShrink: 0 so they stay visible */}
+        <div style={{ display: "flex", alignItems: "center", gap: 16, flexShrink: 0 }}>
+          {path ? (
+            <Link to={path} onClick={e => e.stopPropagation()} className="platform-module-link"
+              onMouseEnter={e => {
+                e.currentTarget.style.color = G;
+                e.currentTarget.style.transform = "translateX(2px)";
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.color = "#dec89a";
+                e.currentTarget.style.transform = "translateX(0)";
+              }}
+              style={{
+              fontFamily: "Inter, Arial, sans-serif",
+              display: "inline-flex", alignItems: "center", gap: 10,
+              color: "#dec89a", textDecoration: "none", fontSize: 15, fontWeight: 800,
+              transition: "color 0.25s ease, transform 0.25s ease",
+            }}>
+              Open Module <span style={{ fontSize: 16, lineHeight: 1 }}>→</span>
+            </Link>
+          ) : (
+            <span className="platform-module-link" style={{ display: "inline-flex", alignItems: "center", gap: 10, fontSize: 15, fontWeight: 800, color: "#dec89a" }}>Open Module →</span>
+          )}
+          {path && (
+            <Link to={`/docs?module=${path.slice(1)}`} onClick={e => e.stopPropagation()}
+              onMouseEnter={e => e.currentTarget.style.color = "#F4BB40"}
+              onMouseLeave={e => e.currentTarget.style.color = "#94a3b8"}
+              style={{
+                fontFamily: "Inter, Arial, sans-serif",
+                display: "inline-flex", alignItems: "center", gap: 6,
+                color: "#94a3b8", textDecoration: "none", fontSize: 13, fontWeight: 600,
+                transition: "color 0.25s ease",
+              }}>
+              Read docs
+            </Link>
+          )}
+        </div>
       </div>
     </>
   );
