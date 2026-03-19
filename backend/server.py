@@ -6,12 +6,17 @@ Route handlers import logic from: lcoe_pdf, quality_check_csv, time_sync.
 
 import os
 import tempfile
+from datetime import datetime
 
+import pandas as pd
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 from lcoe_pdf import parse_pvsyst_pdf
 from quality_check_csv import process_quality_check_csv
+
+CONTACTS_DIR = os.path.join(os.path.dirname(__file__), "data")
+CONTACTS_FILE = os.path.join(CONTACTS_DIR, "contacts.xlsx")
 
 app = Flask(__name__)
 CORS(app)
@@ -62,6 +67,53 @@ def process_csv():
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": f"Processing error: {str(e)}"}), 500
+
+
+@app.route("/api/contact", methods=["POST"])
+def save_contact():
+    """Save a contact form submission to the local Excel file."""
+    data = request.get_json(silent=True)
+    if not data:
+        return jsonify({"error": "Invalid JSON body."}), 400
+
+    name = (data.get("name") or "").strip()
+    email = (data.get("email") or "").strip()
+    message = (data.get("message") or "").strip()
+
+    if not name or not email or not message:
+        return jsonify({"error": "Name, email, and message are required."}), 400
+
+    try:
+        os.makedirs(CONTACTS_DIR, exist_ok=True)
+        new_row = pd.DataFrame([{
+            "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "Name": name,
+            "Email": email,
+            "Message": message,
+        }])
+
+        if os.path.exists(CONTACTS_FILE):
+            existing = pd.read_excel(CONTACTS_FILE, engine="openpyxl")
+            df = pd.concat([existing, new_row], ignore_index=True)
+        else:
+            df = new_row
+
+        df.to_excel(CONTACTS_FILE, index=False, engine="openpyxl")
+        return jsonify({"success": True})
+    except Exception as e:
+        return jsonify({"error": f"Failed to save contact: {str(e)}"}), 500
+
+
+@app.route("/api/contacts", methods=["GET"])
+def list_contacts():
+    """Return all contact form submissions as JSON."""
+    if not os.path.exists(CONTACTS_FILE):
+        return jsonify([])
+    try:
+        df = pd.read_excel(CONTACTS_FILE, engine="openpyxl")
+        return jsonify(df.to_dict(orient="records"))
+    except Exception as e:
+        return jsonify({"error": f"Failed to read contacts: {str(e)}"}), 500
 
 
 @app.route("/api/health", methods=["GET"])

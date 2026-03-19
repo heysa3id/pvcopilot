@@ -12,6 +12,7 @@ import {
   Menu,
   X,
 } from "lucide-react";
+import ContactFormPopover from "./ContactFormPopover";
 import {
   SearchOutlined,
   QueryStats,
@@ -211,16 +212,22 @@ function ToolsMenu({ pathname, toolsOpen, setToolsOpen, toolsRef, closeMobile })
 }
 
 function ContactTooltipButton({ closeMobile }) {
+  const [contactOpen, setContactOpen] = useState(false);
   return (
-    <a
-      href="mailto:contact@pvcopilot.com"
-      className="group relative flex items-center justify-center rounded-lg p-2 transition-colors duration-200"
-      style={{ background: SOFT_ACCENT_BG, color: ACCENT }}
-      onClick={closeMobile}
-    >
-      <Mail className="h-5 w-5" strokeWidth={2} />
-      <NavTooltip icon={Mail} label="Contact us" />
-    </a>
+    <div className="relative">
+      <button
+        type="button"
+        onClick={() => { closeMobile?.(); setContactOpen(true); }}
+        className="group relative flex items-center justify-center rounded-lg p-2 transition-colors duration-200"
+        style={{ background: SOFT_ACCENT_BG, color: ACCENT }}
+      >
+        <Mail className="h-5 w-5" strokeWidth={2} />
+        <NavTooltip icon={Mail} label="Contact us" />
+      </button>
+      <div className="absolute right-0 top-full z-50 mt-2">
+        <ContactFormPopover open={contactOpen} setOpen={setContactOpen} />
+      </div>
+    </div>
   );
 }
 
