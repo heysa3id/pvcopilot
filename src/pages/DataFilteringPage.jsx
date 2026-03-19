@@ -255,6 +255,7 @@ function computePdcComparison(headers, rows, config, lossFactor = 0.97) {
   }
 
   const result = [];
+  let debugLogged = 0;
   for (const row of rows) {
     if (!Array.isArray(row)) continue;
     const airTemp = parseFloat(row[airIdx]);
@@ -264,13 +265,44 @@ function computePdcComparison(headers, rows, config, lossFactor = 0.97) {
     if (!Number.isFinite(gti) || !Number.isFinite(airTemp) || !Number.isFinite(wind)) continue;
     const tcell = airTemp + (gti * Math.exp(coef_a + coef_b * wind)) + (gti * delta / 1000);
     const factor = resolveLossFactorForTime(row[timeIdx]);
-    const pvWatts = (gti * tot_power * (1 + (temp_coef * 1e-2) * (tcell - 25))) * factor;
+    // PVWatts is computed from the GTI model; scale by /1000 to match kW-based `Power` units.
+    const pvWatts = (gti * tot_power * (1 + (temp_coef * 1e-2) * (tcell - 25))) * factor / 1000;
     const rowObj = {};
     for (let i = 0; i < headers.length; i++) rowObj[headers[i]] = row[i];
     rowObj.time = row[timeIdx];
     rowObj.Power = Number.isFinite(pdc) ? pdc : null;
     rowObj.weather_POA = Number.isFinite(gti) ? gti : null;
     rowObj.PVWatts = Number.isFinite(pvWatts) ? pvWatts : null;
+
+    // #region agent log (pvwatts_power_units)
+    const pdcWGuess = Number.isFinite(pdc) ? pdc * 1000 : null;
+    if (debugLogged < 3 && Number.isFinite(pdc) && Number.isFinite(pvWatts) && Number.isFinite(gti) && gti > 0 && pvWatts > 0 && pdc !== 0) {
+      fetch("http://127.0.0.1:7283/ingest/1d413e82-602f-441e-8fcf-2d13a5c3968e", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "bd2544" },
+        body: JSON.stringify({
+          sessionId: "bd2544",
+          runId: "daylightEvidence",
+          hypothesisId: "H1",
+          location: "src/pages/DataFilteringPage.jsx:computePdcComparison",
+          message: "PVWatts vs Power (kW) sample row",
+          timestamp: Date.now(),
+          data: {
+            time: row[timeIdx],
+            gti,
+            tot_power,
+            tcell,
+            factor,
+            Power: pdc,
+            Power_times_1000_guess: pdcWGuess,
+            PVWatts: pvWatts,
+          },
+        }),
+      }).catch(() => {});
+      debugLogged++;
+    }
+    // #endregion
+
     result.push(rowObj);
   }
   return result.length ? result : null;
@@ -1672,7 +1704,7 @@ function PdcComparisonChart({ comparisonData }) {
       y: pdcY,
       type: "scatter",
       mode: "lines",
-      name: "Power (measured)",
+      name: "Power (measured, kW)",
       line: { color: O, width: 1.5, shape: "spline", smoothing: 1.2 },
       hovertemplate: "<b>Power</b>: %{y}<extra></extra>",
     },
@@ -1681,9 +1713,9 @@ function PdcComparisonChart({ comparisonData }) {
       y: pvWattsY,
       type: "scatter",
       mode: "lines",
-      name: "PVWatts (theoretical)",
+      name: "PVWatts (theoretical, kW)",
       line: { color: B, width: 1.5, shape: "spline", smoothing: 1.2 },
-      hovertemplate: "<b>PVWatts</b>: %{y}<extra></extra>",
+      hovertemplate: "<b>PVWatts (kW)</b>: %{y}<extra></extra>",
     },
   ];
 
@@ -1723,7 +1755,7 @@ function PdcComparisonChart({ comparisonData }) {
                 tickfont: { family: MONO, size: 10, color: "#94a3b8" },
               },
               yaxis: {
-                title: { text: "Power (W)", font: { family: FONT, size: 12, color: "#94a3b8" } },
+                title: { text: "Power (kW)", font: { family: FONT, size: 12, color: "#94a3b8" } },
                 gridcolor: "#F1F5F9",
                 tickfont: { family: MONO, size: 10, color: "#94a3b8" },
               },
@@ -1845,7 +1877,7 @@ function PdcFilterChart({ comparisonData, filterResult, resampleMinutes }) {
                 tickfont: { family: MONO, size: 10, color: "#94a3b8" },
               },
               yaxis: {
-                title: { text: "Power (W)", font: { family: FONT, size: 12, color: "#94a3b8" } },
+                title: { text: "Power (kW)", font: { family: FONT, size: 12, color: "#94a3b8" } },
                 gridcolor: "#F1F5F9",
                 tickfont: { family: MONO, size: 10, color: "#94a3b8" },
               },
@@ -2898,7 +2930,7 @@ export default function DataFilteringPage() {
                   </p>
                   <ul style={{ fontSize: 12, color: "#64748B", lineHeight: 1.6, paddingLeft: 18, margin: 0 }}>
                     <li>Tcell from air temp, GTI, wind speed, and system coefficients.</li>
-                    <li>PVWatts = GTI × tot_power × (1 + temp_coef×(Tcell−25)/100) × loss_factor.</li>
+                    <li>PVWatts (kW) = GTI × tot_power × (1 + temp_coef×(Tcell−25)/100) × loss_factor / 1000.</li>
                     <li>Configurable loss factor (default 0.97); next version will auto-compute it.</li>
                   </ul>
                 </div>
@@ -3391,8 +3423,9 @@ export default function DataFilteringPage() {
                   </div>
 
                   <div style={{ color: "#64748B", fontSize: 11, fontFamily: FONT, marginTop: -2 }}>
-                    PVWatts = GTI × tot_power × (1 + (temp_coef/100) × (Tcell − 25)) ×{" "}
+                    PVWatts (kW) = GTI × tot_power × (1 + (temp_coef/100) × (Tcell − 25)) ×{" "}
                     <span style={{ color: "#0F172A", fontWeight: 600 }}>loss_factor</span>
+                    {" "} / 1000
                   </div>
 
                   {lossFactorAdvanced && !pvwattsCardCollapsed && (

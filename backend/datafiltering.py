@@ -97,7 +97,7 @@ def apply_temperature_and_power(data: pd.DataFrame, system_info_path: str) -> pd
                 + (GTI * delta / 1000)
 
     Power module:
-        PVWatts = GTI * tot_power * (1 + (temp_coef/100) * (Tcell - 25)) * loss_factor
+        PVWatts = (GTI * tot_power * (1 + (temp_coef/100) * (Tcell - 25)) * loss_factor) / 1000
         (loss_factor default 0.97, configurable in system config)
 
     Parameters
@@ -142,10 +142,10 @@ def apply_temperature_and_power(data: pd.DataFrame, system_info_path: str) -> pd
         + (data[gti_col] * delta / 1000)
     )
 
-    # Power module: GTI * tot_power * (1 + (temp_coef/100)*(Tcell-25)) * loss_factor
+    # Power module: compute PVWatts then scale by /1000 to match kW-based `Power` units.
     data["PVWatts"] = (
         data[gti_col] * tot_power * (1 + (temp_coef * 1e-2) * (data["Tcell"] - 25))
-    ) * loss_factor
+    ) * loss_factor / 1000
 
     return data
 
