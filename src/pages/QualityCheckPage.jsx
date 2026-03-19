@@ -24,6 +24,7 @@ import RotateLeftOutlinedIcon from "@mui/icons-material/RotateLeftOutlined";
 import Button from "@mui/material/Button";
 import TableColumnSelector from "../components/TableColumnSelector";
 import SystemInfoHelpIcon from "../components/SystemInfoHelpIcon";
+import CSVColumnMapper, { PV_SYNONYMS, PV_TEMPLATE_COLUMNS, PV_TEMPLATE_LABELS, WEATHER_SYNONYMS, WEATHER_TEMPLATE_COLUMNS, WEATHER_TEMPLATE_LABELS } from "../components/CSVColumnMapper";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -2464,6 +2465,8 @@ export default function QualityCheckPage() {
   const [dateTo, setDateTo] = useState(null);
   const [resamplingStepMinutes, setResamplingStepMinutes] = useState(10);
   const [syncRules, setSyncRules] = useState(DEFAULT_SYNC_RULES);
+  const [mapperFile, setMapperFile] = useState(null);
+  const [weatherMapperFile, setWeatherMapperFile] = useState(null);
 
   const pvData = useMemo(() => {
     if (!pvRawData?.headers?.length || !pvRawData?.rows?.length) return null;
@@ -2583,6 +2586,46 @@ export default function QualityCheckPage() {
           onClose={() => setToast(null)}
         />
       )}
+
+      {/* CSV Column Mapper */}
+      <CSVColumnMapper
+        open={!!mapperFile}
+        file={mapperFile}
+        onClose={() => setMapperFile(null)}
+        onComplete={(adaptedData, fileName) => {
+          setPvLoadError(null);
+          setPvFile(fileName);
+          setPvRawData(adaptedData);
+          saveCache(CACHE_PV, { fileName, data: adaptedData });
+          showToast(`Custom PV data loaded — ${adaptedData.rows.length.toLocaleString()} rows mapped to PVCopilot format`);
+          setMapperFile(null);
+        }}
+        templateColumns={PV_TEMPLATE_COLUMNS}
+        templateLabels={PV_TEMPLATE_LABELS}
+        synonymTable={PV_SYNONYMS}
+        requiredColumns={["Time", "Power"]}
+        color={O}
+      />
+
+      {/* Weather CSV Column Mapper */}
+      <CSVColumnMapper
+        open={!!weatherMapperFile}
+        file={weatherMapperFile}
+        onClose={() => setWeatherMapperFile(null)}
+        onComplete={(adaptedData, fileName) => {
+          setWeatherLoadError(null);
+          setWeatherFile(fileName);
+          setWeatherRawData(adaptedData);
+          saveCache(CACHE_WEATHER, { fileName, data: adaptedData });
+          showToast(`Custom weather data loaded — ${adaptedData.rows.length.toLocaleString()} rows mapped to PVCopilot format`);
+          setWeatherMapperFile(null);
+        }}
+        templateColumns={WEATHER_TEMPLATE_COLUMNS}
+        templateLabels={WEATHER_TEMPLATE_LABELS}
+        synonymTable={WEATHER_SYNONYMS}
+        requiredColumns={["Time", "POA", "Air_Temp", "RH", "Wind_speed"]}
+        color={B}
+      />
 
       <div style={{ maxWidth: 1200, margin: "0 auto" }}>
 
@@ -2743,8 +2786,7 @@ export default function QualityCheckPage() {
                   return;
                 }
                 if (!isValidPvHeaders(data.headers)) {
-                  setPvLoadError(true);
-                  showToast("The PV Data (.csv) file should include the following columns: Time, Current, Voltage, Power, and Module_Temp. For the best experience, click Load Template, then Download it and adapt your data to match the template structure.", "error");
+                  setMapperFile(file);
                   return;
                 }
                 setPvLoadError(null);
@@ -2792,8 +2834,7 @@ export default function QualityCheckPage() {
                   return;
                 }
                 if (!isValidWeatherHeaders(data.headers)) {
-                  setWeatherLoadError(true);
-                  showToast("The Weather Data (.csv) file should include the following columns: Time, POA, GHI, DNI, DHI, Air_Temp, RH, Pressure, Wind_speed, and Rain. For the best experience, click Load Template, then Download it and adapt your data to match the template structure.", "error");
+                  setWeatherMapperFile(file);
                   return;
                 }
                 setWeatherLoadError(null);
