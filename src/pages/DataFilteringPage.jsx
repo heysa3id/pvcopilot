@@ -1577,7 +1577,7 @@ function FilterCSVTable({ title, icon, color, headers, rows, resampled, original
                             if (raw === "" || raw === null || raw === undefined) return "";
                             const num = Number(raw);
                             if (!Number.isFinite(num)) return raw;
-                            return num.toFixed(4);
+                            return num.toFixed(2);
                           })()}
                     </td>
                   ))}
@@ -2071,8 +2071,8 @@ function FilteredDataTable({ data, title = "Filtered Data" }) {
   const renderCell = (colId, d, ri) => {
     if (colId === "rowNum") return ri + 1;
     if (colId === "time") return d.time ?? "";
-    if (colId === "Power") return d.Power != null ? Number(d.Power).toFixed(4) : "";
-    if (colId === "PVWatts") return d.PVWatts != null ? Number(d.PVWatts).toFixed(4) : "";
+    if (colId === "Power") return d.Power != null ? Number(d.Power).toFixed(2) : "";
+    if (colId === "PVWatts") return d.PVWatts != null ? Number(d.PVWatts).toFixed(2) : "";
     if (colId === "rel_error") return d.rel_error != null ? (Number(d.rel_error) * 100).toFixed(2) + "%" : "";
     if (colId === "status") return d.status ?? "";
     return "";

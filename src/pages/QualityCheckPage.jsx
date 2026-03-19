@@ -24,7 +24,7 @@ import RotateLeftOutlinedIcon from "@mui/icons-material/RotateLeftOutlined";
 import Button from "@mui/material/Button";
 import TableColumnSelector from "../components/TableColumnSelector";
 import SystemInfoHelpIcon from "../components/SystemInfoHelpIcon";
-import CSVColumnMapper, { PV_SYNONYMS, PV_TEMPLATE_COLUMNS, PV_TEMPLATE_LABELS, WEATHER_SYNONYMS, WEATHER_TEMPLATE_COLUMNS, WEATHER_TEMPLATE_LABELS } from "../components/CSVColumnMapper";
+import CSVColumnMapper, { PV_SYNONYMS, PV_TEMPLATE_COLUMNS, PV_TEMPLATE_LABELS, PV_EXPECTED_TYPES, WEATHER_SYNONYMS, WEATHER_TEMPLATE_COLUMNS, WEATHER_TEMPLATE_LABELS, WEATHER_EXPECTED_TYPES } from "../components/CSVColumnMapper";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -685,7 +685,7 @@ function CSVTable({ title, icon, color, headers, rows, resampled, originalRows, 
                             if (raw === "" || raw === null || raw === undefined) return "";
                             const num = Number(raw);
                             if (!Number.isFinite(num)) return raw;
-                            return num.toFixed(4);
+                            return num.toFixed(2);
                           })()}
                     </td>
                   ))}
@@ -2603,6 +2603,7 @@ export default function QualityCheckPage() {
         templateColumns={PV_TEMPLATE_COLUMNS}
         templateLabels={PV_TEMPLATE_LABELS}
         synonymTable={PV_SYNONYMS}
+        expectedTypes={PV_EXPECTED_TYPES}
         requiredColumns={["Time", "Power"]}
         color={O}
       />
@@ -2623,6 +2624,7 @@ export default function QualityCheckPage() {
         templateColumns={WEATHER_TEMPLATE_COLUMNS}
         templateLabels={WEATHER_TEMPLATE_LABELS}
         synonymTable={WEATHER_SYNONYMS}
+        expectedTypes={WEATHER_EXPECTED_TYPES}
         requiredColumns={["Time", "POA", "Air_Temp", "RH", "Wind_speed"]}
         color={B}
       />

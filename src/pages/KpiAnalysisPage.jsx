@@ -1422,7 +1422,7 @@ function KpiCSVTable({ title, icon, color, headers, rows, resampled, originalRow
                             if (raw === "" || raw === null || raw === undefined) return "";
                             const num = Number(raw);
                             if (!Number.isFinite(num)) return raw;
-                            return num.toFixed(4);
+                            return num.toFixed(2);
                           })()}
                     </td>
                   ))}

@@ -48,11 +48,19 @@ export const PV_SYNONYMS = {
 export const PV_TEMPLATE_COLUMNS = ["Time", "Current", "Voltage", "Power", "Module_Temp"];
 
 export const PV_TEMPLATE_LABELS = {
-  Time: "\u23F1 Time",
-  Current: "\u26A1 Current (A)",
-  Voltage: "\uD83D\uDD0B Voltage (V)",
-  Power: "\u2600 Power (W)",
-  Module_Temp: "\uD83C\uDF21 Module Temp (\u00B0C)",
+  Time: "Time",
+  Current: "Current (A)",
+  Voltage: "Voltage (V)",
+  Power: "Power (kW)",
+  Module_Temp: "Module Temp (\u00B0C)",
+};
+
+export const PV_EXPECTED_TYPES = {
+  Time: "datetime",
+  Current: "float",
+  Voltage: "float",
+  Power: "float",
+  Module_Temp: "float",
 };
 
 // ── Weather / Meteo synonym tables ──────────────────────────────────────────
@@ -107,19 +115,108 @@ export const WEATHER_TEMPLATE_COLUMNS = [
 ];
 
 export const WEATHER_TEMPLATE_LABELS = {
-  Time: "\u23F1 Time",
-  POA: "\u2600 POA (W/m\u00B2)",
-  GHI: "\uD83C\uDF24 GHI (W/m\u00B2)",
-  DNI: "\uD83D\uDD06 DNI (W/m\u00B2)",
-  DHI: "\uD83C\uDF25 DHI (W/m\u00B2)",
-  Air_Temp: "\uD83C\uDF21 Air Temp (\u00B0C)",
-  RH: "\uD83D\uDCA7 RH (%)",
-  Pressure: "\uD83C\uDF00 Pressure (hPa)",
-  Wind_speed: "\uD83D\uDCA8 Wind Speed (m/s)",
-  Rain: "\uD83C\uDF27 Rain (mm)",
+  Time: "Time",
+  POA: "POA (W/m\u00B2)",
+  GHI: "GHI (W/m\u00B2)",
+  DNI: "DNI (W/m\u00B2)",
+  DHI: "DHI (W/m\u00B2)",
+  Air_Temp: "Air Temp (\u00B0C)",
+  RH: "RH (%)",
+  Pressure: "Pressure (hPa)",
+  Wind_speed: "Wind Speed (m/s)",
+  Rain: "Rain (mm)",
+};
+
+export const WEATHER_EXPECTED_TYPES = {
+  Time: "datetime",
+  POA: "float",
+  GHI: "float",
+  DNI: "float",
+  DHI: "float",
+  Air_Temp: "float",
+  RH: "float",
+  Pressure: "float",
+  Wind_speed: "float",
+  Rain: "float",
 };
 
 // ── CSV parsing utilities ───────────────────────────────────────────────────
+
+function detectType(rows, colIdx) {
+  if (colIdx == null || colIdx < 0) return "\u2014";
+  const samples = [];
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+    const v = (rows[i][colIdx] ?? "").trim();
+    if (v) samples.push(v);
+  }
+  if (samples.length === 0) return "\u2014";
+  const allNumeric = samples.every((s) => !isNaN(Number(s)) && s !== "");
+  if (allNumeric) {
+    return samples.every((s) => Number.isInteger(Number(s))) ? "integer" : "float";
+  }
+  const allDate = samples.every((s) => !isNaN(Date.parse(s)));
+  if (allDate) return "datetime";
+  return "string";
+}
+
+function detectTimeFormat(rows, colIdx) {
+  if (colIdx == null || colIdx < 0) return "";
+  const sample = (rows[0]?.[colIdx] ?? "").trim();
+  if (!sample) return "";
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/.test(sample)) return "YYYY-MM-DDTHH:mm:ss";
+  if (/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}/.test(sample)) return "YYYY-MM-DD HH:mm:ss";
+  if (/^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}/.test(sample)) return "YYYY-MM-DD HH:mm";
+  if (/^\d{4}-\d{2}-\d{2}/.test(sample)) return "YYYY-MM-DD";
+  if (/^\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}/.test(sample)) return "DD/MM/YYYY HH:mm";
+  if (/^\d{2}\/\d{2}\/\d{4}/.test(sample)) return "DD/MM/YYYY";
+  return sample;
+}
+
+function parseTransform(expr) {
+  if (!expr || !expr.trim()) return null;
+  const s = expr.trim().replace(/×/g, "*");
+  const m = s.match(/^([*/])?\s*([0-9]*\.?[0-9]+)$/);
+  if (!m) return null;
+  const val = parseFloat(m[2]);
+  if (isNaN(val) || val === 0) return null;
+  return (m[1] === "/") ? (1 / val) : (m[1] === "*" || !m[1]) ? val : null;
+}
+
+function parseTimeParts(value) {
+  let m;
+  // YYYY-MM-DDTHH:mm:ss or YYYY-MM-DD HH:mm:ss
+  m = value.match(/^(\d{4})-(\d{2})-(\d{2})[T\s](\d{2}):(\d{2}):(\d{2})/);
+  if (m) return { Y: m[1], M: m[2], D: m[3], h: m[4], m: m[5], s: m[6] };
+  // YYYY-MM-DD HH:mm
+  m = value.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2})/);
+  if (m) return { Y: m[1], M: m[2], D: m[3], h: m[4], m: m[5], s: "00" };
+  // YYYY-MM-DD
+  m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return { Y: m[1], M: m[2], D: m[3], h: "00", m: "00", s: "00" };
+  // DD/MM/YYYY HH:mm:ss
+  m = value.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2}):(\d{2})/);
+  if (m) return { Y: m[3], M: m[2], D: m[1], h: m[4], m: m[5], s: m[6] };
+  // DD/MM/YYYY HH:mm
+  m = value.match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})/);
+  if (m) return { Y: m[3], M: m[2], D: m[1], h: m[4], m: m[5], s: "00" };
+  // DD/MM/YYYY
+  m = value.match(/^(\d{2})\/(\d{2})\/(\d{4})/);
+  if (m) return { Y: m[3], M: m[2], D: m[1], h: "00", m: "00", s: "00" };
+  return null;
+}
+
+function formatTime(parts, fmt) {
+  return fmt
+    .replace("YYYY", parts.Y).replace("MM", parts.M).replace("DD", parts.D)
+    .replace("HH", parts.h).replace("mm", parts.m).replace("ss", parts.s);
+}
+
+function convertTimeValue(value, targetFormat) {
+  if (!targetFormat || !value) return value;
+  const parts = parseTimeParts(value.trim());
+  if (!parts) return value;
+  return formatTime(parts, targetFormat);
+}
 
 function autoDetectDelimiter(text) {
   const lines = text.split("\n").slice(0, 5);
@@ -195,12 +292,27 @@ function autoMapColumns(sourceHeaders, templateColumns, synonymTable) {
   return mappings;
 }
 
-function buildAdaptedData(sourceHeaders, sourceRows, mappings, templateColumns) {
+function buildAdaptedData(sourceHeaders, sourceRows, mappings, templateColumns, transforms = {}) {
   const headers = [...templateColumns];
+  const factors = {};
+  for (const tpl of templateColumns) {
+    factors[tpl] = parseTransform(transforms[tpl]);
+  }
   const rows = sourceRows.map((row) => {
     return templateColumns.map((tpl) => {
       const srcIdx = mappings[tpl];
-      if (srcIdx != null && srcIdx >= 0 && srcIdx < row.length) return row[srcIdx];
+      if (srcIdx != null && srcIdx >= 0 && srcIdx < row.length) {
+        const val = row[srcIdx];
+        if (tpl === "Time" && transforms["Time"]) {
+          return convertTimeValue(val, transforms["Time"]);
+        }
+        const f = factors[tpl];
+        if (f != null && tpl !== "Time") {
+          const num = parseFloat(val);
+          if (!isNaN(num)) return String(num * f);
+        }
+        return val;
+      }
       return tpl === "Time" ? "" : "0.0";
     });
   });
@@ -255,6 +367,7 @@ export default function CSVColumnMapper({
   templateColumns = PV_TEMPLATE_COLUMNS,
   templateLabels = PV_TEMPLATE_LABELS,
   synonymTable = PV_SYNONYMS,
+  expectedTypes = PV_EXPECTED_TYPES,
   requiredColumns = ["Time"],
   color = "#ff7a45",
 }) {
@@ -268,6 +381,8 @@ export default function CSVColumnMapper({
   const [fileName, setFileName] = useState("");
   const fileInputRef = useRef(null);
   const [dragOver, setDragOver] = useState(false);
+  const [transforms, setTransforms] = useState({});
+  const [editingField, setEditingField] = useState(null);
 
   // Reset state when dialog opens/closes
   useEffect(() => {
@@ -278,6 +393,8 @@ export default function CSVColumnMapper({
       setSourceRows([]);
       setSelectedCols(new Set());
       setMappings({});
+      setTransforms({});
+      setEditingField(null);
       setLoading(false);
       setFileName("");
       // If a file was already passed, parse it immediately
@@ -370,11 +487,11 @@ export default function CSVColumnMapper({
     setLoading(true);
     // Use setTimeout to let the UI update before heavy computation
     setTimeout(() => {
-      const adapted = buildAdaptedData(sourceHeaders, sourceRows, mappings, templateColumns);
+      const adapted = buildAdaptedData(sourceHeaders, sourceRows, mappings, templateColumns, transforms);
       onComplete(adapted, fileName);
       setLoading(false);
     }, 80);
-  }, [sourceHeaders, sourceRows, mappings, templateColumns, fileName, onComplete]);
+  }, [sourceHeaders, sourceRows, mappings, templateColumns, transforms, fileName, onComplete]);
 
   return (
     <Dialog
@@ -574,12 +691,17 @@ export default function CSVColumnMapper({
 
                     {/* Template column label */}
                     <div style={{
-                      flex: "0 0 180px", fontSize: 13, fontWeight: 700,
+                      flex: "0 0 200px", fontSize: 13, fontWeight: 700,
                       color: "#0F172A", fontFamily: FONT,
                     }}>
                       {templateLabels[tpl] || tpl}
                       {isRequired && !mapped && (
                         <span style={{ color: "#dc2626", fontSize: 11, marginLeft: 4 }}>required</span>
+                      )}
+                      {expectedTypes[tpl] && (
+                        <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 500, marginLeft: 6 }}>
+                          {expectedTypes[tpl]}
+                        </span>
                       )}
                     </div>
 
@@ -602,6 +724,53 @@ export default function CSVColumnMapper({
                         <option key={ah.index} value={ah.index}>{ah.header}</option>
                       ))}
                     </select>
+
+                    {/* Detected type badge */}
+                    <span style={{
+                      fontSize: 11, fontWeight: 600, fontFamily: FONT,
+                      padding: "2px 8px", borderRadius: 6,
+                      background: "#f1f5f9", color: "#64748B",
+                      whiteSpace: "nowrap", flexShrink: 0,
+                      minWidth: 50, textAlign: "center",
+                    }}>
+                      {detectType(sourceRows, mappings[tpl])}
+                    </span>
+
+                    {/* Click-to-edit transform: time format or factor */}
+                    {editingField === tpl ? (
+                      <input
+                        type="text"
+                        autoFocus
+                        placeholder={tpl === "Time" ? (detectTimeFormat(sourceRows, mappings[tpl]) || "format") : "\u00d71"}
+                        value={transforms[tpl] ?? (tpl === "Time" ? (detectTimeFormat(sourceRows, mappings[tpl]) || "") : "")}
+                        onChange={(e) => setTransforms((prev) => ({ ...prev, [tpl]: e.target.value }))}
+                        onBlur={() => setEditingField(null)}
+                        onKeyDown={(e) => { if (e.key === "Enter") setEditingField(null); }}
+                        style={{
+                          width: tpl === "Time" ? 140 : 64, padding: "5px 8px", borderRadius: 6, fontSize: 12,
+                          fontFamily: FONT, fontWeight: 500, border: `1.5px solid ${color}`,
+                          background: "#fff", color: "#0F172A", textAlign: "center",
+                          outline: "none", flexShrink: 0,
+                        }}
+                      />
+                    ) : (
+                      <span
+                        onClick={() => setEditingField(tpl)}
+                        style={{
+                          fontSize: 11, fontWeight: 500, fontFamily: FONT,
+                          padding: "5px 8px", borderRadius: 6,
+                          background: (transforms[tpl]) ? `${color}10` : "#f8fafc",
+                          border: (transforms[tpl]) ? `1px solid ${color}40` : "1px solid #E2E8F0",
+                          color: (transforms[tpl]) ? color : "#94a3b8",
+                          whiteSpace: "nowrap", flexShrink: 0, cursor: "pointer",
+                          minWidth: tpl === "Time" ? 90 : 32, textAlign: "center",
+                        }}
+                      >
+                        {tpl === "Time"
+                          ? (transforms[tpl] || detectTimeFormat(sourceRows, mappings[tpl]) || "\u2014")
+                          : (transforms[tpl] || "\u00d71")}
+                      </span>
+                    )}
                   </div>
                 );
               })}
