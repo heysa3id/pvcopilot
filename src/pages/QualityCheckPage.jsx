@@ -944,6 +944,84 @@ function applySyncRulesToTimes(times, rules, shiftColUnits = "minutes") {
   });
 }
 
+/**
+ * Cross-correlation: find the weather time lag (in minutes) that maximises R²
+ * between PV power and weather irradiance.
+ *
+ * pvTimes/whTimes  – arrays of "YYYY-MM-DD HH:MM" strings
+ * pvValues/whValues – parallel arrays of numeric values (Power / POA)
+ * stepMinutes       – resampling interval (lag granularity)
+ * maxLagMinutes     – search range ±
+ */
+function detectTimeOffset(pvTimes, pvValues, whTimes, whValues, stepMinutes, maxLagMinutes = 120) {
+  const step = Math.max(1, Math.round(stepMinutes));
+  const maxLag = Math.max(step, Math.round(maxLagMinutes));
+
+  // Build PV map (time string → power), daytime only
+  const pvMap = new Map();
+  for (let i = 0; i < pvTimes.length; i++) {
+    const p = Number(pvValues[i]);
+    if (!Number.isFinite(p)) continue;
+    const t = String(pvTimes[i] ?? "").trim();
+    if (t) pvMap.set(t, p);
+  }
+
+  // Pre-parse weather entries (keep irradiance ≥ 50 W/m² to skip nighttime)
+  const whEntries = [];
+  for (let i = 0; i < whTimes.length; i++) {
+    const g = Number(whValues[i]);
+    if (!Number.isFinite(g) || g < 50) continue;
+    const tStr = String(whTimes[i] ?? "").trim();
+    if (!tStr) continue;
+    const ms = new Date(tStr.replace(" ", "T")).getTime();
+    if (!Number.isFinite(ms)) continue;
+    whEntries.push({ ms, g });
+  }
+
+  if (pvMap.size === 0 || whEntries.length === 0) return null;
+
+  // Helper: ms → "YYYY-MM-DD HH:MM"
+  const fmtTime = (ms) => {
+    const d = new Date(ms);
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    const HH = String(d.getHours()).padStart(2, "0");
+    const MM = String(d.getMinutes()).padStart(2, "0");
+    return `${yyyy}-${mm}-${dd} ${HH}:${MM}`;
+  };
+
+  let bestLag = 0;
+  let bestR2 = -Infinity;
+  let bestCount = 0;
+  let baselineR2 = 0;
+
+  for (let lag = -maxLag; lag <= maxLag; lag += step) {
+    const shiftMs = lag * 60000;
+    const xs = [];
+    const ys = [];
+    for (const { ms, g } of whEntries) {
+      const shifted = fmtTime(ms + shiftMs);
+      const p = pvMap.get(shifted);
+      if (p != null) {
+        xs.push(g);
+        ys.push(p);
+      }
+    }
+    if (xs.length < 20) continue;
+    const { r2 } = linearRegression(xs, ys);
+    if (lag === 0) baselineR2 = r2;
+    if (r2 > bestR2) {
+      bestR2 = r2;
+      bestLag = lag;
+      bestCount = xs.length;
+    }
+  }
+
+  if (bestR2 === -Infinity) return null;
+  return { bestLag, bestR2, baselineR2, matchedCount: bestCount };
+}
+
 function SyncRuleRangeEditor({ rule, onChange }) {
   const fromValue = rule.start ? rule.start.replace(" ", "T") : "";
   const toValue = rule.end ? rule.end.replace(" ", "T") : "";
@@ -2527,6 +2605,8 @@ export default function QualityCheckPage() {
   const [dateTo, setDateTo] = useState(null);
   const [resamplingStepMinutes, setResamplingStepMinutes] = useState(10);
   const [syncRules, setSyncRules] = useState(DEFAULT_SYNC_RULES);
+  const [autoSyncResult, setAutoSyncResult] = useState(null);
+  const [autoSyncRunning, setAutoSyncRunning] = useState(false);
   const [mapperFile, setMapperFile] = useState(null);
   const [weatherMapperFile, setWeatherMapperFile] = useState(null);
 
@@ -3335,7 +3415,113 @@ export default function QualityCheckPage() {
                   >
                     + Add rule
                   </button>
+                  <button
+                    type="button"
+                    disabled={autoSyncRunning || !pvFilteredRows.length || !weatherFilteredRows.length || !pvData || !weatherData}
+                    onClick={() => {
+                      const pvH = Array.isArray(pvData?.headers) ? pvData.headers : [];
+                      const whH = Array.isArray(weatherData?.headers) ? weatherData.headers : [];
+                      const pdcIdx = findColIndex(pvH, "P_DC", "P DC", "PDC", "P", "Power");
+                      const irrIdx = findColIndex(whH, "POA", "Poa", "poa", "GTI", "GHI", "Ghi");
+                      if (pdcIdx < 0 || irrIdx < 0) {
+                        setAutoSyncResult({ error: "Required columns (Power / POA) not found" });
+                        return;
+                      }
+                      const pvTimes = pvFilteredRows.map((r) => (Array.isArray(r) ? r[0] : ""));
+                      const pvVals = pvFilteredRows.map((r) => (Array.isArray(r) ? r[pdcIdx] : NaN));
+                      const whTimes = weatherFilteredRows.map((r) => (Array.isArray(r) ? r[0] : ""));
+                      const whVals = weatherFilteredRows.map((r) => (Array.isArray(r) ? r[irrIdx] : NaN));
+                      setAutoSyncRunning(true);
+                      setAutoSyncResult(null);
+                      setTimeout(() => {
+                        const result = detectTimeOffset(pvTimes, pvVals, whTimes, whVals, resamplingStepMinutes);
+                        setAutoSyncResult(result ?? { error: "Could not detect offset — insufficient data overlap" });
+                        setAutoSyncRunning(false);
+                      }, 0);
+                    }}
+                    style={{
+                      borderRadius: 999,
+                      border: "1px solid #BBF7D0",
+                      background: "linear-gradient(135deg, #F0FDF4 0%, #ECFDF5 100%)",
+                      padding: "3px 12px",
+                      fontFamily: FONT,
+                      fontSize: 11,
+                      fontWeight: 600,
+                      color: "#15803D",
+                      cursor: (autoSyncRunning || !pvFilteredRows.length || !weatherFilteredRows.length) ? "not-allowed" : "pointer",
+                      opacity: (autoSyncRunning || !pvFilteredRows.length || !weatherFilteredRows.length) ? 0.5 : 1,
+                      boxShadow: "0 0 0 1px rgba(134,239,172,0.8), 0 3px 8px rgba(15,23,42,0.12)",
+                    }}
+                  >
+                    {autoSyncRunning ? "Detecting..." : "Auto-detect sync"}
+                  </button>
                 </div>
+                {/* Auto-detect result banner */}
+                {autoSyncResult && !autoSyncResult.error && (
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 12, padding: "8px 14px",
+                    borderRadius: 10, border: "1px solid #BBF7D0", background: "#F0FDF4",
+                    fontFamily: FONT, fontSize: 12, color: "#15803D", marginBottom: 4,
+                  }}>
+                    <span style={{ fontWeight: 700 }}>
+                      {autoSyncResult.bestLag === 0
+                        ? "Offset: 0 min — data appears already synchronized"
+                        : `Detected offset: ${autoSyncResult.bestLag > 0 ? "+" : ""}${autoSyncResult.bestLag} min`}
+                    </span>
+                    <span style={{ color: "#64748B", fontSize: 11 }}>
+                      R² {autoSyncResult.baselineR2.toFixed(3)} → {autoSyncResult.bestR2.toFixed(3)}
+                    </span>
+                    <span style={{ color: "#94A3B8", fontSize: 10 }}>
+                      ({autoSyncResult.matchedCount} pts)
+                    </span>
+                    <div style={{ flex: 1 }} />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const firstTime = pvFilteredRows.length ? String(pvFilteredRows[0]?.[0] ?? "") : "";
+                        const lastTime = pvFilteredRows.length ? String(pvFilteredRows[pvFilteredRows.length - 1]?.[0] ?? "") : "";
+                        setSyncRules([{ id: 1, start: firstTime, end: lastTime, shiftMinutes: autoSyncResult.bestLag }]);
+                        setAutoSyncResult(null);
+                      }}
+                      style={{
+                        borderRadius: 999, border: "1px solid #15803D", background: "#15803D",
+                        padding: "2px 14px", fontFamily: FONT, fontSize: 11, fontWeight: 600,
+                        color: "#fff", cursor: "pointer",
+                      }}
+                    >
+                      Apply
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAutoSyncResult(null)}
+                      style={{
+                        borderRadius: 999, border: "1px solid #E2E8F0", background: "#fff",
+                        padding: "2px 10px", fontFamily: FONT, fontSize: 11, fontWeight: 600,
+                        color: "#64748B", cursor: "pointer",
+                      }}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                )}
+                {autoSyncResult?.error && (
+                  <div style={{
+                    padding: "8px 14px", borderRadius: 10, border: "1px solid #FED7AA",
+                    background: "#FFFBEB", fontFamily: FONT, fontSize: 12, color: "#92400E", marginBottom: 4,
+                  }}>
+                    {autoSyncResult.error}
+                    <button
+                      type="button"
+                      onClick={() => setAutoSyncResult(null)}
+                      style={{
+                        marginLeft: 12, borderRadius: 999, border: "1px solid #E2E8F0", background: "#fff",
+                        padding: "2px 10px", fontFamily: FONT, fontSize: 11, color: "#64748B", cursor: "pointer",
+                      }}
+                    >
+                      Dismiss
+                    </button>
+                  </div>
+                )}
                 <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 180, overflowY: "auto" }}>
                   {syncRules.map((rule, idx) => (
                     <div

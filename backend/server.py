@@ -7,7 +7,13 @@ Route handlers import logic from: lcoe_pdf, quality_check_csv, time_sync.
 import os
 import tempfile
 import time
+from contextlib import contextmanager
 from datetime import datetime
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None  # Windows: no flock; atomic replace still avoids torn writes
 
 import pandas as pd
 from flask import Flask, request, jsonify
@@ -18,25 +24,60 @@ from quality_check_csv import process_quality_check_csv
 
 CONTACTS_DIR = os.path.join(os.path.dirname(__file__), "data")
 CONTACTS_FILE = os.path.join(CONTACTS_DIR, "contacts.csv")
-LEGACY_CONTACTS_XLSX = os.path.join(CONTACTS_DIR, "contacts.xlsx")
+CONTACTS_LOCK_FILE = CONTACTS_FILE + ".lock"
+
+
+@contextmanager
+def _contacts_lock_exclusive():
+    """Serialize contact CSV read-modify-write (Unix fcntl); no-op on Windows."""
+    if fcntl is None:
+        yield
+        return
+    os.makedirs(CONTACTS_DIR, exist_ok=True)
+    with open(CONTACTS_LOCK_FILE, "a+", encoding="utf-8") as lockf:
+        fcntl.flock(lockf.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lockf.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def _contacts_lock_shared():
+    """Allow concurrent reads; block while a writer holds the exclusive lock."""
+    if fcntl is None:
+        yield
+        return
+    if not os.path.exists(CONTACTS_LOCK_FILE) and not os.path.exists(CONTACTS_FILE):
+        yield
+        return
+    os.makedirs(CONTACTS_DIR, exist_ok=True)
+    with open(CONTACTS_LOCK_FILE, "a+", encoding="utf-8") as lockf:
+        fcntl.flock(lockf.fileno(), fcntl.LOCK_SH)
+        try:
+            yield
+        finally:
+            fcntl.flock(lockf.fileno(), fcntl.LOCK_UN)
+
+
+def _write_contacts_csv_atomic(df):
+    """Write CSV via temp file + os.replace to avoid truncated file on crash."""
+    os.makedirs(CONTACTS_DIR, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(suffix=".csv", prefix="contacts_", dir=CONTACTS_DIR)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="") as tmpf:
+            df.to_csv(tmpf, index=False)
+        os.replace(tmp_path, CONTACTS_FILE)
+    except Exception:
+        try:
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+
 
 app = Flask(__name__)
-
-
-def _migrate_legacy_contacts_xlsx_if_needed():
-    """If contacts.csv is missing but contacts.xlsx exists, import once (openpyxl)."""
-    if os.path.exists(CONTACTS_FILE):
-        return
-    if not os.path.exists(LEGACY_CONTACTS_XLSX):
-        return
-    try:
-        df = pd.read_excel(LEGACY_CONTACTS_XLSX, engine="openpyxl")
-        os.makedirs(CONTACTS_DIR, exist_ok=True)
-        df.to_csv(CONTACTS_FILE, index=False, encoding="utf-8")
-    except Exception:
-        pass
-
-
 CORS(app)
 
 MAX_PVSYST_UPLOAD_BYTES = int(os.getenv("MAX_PVSYST_UPLOAD_BYTES", str(10 * 1024 * 1024)))
@@ -146,8 +187,6 @@ def save_contact():
         return jsonify({"error": "Name, email, and message are required."}), 400
 
     try:
-        os.makedirs(CONTACTS_DIR, exist_ok=True)
-        _migrate_legacy_contacts_xlsx_if_needed()
         new_row = pd.DataFrame([{
             "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "Name": name,
@@ -155,13 +194,13 @@ def save_contact():
             "Message": message,
         }])
 
-        if os.path.exists(CONTACTS_FILE):
-            existing = pd.read_csv(CONTACTS_FILE, encoding="utf-8")
-            df = pd.concat([existing, new_row], ignore_index=True)
-        else:
-            df = new_row
-
-        df.to_csv(CONTACTS_FILE, index=False, encoding="utf-8")
+        with _contacts_lock_exclusive():
+            if os.path.exists(CONTACTS_FILE):
+                existing = pd.read_csv(CONTACTS_FILE, encoding="utf-8")
+                df = pd.concat([existing, new_row], ignore_index=True)
+            else:
+                df = new_row
+            _write_contacts_csv_atomic(df)
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"error": f"Failed to save contact: {str(e)}"}), 500
@@ -170,11 +209,11 @@ def save_contact():
 @app.route("/api/contacts", methods=["GET"])
 def list_contacts():
     """Return all contact form submissions as JSON."""
-    _migrate_legacy_contacts_xlsx_if_needed()
     if not os.path.exists(CONTACTS_FILE):
         return jsonify([])
     try:
-        df = pd.read_csv(CONTACTS_FILE, encoding="utf-8")
+        with _contacts_lock_shared():
+            df = pd.read_csv(CONTACTS_FILE, encoding="utf-8")
         return jsonify(df.to_dict(orient="records"))
     except Exception as e:
         return jsonify({"error": f"Failed to read contacts: {str(e)}"}), 500
