@@ -147,7 +147,7 @@ function capexPerKwpFromQtyUnit(qty, unitUsd, capacityKwp) {
 }
 const DEFAULTS = {
   systemCapacity:    1,
-  ratedPowerAC:      875.4,
+  ratedPowerAC:      8.754,
   dcAcRatio:         1.14,
   modulePower:       605,
   specificYield:     1883,
