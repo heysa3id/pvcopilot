@@ -6,6 +6,7 @@ Route handlers import logic from: lcoe_pdf, quality_check_csv, time_sync.
 
 import os
 import tempfile
+import time
 from datetime import datetime
 
 import pandas as pd
@@ -21,6 +22,21 @@ CONTACTS_FILE = os.path.join(CONTACTS_DIR, "contacts.xlsx")
 app = Flask(__name__)
 CORS(app)
 
+MAX_PVSYST_UPLOAD_BYTES = int(os.getenv("MAX_PVSYST_UPLOAD_BYTES", str(10 * 1024 * 1024)))
+app.config["MAX_CONTENT_LENGTH"] = MAX_PVSYST_UPLOAD_BYTES
+
+ALLOWED_PDF_MIME = {
+    "application/pdf",
+    "application/x-pdf",
+    "application/octet-stream",  # some browsers/proxies
+}
+
+
+@app.errorhandler(413)
+def handle_413(_e):
+    max_mb = round(MAX_PVSYST_UPLOAD_BYTES / (1024 * 1024), 1)
+    return jsonify({"error": f"File too large. Max {max_mb} MB."}), 413
+
 
 @app.route("/api/parse-pvsyst", methods=["POST"])
 def parse_pvsyst():
@@ -29,18 +45,47 @@ def parse_pvsyst():
         return jsonify({"error": "No file uploaded. Send a PDF file with key 'file'."}), 400
 
     file = request.files["file"]
-    if not file.filename or not file.filename.lower().endswith(".pdf"):
+    if not file or not file.filename:
         return jsonify({"error": "Please upload a PDF file."}), 400
 
+    if not file.filename.lower().endswith(".pdf"):
+        return jsonify({"error": "Please upload a PDF file (.pdf)."}), 400
+
+    # Hard guard in addition to MAX_CONTENT_LENGTH (for cases where content-length is missing).
+    if request.content_length and request.content_length > MAX_PVSYST_UPLOAD_BYTES:
+        max_mb = round(MAX_PVSYST_UPLOAD_BYTES / (1024 * 1024), 1)
+        return jsonify({"error": f"File too large. Max {max_mb} MB."}), 413
+
+    content_type = (getattr(file, "content_type", None) or "").lower()
+    if content_type and content_type not in ALLOWED_PDF_MIME and "pdf" not in content_type:
+        return jsonify({"error": "Invalid file type. Please upload a PDF."}), 415
+
     tmp_path = None
+    start = time.time()
     try:
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             file.save(tmp.name)
             tmp_path = tmp.name
         result = parse_pvsyst_pdf(tmp_path)
+        elapsed_ms = int((time.time() - start) * 1000)
+        app.logger.info(
+            "parse-pvsyst ok filename=%s bytes=%s elapsed_ms=%s",
+            file.filename,
+            request.content_length,
+            elapsed_ms,
+        )
         return jsonify(result)
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        elapsed_ms = int((time.time() - start) * 1000)
+        app.logger.warning(
+            "parse-pvsyst failed filename=%s bytes=%s elapsed_ms=%s error=%s",
+            getattr(file, "filename", None),
+            request.content_length,
+            elapsed_ms,
+            str(e)[:200],
+        )
+        # Parsing failures are client-correctable (bad/corrupt PDF, unexpected report format).
+        return jsonify({"error": str(e)}), 422
     finally:
         if tmp_path is not None and os.path.exists(tmp_path):
             try:
@@ -123,4 +168,5 @@ def health():
 
 if __name__ == "__main__":
     print("🔧 PVCopilot Parser API running on http://localhost:5001")
-    app.run(host="0.0.0.0", port=5001, debug=True)
+    debug = os.getenv("FLASK_DEBUG", "").lower() in {"1", "true", "yes", "on"}
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "5001")), debug=debug)

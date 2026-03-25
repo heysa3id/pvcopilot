@@ -64,7 +64,17 @@ cd backend && python3 server.py
 cd backend
 # Use a production WSGI server, e.g. gunicorn
 pip install gunicorn
-gunicorn -w 4 -b 0.0.0.0:5001 server:app
+# Default upload guard for /api/parse-pvsyst is 10MB (configurable):
+# export MAX_PVSYST_UPLOAD_BYTES=10485760
+
+# Gunicorn with thread workers helps concurrent PDF parsing requests:
+gunicorn -w 4 --threads 4 -k gthread --timeout 120 -b 0.0.0.0:5001 server:app
+```
+
+**Concurrency smoke test (optional):**
+
+```bash
+python3 backend/concurrent_parse_smoke_test.py --pdf /path/to/report.pdf --concurrency 8 --timeout 60
 ```
 
 ---

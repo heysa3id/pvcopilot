@@ -269,19 +269,31 @@ function sensitivity(base, R, capexCats = CAPEX_CATS) {
 
 // ── PVsyst PDF Parser (Python backend; set VITE_PARSER_URL for production) ──
 const PARSER_URL = import.meta.env.VITE_PARSER_URL || "http://localhost:5001/api/parse-pvsyst";
+const MAX_PVSYST_PDF_UPLOAD_BYTES = 10 * 1024 * 1024; // keep aligned with backend default
 
 async function parsePVsystPDF(file) {
   const formData = new FormData();
   formData.append("file", file);
   try {
-    const response = await fetch(PARSER_URL, { method: "POST", body: formData });
-    const data = await response.json().catch(() => ({}));
-    if (response.ok) return data;
-    throw new Error(data.error || `Parser error ${response.status}`);
+    const controller = new AbortController();
+    const timeoutMs = 45000; // large enough for slower PDFs, bounded to protect concurrent users
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      const response = await fetch(PARSER_URL, {
+        method: "POST",
+        body: formData,
+        signal: controller.signal,
+      });
+      const data = await response.json().catch(() => ({}));
+      if (response.ok) return data;
+      throw new Error(data.error || `Parser error ${response.status}`);
+    } finally {
+      clearTimeout(timeoutId);
+    }
   } catch (e) {
     const msg = e?.message || "";
     const backendUnavailable =
-      /failed to fetch|network|load failed|cors|refused/i.test(msg) || msg === "Load failed";
+      /failed to fetch|network|load failed|cors|refused|aborted|abort|timeout/i.test(msg) || e?.name === "AbortError";
     if (backendUnavailable) {
       return parsePvsystPdfClient(file);
     }
@@ -597,8 +609,23 @@ export default function LcoeTool() {
   }, [capexCats]);
 
   const handlePDF = useCallback(async (file) => {
-    if (!file || file.type !== "application/pdf") {
+    if (!file) {
       setPdfState({ status: "error", filename: file?.name || "", extracted: null, error: "Please upload a PDF file." });
+      return;
+    }
+    const isPdfByName = /\.pdf$/i.test(file.name || "");
+    if (!isPdfByName && file.type && file.type !== "application/pdf") {
+      setPdfState({ status: "error", filename: file.name, extracted: null, error: "Please upload a PDF file." });
+      return;
+    }
+    if (Number.isFinite(file.size) && file.size > MAX_PVSYST_PDF_UPLOAD_BYTES) {
+      const maxMb = Math.round((MAX_PVSYST_PDF_UPLOAD_BYTES / (1024 * 1024)) * 10) / 10;
+      setPdfState({
+        status: "error",
+        filename: file.name,
+        extracted: null,
+        error: `PDF too large. Max ${maxMb} MB.`,
+      });
       return;
     }
     setPdfState({ status: "loading", filename: file.name, extracted: null, error: null });
@@ -623,8 +650,11 @@ export default function LcoeTool() {
       setPdfState({ status: "done", filename: file.name, extracted, error: null });
       setPanel("system");
     } catch(e) {
-      setPdfState({ status: "error", filename: file.name, extracted: null, error: e.message });
-      setShowBrowserRecommendDialog(true);
+      const msg = e?.message || "PDF parsing failed.";
+      setPdfState({ status: "error", filename: file.name, extracted: null, error: msg });
+      const clientParserLikely =
+        /client-side pdf|pdf engine failed|pdfjs|worker|undefined is not a function/i.test(msg);
+      if (clientParserLikely) setShowBrowserRecommendDialog(true);
     }
   }, []);
 
@@ -979,12 +1009,47 @@ export default function LcoeTool() {
                 </div>
               </div>
             </div>
-            <div style={{ marginLeft:"auto", borderRadius:"999px", background:"#F8FAFC", border:"1px solid #E2E8F0", padding:4, display:"flex", alignItems:"center", justifyContent:"center" }}>
-              {overviewOpen ? (
-                <ExpandLessIcon sx={{ fontSize:18, color:"#94a3b8" }} />
-              ) : (
-                <ExpandMoreIcon sx={{ fontSize:18, color:"#94a3b8" }} />
-              )}
+            <div style={{ marginLeft:"auto", display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", justifyContent:"flex-end" }}>
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  window.open("/docs?module=lcoe-tool", "_blank", "noopener,noreferrer");
+                }}
+                style={{
+                  display:"inline-flex",
+                  alignItems:"center",
+                  gap:6,
+                  padding:"5px 10px",
+                  borderRadius:8,
+                  background:"#F1F5F9",
+                  border:"1px solid #CBD5E1",
+                  color:"#475569",
+                  fontSize:11,
+                  fontWeight:600,
+                  fontFamily:"Inter, Arial, sans-serif",
+                  cursor:"pointer",
+                  whiteSpace:"nowrap",
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.background = "#E2E8F0";
+                  e.currentTarget.style.borderColor = "#94A3B8";
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.background = "#F1F5F9";
+                  e.currentTarget.style.borderColor = "#CBD5E1";
+                }}
+              >
+                <DescriptionOutlinedIcon sx={{ fontSize: 14, color:"#64748B" }} />
+                Read Docs
+              </button>
+              <div style={{ borderRadius:"999px", background:"#F8FAFC", border:"1px solid #E2E8F0", padding:4, display:"flex", alignItems:"center", justifyContent:"center" }}>
+                {overviewOpen ? (
+                  <ExpandLessIcon sx={{ fontSize:18, color:"#94a3b8" }} />
+                ) : (
+                  <ExpandMoreIcon sx={{ fontSize:18, color:"#94a3b8" }} />
+                )}
+              </div>
             </div>
           </div>
           {overviewOpen && (
