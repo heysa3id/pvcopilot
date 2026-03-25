@@ -218,12 +218,17 @@ def pvwatts_filter(
     # Relative error vs PVWatts (denominator = PVWatts to avoid div by zero when P_DC=0)
     df["rel_error"] = np.abs((df["P_DC"] - df[pvwatts_column]) / df[pvwatts_column])
 
+    # Zero power during daylight (PVWatts > 0) is always invalid
+    zero_power = df["P_DC"] <= 0
+
     if time_weight_min is not None:
         weight = _time_of_day_weight(df["hour"].values, solar_noon_hour, time_weight_min)
         scaled_error = df["rel_error"].values * weight
         df["status"] = np.where(scaled_error <= threshold, "valid", "removed")
     else:
         df["status"] = np.where(df["rel_error"] <= threshold, "valid", "removed")
+
+    df.loc[zero_power, "status"] = "removed"
 
     filtered_data = df[df["status"] == "valid"].drop(columns=["hour", "rel_error"])
     removed_times = df[df["status"] == "removed"]["time"].tolist()

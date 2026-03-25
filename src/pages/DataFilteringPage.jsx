@@ -341,6 +341,10 @@ function pvwattsFilterJS(comparisonData, threshold, options = {}) {
     const pdc = d.Power != null ? Number(d.Power) : NaN;
     const pv = d.PVWatts != null ? Number(d.PVWatts) : NaN;
     if (!Number.isFinite(pv) || pv <= 0 || !Number.isFinite(pdc)) continue;
+    if (pdc <= 0 && pv > 0) {
+      labeled.push({ ...d, rel_error: 1, status: "removed" });
+      continue;
+    }
     const relError = Math.abs((pdc - pv) / pv);
     let compareError = relError;
     if (useTimeWeight) {
