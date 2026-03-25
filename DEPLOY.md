@@ -41,6 +41,8 @@ Backend runs on **port 5001** and provides:
 
 - `POST /api/parse-pvsyst` — parse PVSyst PDF
 - `POST /api/process-csv` — process CSV
+- `POST /api/contact` — save contact form submissions (Excel)
+- `GET /api/contacts` — list saved contacts (JSON)
 - `GET /api/health` — health check
 
 **From project root:**
@@ -81,28 +83,40 @@ python3 backend/concurrent_parse_smoke_test.py --pdf /path/to/report.pdf --concu
 
 ## 4. Point frontend to the deployed API
 
-The app currently uses **`http://localhost:5001`** for the API. For deployment you must point it to your real API URL.
+The app defaults to **`http://localhost:5001`** when env vars are unset. For any public deployment (including GitHub Pages), host the Flask backend on an HTTPS origin and set build-time variables so the browser calls that host instead of localhost.
 
-**Option A — Build-time variable**
+### Build-time variables (Vite)
 
-- Add an env variable (e.g. `VITE_API_URL`) in `.env.production` and use it in code, then rebuild.
+| Variable | Used by | Value (example) |
+|----------|---------|-------------------|
+| `VITE_API_BASE` | `src/components/ContactFormPopover.tsx`, `src/pages/QualityCheckPage.jsx` | `https://your-api.example.com` (no trailing slash) |
+| `VITE_PARSER_URL` | `src/pages/LcoeTool.jsx` (PVsyst PDF upload) | `https://your-api.example.com/api/parse-pvsyst` |
 
-**Option B — Same-origin proxy**
+For a local production check, create `.env.production` in the repo root:
 
-- Serve the frontend and proxy `/api` to the backend (e.g. Nginx or your host’s proxy). Then use relative URLs like `/api/...` so no code change is needed per environment.
-
-Update these in the repo before building for production:
-
-- `src/pages/QualityCheckPage.jsx` — `API_BASE`
-- `src/pages/LcoeTool.jsx` — `PARSER_URL`
-
-Example with a variable:
-
-```js
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:5001";
+```bash
+VITE_API_BASE=https://your-api.example.com
+VITE_PARSER_URL=https://your-api.example.com/api/parse-pvsyst
 ```
 
-Then set `VITE_API_URL=https://your-api-domain.com` (no trailing slash) when building.
+Then run `npm run build`.
+
+**Note:** `VITE_*` values are embedded in the client bundle; treat them as public configuration, not secrets.
+
+### GitHub Pages (`.github/workflows/deploy-pages.yml`)
+
+The workflow passes the same variables into `npm run build`. After your API is deployed:
+
+1. Open the repo on GitHub → **Settings** → **Secrets and variables** → **Actions**.
+2. Add repository secrets:
+   - **`VITE_API_BASE`** — HTTPS origin of the Flask app (no trailing slash).
+   - **`VITE_PARSER_URL`** (optional but recommended) — full URL to `.../api/parse-pvsyst`.
+
+If these are not set, the CI build still succeeds, but the live site will fall back to `localhost` for API calls (contact form and related features will not work for real users).
+
+### Same-origin proxy (alternative)
+
+If you serve the frontend behind Nginx (or similar) and proxy `/api` to the backend, you could instead use relative URLs like `/api/...` in code for that deployment only — the current codebase uses absolute bases from env for cross-domain Pages + API setups.
 
 ---
 
@@ -111,12 +125,12 @@ Then set `VITE_API_URL=https://your-api-domain.com` (no trailing slash) when bui
 | Step | Command / action |
 |------|-------------------|
 | 1. Install frontend deps | `npm install` |
-| 2. Build frontend | `npm run build` |
+| 2. Build frontend | `npm run build` (set `VITE_API_BASE` / `VITE_PARSER_URL` or use `.env.production`) |
 | 3. Backend deps | `pip install -r backend/requirements.txt` |
-| 4. Set API URL | Configure `VITE_API_URL` or proxy (see §4) |
+| 4. Set API URL | `VITE_API_BASE`, `VITE_PARSER_URL`, GitHub Actions secrets for Pages, or proxy (see §4) |
 | 5. Deploy `dist/` | Upload to static host or copy to server |
 | 6. Run backend | Start Flask/gunicorn on port 5001 (or your chosen port) |
-| 7. CORS | Backend has CORS enabled; if frontend and API are on different domains, ensure your API domain is allowed |
+| 7. CORS | Backend uses `CORS(app)`; cross-origin requests from the Pages domain are allowed |
 
 ---
 

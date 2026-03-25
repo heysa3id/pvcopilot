@@ -1,6 +1,12 @@
 # Deploy Vite build to GitHub Pages.
 # Repo Settings → Pages → Source must be "GitHub Actions" (not "Deploy from a branch").
 # Site: https://www.pvcopilot.com/
+#
+# Production API (required for contact form, Quality Check CSV, LCOE PDF parser on the live site):
+# Settings → Secrets and variables → Actions → New repository secret:
+#   VITE_API_BASE      — https origin of your Flask app, no trailing slash
+#   VITE_PARSER_URL    — optional, full URL e.g. https://your-api.example.com/api/parse-pvsyst
+# If unset, the client falls back to localhost (fine for local builds only).
 name: Deploy to GitHub Pages
 
 on:
@@ -34,6 +40,9 @@ jobs:
         run: npm ci
 
       - name: Build
+        env:
+          VITE_API_BASE: ${{ secrets.VITE_API_BASE }}
+          VITE_PARSER_URL: ${{ secrets.VITE_PARSER_URL }}
         run: npm run build
 
       - name: Setup Pages

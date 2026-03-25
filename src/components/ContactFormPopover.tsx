@@ -20,11 +20,13 @@ export default function ContactFormPopover({
   setOpen: (open: boolean) => void
 }) {
   const [formState, setFormState] = useState<FormState>("idle")
+  const [submitError, setSubmitError] = useState<string | null>(null)
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
   const [message, setMessage] = useState("")
 
   async function submit() {
+    setSubmitError(null)
     setFormState("loading")
     try {
       const res = await fetch(`${API_BASE}/api/contact`, {
@@ -43,6 +45,7 @@ export default function ContactFormPopover({
       }, 1800)
     } catch (err) {
       console.error("Contact form error:", err)
+      setSubmitError("Could not send — try again later.")
       setFormState("idle")
     }
   }
@@ -56,6 +59,10 @@ export default function ContactFormPopover({
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
   }, [setOpen])
+
+  useEffect(() => {
+    if (open) setSubmitError(null)
+  }, [open])
 
   return (
     <PopoverForm
@@ -87,7 +94,10 @@ export default function ContactFormPopover({
               type="text"
               id="contact-name"
               value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => {
+                setName(e.target.value)
+                setSubmitError(null)
+              }}
               className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-amber-400"
               required
             />
@@ -103,7 +113,10 @@ export default function ContactFormPopover({
               type="email"
               id="contact-email"
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                setEmail(e.target.value)
+                setSubmitError(null)
+              }}
               onInvalid={(e) => (e.target as HTMLInputElement).setCustomValidity("Please include a correct email address")}
               onInput={(e) => (e.target as HTMLInputElement).setCustomValidity("")}
               className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-amber-400"
@@ -120,12 +133,20 @@ export default function ContactFormPopover({
             <textarea
               id="contact-message"
               value={message}
-              onChange={(e) => setMessage(e.target.value)}
+              onChange={(e) => {
+                setMessage(e.target.value)
+                setSubmitError(null)
+              }}
               className="w-full rounded-md border border-gray-200 bg-white px-3 py-2 shadow-sm focus:border-amber-400 focus:outline-none focus:ring-amber-400"
               rows={3}
               required
             />
           </div>
+          {submitError ? (
+            <p className="px-4 text-sm text-red-600" role="alert">
+              {submitError}
+            </p>
+          ) : null}
           <div className="relative flex h-12 items-center px-[10px]">
             <PopoverFormSeparator />
             <div className="absolute left-0 top-0 -translate-x-[1.5px] -translate-y-1/2">
