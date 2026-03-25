@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import Chart from "react-apexcharts";
 import Dialog from "@mui/material/Dialog";
 import DialogTitle from "@mui/material/DialogTitle";
@@ -26,6 +26,8 @@ import CurrencyExchangeIcon from "@mui/icons-material/CurrencyExchange";
 import HelpOutlineIcon from "@mui/icons-material/HelpOutline";
 import BookmarkAddedOutlinedIcon from "@mui/icons-material/BookmarkAddedOutlined";
 import RotateLeftOutlinedIcon from "@mui/icons-material/RotateLeftOutlined";
+import ShowChartOutlined from "@mui/icons-material/ShowChartOutlined";
+import CalculateOutlinedIcon from "@mui/icons-material/CalculateOutlined";
 
 // ── Currency data ─────────────────────────────────────────────────────────────
 const CURRENCIES = [
@@ -113,13 +115,43 @@ const CAPEX_CATS = [
 ];
 
 const INIT_CAPEX = Object.fromEntries(CAPEX_CATS.flatMap(c => c.items.map(i => [i.id, i.def])));
+const cloneCapexCats = (cats) => cats.map((cat) => ({ ...cat, items: cat.items.map((item) => ({ ...item })) }));
+const normalizeCapexName = (name) => String(name ?? "").trim().replace(/\s+/g, " ");
+function makeCapexItemId(label, existingIds) {
+  const base = normalizeCapexName(label)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "") || "item";
+  let next = base;
+  let suffix = 2;
+  while (existingIds.has(next)) {
+    next = `${base}_${suffix}`;
+    suffix += 1;
+  }
+  return next;
+}
+function titleFromItemId(itemId) {
+  return String(itemId ?? "")
+    .replace(/[_-]+/g, " ")
+    .replace(/\b\w/g, (m) => m.toUpperCase())
+    .trim() || "Custom Item";
+}
+/** USD/kWp from quantity × unit price (USD) and plant capacity (kWp). */
+function capexPerKwpFromQtyUnit(qty, unitUsd, capacityKwp) {
+  const cap = Number(capacityKwp);
+  if (!Number.isFinite(cap) || cap <= 0) return 0;
+  const q = Math.max(0, Number(qty) || 0);
+  const u = Number(unitUsd);
+  if (!Number.isFinite(u)) return 0;
+  return (q * u) / cap;
+}
 const DEFAULTS = {
-  systemCapacity:    1000,
+  systemCapacity:    1,
   ratedPowerAC:      875.4,
   dcAcRatio:         1.14,
   modulePower:       605,
   specificYield:     1883,
-  annualEnergy:      1879234,
+  annualEnergy:      1883,
   performanceRatio:  82.53,
   firstYearFactor:   0.975,
   linearDeg:         0.0042,
@@ -132,7 +164,7 @@ const DEFAULTS = {
 };
 
 // ── LCOE Engine ───────────────────────────────────────────────────────────────
-function calcAll(p) {
+function calcAll(p, capexCats = CAPEX_CATS) {
   const n = p.projectLifetime;
   const r = p.discountRate / 100;
   const capexUsdKwp = Object.values(p.capex).reduce((s, v) => s + (v||0), 0);
@@ -178,7 +210,7 @@ function calcAll(p) {
   }
   const projectNpv = npv(r);
 
-  const catTotals = CAPEX_CATS.map(cat => ({
+  const catTotals = capexCats.map(cat => ({
     id: cat.id, label: cat.label, color: cat.color,
     usdKwp:     cat.items.reduce((s,i) => s+(p.capex[i.id]||0), 0),
     localTotal: cat.items.reduce((s,i) => s+(p.capex[i.id]||0), 0) * p.systemCapacity,
@@ -218,7 +250,7 @@ function calcAll(p) {
            cashFlowRows, discountedPayback: discPayback };
 }
 
-function sensitivity(base, R) {
+function sensitivity(base, R, capexCats = CAPEX_CATS) {
   const params = [
     { label:"CAPEX Components",  fn:(p,f)=>({...p, capex:Object.fromEntries(Object.entries(p.capex).map(([k,v])=>[k,v*f]))})},
     { label:"Discount Rate",     fn:(p,f)=>({...p, discountRate:p.discountRate*f}) },
@@ -229,8 +261,8 @@ function sensitivity(base, R) {
     { label:"Tariff / PPA",      fn:(p,f)=>({...p, tariffPrice:p.tariffPrice*f}) },
   ];
   return params.map(({label,fn}) => {
-    const low  = calcAll(fn(base, 0.8)).lcoe;
-    const high = calcAll(fn(base, 1.2)).lcoe;
+    const low  = calcAll(fn(base, 0.8), capexCats).lcoe;
+    const high = calcAll(fn(base, 1.2), capexCats).lcoe;
     return { label, low:low-R.lcoe, high:high-R.lcoe, swing:high-low };
   }).sort((a,b)=>b.swing-a.swing);
 }
@@ -345,6 +377,7 @@ const APEX_BASE = {
 // ── Main LCoE Tool Component ──────────────────────────────────────────────────
 export default function LcoeTool() {
   const [p, setP]     = useState(DEFAULTS);
+  const [capexCats, setCapexCats] = useState(() => cloneCapexCats(CAPEX_CATS));
   const [panel, setPanel] = useState("system");
   const [chart, setChart] = useState("energy");
   const [hiddenCfSeries, setHiddenCfSeries] = useState({});
@@ -367,6 +400,14 @@ export default function LcoeTool() {
   const [showCapacityFactorHelpPopup, setShowCapacityFactorHelpPopup] = useState(false);
   const [showIrrHelpPopup, setShowIrrHelpPopup] = useState(false);
   const [showProjectNpvHelpPopup, setShowProjectNpvHelpPopup] = useState(false);
+  const [showAddCapexItemDialog, setShowAddCapexItemDialog] = useState(false);
+  const [newCapexCategoryId, setNewCapexCategoryId] = useState(CAPEX_CATS[0].id);
+  const [newCapexItemName, setNewCapexItemName] = useState("");
+  const [newCapexItemError, setNewCapexItemError] = useState("");
+  const [capexInputMode, setCapexInputMode] = useState("per_kwp");
+  const [showCapexInputModePopup, setShowCapexInputModePopup] = useState(false);
+  const [capexQtyById, setCapexQtyById] = useState({});
+  const [capexUnitUsdById, setCapexUnitUsdById] = useState({});
   const [reportDownloadedOpen, setReportDownloadedOpen] = useState(false);
   const [lcoeExcellentMaxKwh, setLcoeExcellentMaxKwh] = useState(0.034);
   const [lcoeLowMinKwh, setLcoeLowMinKwh] = useState(0.045);
@@ -389,9 +430,96 @@ export default function LcoeTool() {
   const setCapex = useCallback((id, val) =>
     setP(prev=>({...prev, capex:{...prev.capex,[id]:val}})), []);
 
+  useEffect(() => {
+    if (capexInputMode !== "quantity") return;
+    const cap = Number(p.systemCapacity);
+    let nextQty = capexQtyById;
+    let nextUnit = capexUnitUsdById;
+    let qtyChanged = false;
+    let unitChanged = false;
+    for (const cat of capexCats) {
+      for (const item of cat.items) {
+        if (nextQty[item.id] === undefined) {
+          if (!qtyChanged) { nextQty = { ...capexQtyById }; qtyChanged = true; }
+          nextQty[item.id] = 1;
+        }
+        if (nextUnit[item.id] === undefined) {
+          if (!unitChanged) { nextUnit = { ...capexUnitUsdById }; unitChanged = true; }
+          const q = nextQty[item.id] ?? 1;
+          const pk = p.capex[item.id] ?? 0;
+          nextUnit[item.id] = cap > 0 && Number.isFinite(cap) ? (pk * cap) / Math.max(q, 1e-12) : 0;
+        }
+      }
+    }
+    if (qtyChanged) setCapexQtyById(nextQty);
+    if (unitChanged) setCapexUnitUsdById(nextUnit);
+  }, [capexInputMode, capexCats, p.capex, p.systemCapacity, capexQtyById, capexUnitUsdById]);
+
+  useEffect(() => {
+    if (capexInputMode !== "quantity") return;
+    const cap = p.systemCapacity;
+    if (!cap || cap <= 0) return;
+    setP((prev) => {
+      const nextCapex = { ...prev.capex };
+      let touched = false;
+      for (const cat of capexCats) {
+        for (const item of cat.items) {
+          const q = Math.max(0, capexQtyById[item.id] ?? 1);
+          const u = capexUnitUsdById[item.id];
+          if (u === undefined || !Number.isFinite(u)) continue;
+          const v = (q * u) / cap;
+          if (nextCapex[item.id] !== v) touched = true;
+          nextCapex[item.id] = v;
+        }
+      }
+      if (!touched) return prev;
+      return { ...prev, capex: nextCapex };
+    });
+  }, [p.systemCapacity, capexInputMode, capexCats, capexQtyById, capexUnitUsdById]);
+
+  const resetAddCapexDialog = useCallback(() => {
+    setNewCapexCategoryId(CAPEX_CATS[0].id);
+    setNewCapexItemName("");
+    setNewCapexItemError("");
+  }, []);
+
+  const closeAddCapexDialog = useCallback(() => {
+    setShowAddCapexItemDialog(false);
+    resetAddCapexDialog();
+  }, [resetAddCapexDialog]);
+
+  const handleApplyNewCapexItem = useCallback(() => {
+    const normalizedName = normalizeCapexName(newCapexItemName);
+    if (!normalizedName) {
+      setNewCapexItemError("Name is required.");
+      return;
+    }
+    const target = capexCats.find((cat) => cat.id === newCapexCategoryId);
+    if (!target) {
+      setNewCapexItemError("Please select a category.");
+      return;
+    }
+    const hasDuplicateName = target.items.some((item) => normalizeCapexName(item.label).toLowerCase() === normalizedName.toLowerCase());
+    if (hasDuplicateName) {
+      setNewCapexItemError("This item already exists in the selected category.");
+      return;
+    }
+    const existingIds = new Set(capexCats.flatMap((cat) => cat.items.map((item) => item.id)));
+    const id = makeCapexItemId(normalizedName, existingIds);
+    const newItem = { id, label: normalizedName, def: 0, custom: true };
+    setCapexCats((prev) => prev.map((cat) => (
+      cat.id === newCapexCategoryId ? { ...cat, items: [...cat.items, newItem] } : cat
+    )));
+    setP((prev) => ({ ...prev, capex: { ...prev.capex, [id]: 0 } }));
+    setCapexQtyById((prev) => ({ ...prev, [id]: 1 }));
+    setCapexUnitUsdById((prev) => ({ ...prev, [id]: 0 }));
+    setOpenCat((prev) => ({ ...prev, [newCapexCategoryId]: true }));
+    closeAddCapexDialog();
+  }, [capexCats, newCapexCategoryId, newCapexItemName, closeAddCapexDialog]);
+
   const handleSaveTemplate = useCallback(() => {
     const grouped = {};
-    for (const cat of CAPEX_CATS) {
+    for (const cat of capexCats) {
       grouped[cat.label] = Object.fromEntries(
         cat.items.map(i => [i.id, p.capex[i.id] ?? i.def])
       );
@@ -403,7 +531,7 @@ export default function LcoeTool() {
     a.download = "capex_template.json";
     a.click();
     URL.revokeObjectURL(url);
-  }, [p.capex]);
+  }, [capexCats, p.capex]);
 
   const handleLoadTemplate = useCallback(() => {
     const input = document.createElement("input");
@@ -417,29 +545,56 @@ export default function LcoeTool() {
         try {
           const data = JSON.parse(ev.target.result);
           if (typeof data === "object" && data !== null && !Array.isArray(data)) {
+            const categoryEntries = new Map(
+              Object.entries(data).map(([k, v]) => [String(k).trim().toLowerCase(), v])
+            );
+            const requiredLabels = CAPEX_CATS.map((c) => c.label.toLowerCase());
+            const hasAllCategories = requiredLabels.every((label) => categoryEntries.has(label));
+            if (!hasAllCategories) return;
+
+            const baseByCategory = new Map(capexCats.map((cat) => [cat.id, cat]));
+            const nextCats = capexCats.map((cat) => ({ ...cat, items: [...cat.items] }));
             const flat = {};
-            for (const val of Object.values(data)) {
-              if (typeof val === "object" && val !== null && !Array.isArray(val)) {
-                Object.assign(flat, val);
-              } else if (typeof val === "number") {
-                // support flat format too — key is already at top level
+            const knownIds = new Set(capexCats.flatMap((cat) => cat.items.map((item) => item.id)));
+
+            for (const baseCat of CAPEX_CATS) {
+              const incoming = categoryEntries.get(baseCat.label.toLowerCase());
+              if (typeof incoming !== "object" || incoming === null || Array.isArray(incoming)) continue;
+              const runtimeCat = nextCats.find((c) => c.id === baseCat.id) || baseByCategory.get(baseCat.id);
+              if (!runtimeCat) continue;
+              const labelsToIds = new Map(runtimeCat.items.map((item) => [normalizeCapexName(item.label).toLowerCase(), item.id]));
+
+              for (const [rawItemKey, rawItemValue] of Object.entries(incoming)) {
+                const itemValue = Number(rawItemValue);
+                if (!Number.isFinite(itemValue)) continue;
+                const itemKey = String(rawItemKey).trim();
+                if (!itemKey) continue;
+
+                let resolvedId = knownIds.has(itemKey) ? itemKey : labelsToIds.get(normalizeCapexName(itemKey).toLowerCase());
+                if (!resolvedId) {
+                  resolvedId = makeCapexItemId(itemKey, knownIds);
+                  knownIds.add(resolvedId);
+                  labelsToIds.set(normalizeCapexName(itemKey).toLowerCase(), resolvedId);
+                  runtimeCat.items.push({
+                    id: resolvedId,
+                    label: normalizeCapexName(itemKey),
+                    def: 0,
+                    custom: true,
+                  });
+                }
+                flat[resolvedId] = itemValue;
               }
             }
-            // If top-level keys match item ids directly (flat format), use as-is
-            const allItemIds = new Set(CAPEX_CATS.flatMap(c => c.items.map(i => i.id)));
-            const hasDirectIds = Object.keys(data).some(k => allItemIds.has(k));
-            if (hasDirectIds) {
-              setP(prev => ({ ...prev, capex: { ...prev.capex, ...data } }));
-            } else {
-              setP(prev => ({ ...prev, capex: { ...prev.capex, ...flat } }));
-            }
+
+            setCapexCats(nextCats);
+            setP((prev) => ({ ...prev, capex: { ...prev.capex, ...flat } }));
           }
         } catch { /* ignore invalid JSON */ }
       };
       reader.readAsText(file);
     };
     input.click();
-  }, []);
+  }, [capexCats]);
 
   const handlePDF = useCallback(async (file) => {
     if (!file || file.type !== "application/pdf") {
@@ -478,8 +633,8 @@ export default function LcoeTool() {
     handlePDF(e.dataTransfer.files[0]);
   }, [handlePDF]);
 
-  const R   = useMemo(() => calcAll(p), [p]);
-  const sens = useMemo(() => sensitivity(p, R), [p, R]);
+  const R   = useMemo(() => calcAll(p, capexCats), [p, capexCats]);
+  const sens = useMemo(() => sensitivity(p, R, capexCats), [p, R, capexCats]);
   const lcoeMwh = R.lcoe * 1000;
   const excellentMaxKwh = lcoeExcellentMaxKwh;
   const lowMinKwh = lcoeLowMinKwh;
@@ -733,6 +888,68 @@ export default function LcoeTool() {
         <DialogActions>
           <Button onClick={() => setShowBrowserRecommendDialog(false)} variant="contained" sx={{ bgcolor: G, "&:hover": { bgcolor: "#e6a200" } }}>
             OK
+          </Button>
+        </DialogActions>
+      </Dialog>
+      <Dialog open={showAddCapexItemDialog} onClose={closeAddCapexDialog} maxWidth="xs" fullWidth>
+        <DialogTitle sx={{ fontSize: 16 }}>Add CAPEX Item</DialogTitle>
+        <DialogContent>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 4 }}>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "#475569", display: "block", marginBottom: 6 }}>
+                Category
+              </label>
+              <select
+                value={newCapexCategoryId}
+                onChange={(e) => setNewCapexCategoryId(e.target.value)}
+                style={{
+                  width: "100%",
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  border: "1px solid #E2E8F0",
+                  background: "#fff",
+                  color: "#0F172A",
+                  fontSize: 12,
+                  fontFamily: "Inter, Arial, sans-serif",
+                }}
+              >
+                {capexCats.map((cat) => (
+                  <option key={cat.id} value={cat.id}>{cat.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 700, color: "#475569", display: "block", marginBottom: 6 }}>
+                Name
+              </label>
+              <input
+                type="text"
+                value={newCapexItemName}
+                onChange={(e) => {
+                  setNewCapexItemName(e.target.value);
+                  if (newCapexItemError) setNewCapexItemError("");
+                }}
+                placeholder="e.g. Battery"
+                style={{
+                  width: "100%",
+                  padding: "8px 10px",
+                  borderRadius: 8,
+                  border: "1px solid #E2E8F0",
+                  fontSize: 12,
+                  color: "#0F172A",
+                  fontFamily: "Inter, Arial, sans-serif",
+                }}
+              />
+              {newCapexItemError ? (
+                <div style={{ marginTop: 6, fontSize: 11, color: "#dc2626" }}>{newCapexItemError}</div>
+              ) : null}
+            </div>
+          </div>
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={closeAddCapexDialog}>Cancel</Button>
+          <Button onClick={handleApplyNewCapexItem} variant="contained" sx={{ bgcolor: G, "&:hover": { bgcolor: "#e6a200" } }}>
+            Apply
           </Button>
         </DialogActions>
       </Dialog>
@@ -1146,14 +1363,57 @@ export default function LcoeTool() {
           {/* ── CAPEX ── */}
           {panel==="capex" && (
             <Card className="fu">
-              <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:18, paddingBottom:14, borderBottom:"1px solid #E2E8F0" }}>
+              <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:18, paddingBottom:14, borderBottom:"1px solid #E2E8F0", flexWrap:"wrap" }}>
                 <AccountTreeOutlinedIcon sx={{ fontSize:20, color: ICON_COLOR }} />
-                <div>
+                <div style={{ flex:1, minWidth:140 }}>
                   <div style={{ fontWeight:700, fontSize:13, color:"#0F172A" }}>CAPEX Breakdown</div>
                   <div style={{ fontSize:10, color:"#94a3b8" }}>{currency}/kWp per item · total converts to {currency}</div>
+                  {capexInputMode === "quantity" ? (
+                    <div style={{ fontSize:9, color:"#94a3b8", marginTop:4, lineHeight:1.35 }}>
+                      Line total = quantity × unit price; values roll into {currency}/kWp for LCOE.
+                    </div>
+                  ) : null}
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setShowCapexInputModePopup(true)}
+                  style={{
+                    display:"flex", alignItems:"center", gap:4,
+                    padding:"4px 10px", borderRadius:8,
+                    background:"#F1F5F9", color:"#334155",
+                    border:"1px solid #E2E8F0", cursor:"pointer",
+                    fontSize:10, fontWeight:600, fontFamily:"Inter, Arial, sans-serif",
+                    flexShrink:0,
+                  }}
+                  title="CAPEX input mode"
+                >
+                  <CalculateOutlinedIcon sx={{ fontSize:13, color:"#64748B" }} />
+                  Currency/Qt
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowAddCapexItemDialog(true)}
+                  style={{
+                    flexShrink:0,
+                    width: 24,
+                    height: 24,
+                    borderRadius: "50%",
+                    border: "1px solid #D1D5DB",
+                    background: "#fff",
+                    color: "#475569",
+                    cursor: "pointer",
+                    fontSize: 16,
+                    lineHeight: 1,
+                    display: "inline-flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                  }}
+                  title="add new CAPEX item"
+                >
+                  +
+                </button>
               </div>
-              {CAPEX_CATS.map(cat => {
+              {capexCats.map(cat => {
                 const catSum = cat.items.reduce((s,i)=>s+(p.capex[i.id]||0),0);
                 const isOpen = openCat[cat.id] !== false;
                 return (
@@ -1174,18 +1434,98 @@ export default function LcoeTool() {
                     </button>
                     {isOpen && (
                       <div style={{ paddingTop:8 }}>
-                        {cat.items.map(item=>(
-                          <div key={item.id} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:7 }}>
-                            <div style={{ fontSize:11, color:"#64748B", flex:1 }}>{item.label}</div>
-                            <div style={{ width:110, position:"relative" }}>
-                              <input type="number" value={parseFloat(cx(p.capex[item.id]).toFixed(2))} min={0} step={0.1}
-                                onChange={e=>setCapex(item.id, (parseFloat(e.target.value)||0)/exchangeRate)}
-                                style={{ paddingRight:42 }} />
-                              <span style={{ position:"absolute", right:7, top:"50%", transform:"translateY(-50%)",
-                                fontSize:9, color:"#64748B", fontFamily:"'JetBrains Mono'", pointerEvents:"none" }}>{currSym}/kWp</span>
+                        {cat.items.map((item) => {
+                          const cap = p.systemCapacity;
+                          const q = Math.max(0, capexQtyById[item.id] ?? 1);
+                          const uUsd = capexUnitUsdById[item.id] ?? (
+                            cap > 0 ? ((p.capex[item.id] ?? 0) * cap) / Math.max(q, 1e-12) : 0
+                          );
+                          const lineTotalUsd = q * uUsd;
+
+                          if (capexInputMode === "quantity") {
+                            return (
+                              <div key={item.id} style={{ display:"flex", alignItems:"center", gap:8, marginBottom:8, flexWrap:"wrap" }}>
+                                <div style={{ fontSize:11, color:"#64748B", flex:"1 1 100px", minWidth:90 }}>{item.label}</div>
+                                <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap", flex:"1 1 200px" }}>
+                                  <input
+                                    type="number"
+                                    value={q}
+                                    min={0}
+                                    step={0.01}
+                                    onChange={(e) => {
+                                      const newQ = Math.max(0, parseFloat(e.target.value) || 0);
+                                      const u = capexUnitUsdById[item.id] ?? (
+                                        cap > 0 ? ((p.capex[item.id] ?? 0) * cap) / Math.max(capexQtyById[item.id] ?? 1, 1e-12) : 0
+                                      );
+                                      setCapexQtyById((prev) => ({ ...prev, [item.id]: newQ }));
+                                      if (capexUnitUsdById[item.id] === undefined) {
+                                        setCapexUnitUsdById((prev) => ({ ...prev, [item.id]: u }));
+                                      }
+                                      if (cap > 0) setCapex(item.id, capexPerKwpFromQtyUnit(newQ, u, cap));
+                                    }}
+                                    style={{
+                                      width:72, padding:"6px 8px", borderRadius:7, border:"1px solid #E2E8F0",
+                                      fontSize:11, fontFamily:"'JetBrains Mono', monospace", color:"#0F172A", background:"#fff",
+                                    }}
+                                  />
+                                  <span style={{ fontSize:10, color:"#94a3b8" }}>×</span>
+                                  <div style={{ width:100, position:"relative" }}>
+                                    <input
+                                      type="number"
+                                      value={parseFloat(cx(uUsd).toFixed(2))}
+                                      min={0}
+                                      step={0.01}
+                                      onChange={(e) => {
+                                        const uDisp = parseFloat(e.target.value) || 0;
+                                        const uUsdNew = uDisp / exchangeRate;
+                                        const qn = Math.max(0, capexQtyById[item.id] ?? 1);
+                                        setCapexUnitUsdById((prev) => ({ ...prev, [item.id]: uUsdNew }));
+                                        if (cap > 0) setCapex(item.id, capexPerKwpFromQtyUnit(qn, uUsdNew, cap));
+                                      }}
+                                      style={{ width:"100%", padding:"6px 36px 6px 8px", borderRadius:7, border:"1px solid #E2E8F0",
+                                        fontSize:11, fontFamily:"'JetBrains Mono', monospace", color:"#0F172A", background:"#fff" }}
+                                    />
+                                    <span style={{ position:"absolute", right:7, top:"50%", transform:"translateY(-50%)",
+                                      fontSize:9, color:"#64748B", fontFamily:"'JetBrains Mono'", pointerEvents:"none" }}>{currSym}</span>
+                                  </div>
+                                  <span style={{ fontSize:10, color:"#94a3b8" }}>=</span>
+                                  <span style={{ fontFamily:"'JetBrains Mono'", fontSize:11, color:"#0F172A", minWidth:72 }}>
+                                    {currSym}{fmt(cx(lineTotalUsd), 2)}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div key={item.id} style={{ display:"flex", alignItems:"center", gap:10, marginBottom:7 }}>
+                              <div style={{ fontSize:11, color:"#64748B", flex:1 }}>{item.label}</div>
+                              <div style={{ width:110, position:"relative" }}>
+                                <input
+                                  type="number"
+                                  value={parseFloat(cx(p.capex[item.id]).toFixed(2))}
+                                  min={0}
+                                  step={0.1}
+                                  onChange={(e) => {
+                                    const valUsd = (parseFloat(e.target.value) || 0) / exchangeRate;
+                                    setCapex(item.id, valUsd);
+                                    const c = p.systemCapacity;
+                                    if (c > 0) {
+                                      const qn = capexQtyById[item.id] ?? 1;
+                                      setCapexUnitUsdById((prev) => ({
+                                        ...prev,
+                                        [item.id]: (valUsd * c) / Math.max(qn, 1e-12),
+                                      }));
+                                    }
+                                  }}
+                                  style={{ paddingRight:42 }}
+                                />
+                                <span style={{ position:"absolute", right:7, top:"50%", transform:"translateY(-50%)",
+                                  fontSize:9, color:"#64748B", fontFamily:"'JetBrains Mono'", pointerEvents:"none" }}>{currSym}/kWp</span>
+                              </div>
                             </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -1364,7 +1704,7 @@ export default function LcoeTool() {
                   </span>
                 </div>
                 <button
-                  onClick={() => generateLcoeReport(p, R, sens, CAPEX_CATS, { currency, exchangeRate, currSym })
+                  onClick={() => generateLcoeReport(p, R, sens, capexCats, { currency, exchangeRate, currSym })
                     .then(() => setReportDownloadedOpen(true))
                     .catch(err => console.error("PDF generation failed:", err))}
                   style={{
@@ -1910,6 +2250,78 @@ export default function LcoeTool() {
                 Apply
               </Button>
             </div>
+          </div>
+        </div>
+      )}
+      {/* ── CAPEX input mode popup (same overlay pattern as currency) ── */}
+      {showCapexInputModePopup && (
+        <div style={{
+          position:"fixed", top:0, left:0, right:0, bottom:0,
+          background:"rgba(0,0,0,.3)", zIndex:10000,
+          display:"flex", alignItems:"center", justifyContent:"center",
+        }} onClick={() => setShowCapexInputModePopup(false)}>
+          <div onClick={(e) => e.stopPropagation()} style={{
+            background:"#fff", borderRadius:14, padding:"20px 22px 18px",
+            boxShadow:"0 16px 48px rgba(0,0,0,.18)", width:280,
+            fontFamily:"Inter, Arial, sans-serif",
+          }}>
+            <div style={{ fontSize:13, fontWeight:700, color:"#0F172A", marginBottom:3 }}>CAPEX input mode</div>
+            <div style={{ fontSize:10, color:"#64748B", marginBottom:14 }}>Choose how each line item is entered</div>
+
+            <button
+              type="button"
+              onClick={() => { setCapexInputMode("per_kwp"); setShowCapexInputModePopup(false); }}
+              style={{
+                width:"100%", display:"flex", alignItems:"center", gap:12,
+                padding:"11px 12px", marginBottom:8, borderRadius:8,
+                border:capexInputMode === "per_kwp" ? `2px solid ${G}` : "1.5px solid #E2E8F0",
+                background:capexInputMode === "per_kwp" ? "#FFFBEB" : "#F8FAFC",
+                cursor:"pointer", boxSizing:"border-box",
+                textAlign:"left", fontFamily:"Inter, Arial, sans-serif",
+              }}
+            >
+              <ShowChartOutlined sx={{ fontSize:22, color: ICON_COLOR, flexShrink:0 }} />
+              <div>
+                <div style={{ fontSize:12, fontWeight:700, color:"#0F172A" }}>{currency}/kWp</div>
+                <div style={{ fontSize:10, color:"#64748B", marginTop:2 }}>One value per item (default)</div>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => { setCapexInputMode("quantity"); setShowCapexInputModePopup(false); }}
+              style={{
+                width:"100%", display:"flex", alignItems:"center", gap:12,
+                padding:"11px 12px", marginBottom:14, borderRadius:8,
+                border:capexInputMode === "quantity" ? `2px solid ${G}` : "1.5px solid #E2E8F0",
+                background:capexInputMode === "quantity" ? "#FFFBEB" : "#F8FAFC",
+                cursor:"pointer", boxSizing:"border-box",
+                textAlign:"left", fontFamily:"Inter, Arial, sans-serif",
+              }}
+            >
+              <CalculateOutlinedIcon sx={{ fontSize:22, color: ICON_COLOR, flexShrink:0 }} />
+              <div>
+                <div style={{ fontSize:12, fontWeight:700, color:"#0F172A" }}>{currency} / Quantity</div>
+                <div style={{ fontSize:10, color:"#64748B", marginTop:2 }}>Quantity × unit price per item</div>
+              </div>
+            </button>
+
+            <Button
+              size="small"
+              variant="outlined"
+              onClick={() => setShowCapexInputModePopup(false)}
+              sx={{
+                width:"100%",
+                borderRadius: 2,
+                textTransform: "none",
+                border: "1px solid #E2E8F0",
+                color: "#64748B",
+                backgroundColor: "#F1F5F9",
+                "&:hover": { border: "1px solid #CBD5E1", backgroundColor: "#E2E8F0" },
+              }}
+            >
+              Close
+            </Button>
           </div>
         </div>
       )}
