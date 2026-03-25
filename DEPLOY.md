@@ -41,7 +41,7 @@ Backend runs on **port 5001** and provides:
 
 - `POST /api/parse-pvsyst` — parse PVSyst PDF
 - `POST /api/process-csv` — process CSV
-- `POST /api/contact` — save contact form submissions (Excel)
+- `POST /api/contact` — save contact form submissions (CSV, `backend/data/contacts.csv`)
 - `GET /api/contacts` — list saved contacts (JSON)
 - `GET /api/health` — health check
 

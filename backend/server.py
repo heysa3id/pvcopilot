@@ -17,9 +17,26 @@ from lcoe_pdf import parse_pvsyst_pdf
 from quality_check_csv import process_quality_check_csv
 
 CONTACTS_DIR = os.path.join(os.path.dirname(__file__), "data")
-CONTACTS_FILE = os.path.join(CONTACTS_DIR, "contacts.xlsx")
+CONTACTS_FILE = os.path.join(CONTACTS_DIR, "contacts.csv")
+LEGACY_CONTACTS_XLSX = os.path.join(CONTACTS_DIR, "contacts.xlsx")
 
 app = Flask(__name__)
+
+
+def _migrate_legacy_contacts_xlsx_if_needed():
+    """If contacts.csv is missing but contacts.xlsx exists, import once (openpyxl)."""
+    if os.path.exists(CONTACTS_FILE):
+        return
+    if not os.path.exists(LEGACY_CONTACTS_XLSX):
+        return
+    try:
+        df = pd.read_excel(LEGACY_CONTACTS_XLSX, engine="openpyxl")
+        os.makedirs(CONTACTS_DIR, exist_ok=True)
+        df.to_csv(CONTACTS_FILE, index=False, encoding="utf-8")
+    except Exception:
+        pass
+
+
 CORS(app)
 
 MAX_PVSYST_UPLOAD_BYTES = int(os.getenv("MAX_PVSYST_UPLOAD_BYTES", str(10 * 1024 * 1024)))
@@ -116,7 +133,7 @@ def process_csv():
 
 @app.route("/api/contact", methods=["POST"])
 def save_contact():
-    """Save a contact form submission to the local Excel file."""
+    """Save a contact form submission to the local CSV file."""
     data = request.get_json(silent=True)
     if not data:
         return jsonify({"error": "Invalid JSON body."}), 400
@@ -130,6 +147,7 @@ def save_contact():
 
     try:
         os.makedirs(CONTACTS_DIR, exist_ok=True)
+        _migrate_legacy_contacts_xlsx_if_needed()
         new_row = pd.DataFrame([{
             "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "Name": name,
@@ -138,12 +156,12 @@ def save_contact():
         }])
 
         if os.path.exists(CONTACTS_FILE):
-            existing = pd.read_excel(CONTACTS_FILE, engine="openpyxl")
+            existing = pd.read_csv(CONTACTS_FILE, encoding="utf-8")
             df = pd.concat([existing, new_row], ignore_index=True)
         else:
             df = new_row
 
-        df.to_excel(CONTACTS_FILE, index=False, engine="openpyxl")
+        df.to_csv(CONTACTS_FILE, index=False, encoding="utf-8")
         return jsonify({"success": True})
     except Exception as e:
         return jsonify({"error": f"Failed to save contact: {str(e)}"}), 500
@@ -152,10 +170,11 @@ def save_contact():
 @app.route("/api/contacts", methods=["GET"])
 def list_contacts():
     """Return all contact form submissions as JSON."""
+    _migrate_legacy_contacts_xlsx_if_needed()
     if not os.path.exists(CONTACTS_FILE):
         return jsonify([])
     try:
-        df = pd.read_excel(CONTACTS_FILE, engine="openpyxl")
+        df = pd.read_csv(CONTACTS_FILE, encoding="utf-8")
         return jsonify(df.to_dict(orient="records"))
     except Exception as e:
         return jsonify({"error": f"Failed to read contacts: {str(e)}"}), 500
