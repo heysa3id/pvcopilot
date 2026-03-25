@@ -3,9 +3,7 @@ import Dialog from "@mui/material/Dialog";
 import DialogContent from "@mui/material/DialogContent";
 import IconButton from "@mui/material/IconButton";
 import CloseIcon from "@mui/icons-material/Close";
-import CheckCircleOutline from "@mui/icons-material/CheckCircleOutline";
 import CloudUploadOutlined from "@mui/icons-material/CloudUploadOutlined";
-import ArrowForwardIcon from "@mui/icons-material/ArrowForward";
 
 const FONT = "'Inter', system-ui, -apple-system, sans-serif";
 const Y = "#16a34a";
@@ -480,7 +478,7 @@ export default function CSVColumnMapper({
     [requiredColumns, mappings],
   );
 
-  const previewRows = useMemo(() => sourceRows.slice(0, 5), [sourceRows]);
+  const previewRows = useMemo(() => sourceRows.slice(0, 1000), [sourceRows]);
 
   const handleLoad = useCallback(() => {
     setStep(2);
@@ -609,7 +607,6 @@ export default function CSVColumnMapper({
               fontSize: 13, color: "#64748B", fontFamily: FONT, marginBottom: 16,
               display: "flex", alignItems: "center", gap: 6,
             }}>
-              <CheckCircleOutline sx={{ fontSize: 16, color: Y }} />
               <span><strong>{fileName}</strong> — {sourceHeaders.length} columns, {sourceRows.length.toLocaleString()} rows</span>
             </div>
 
@@ -673,22 +670,6 @@ export default function CSVColumnMapper({
                       transition: "background 0.2s",
                     }}
                   >
-                    {/* Status indicator */}
-                    <div style={{
-                      width: 20, height: 20, borderRadius: "50%",
-                      display: "flex", alignItems: "center", justifyContent: "center",
-                      flexShrink: 0,
-                    }}>
-                      {mapped ? (
-                        <CheckCircleOutline sx={{ fontSize: 18, color: Y }} />
-                      ) : (
-                        <div style={{
-                          width: 10, height: 10, borderRadius: "50%",
-                          border: `2px solid ${isRequired ? "#dc2626" : "#E2E8F0"}`,
-                        }} />
-                      )}
-                    </div>
-
                     {/* Template column label */}
                     <div style={{
                       flex: "0 0 200px", fontSize: 13, fontWeight: 700,
@@ -698,15 +679,7 @@ export default function CSVColumnMapper({
                       {isRequired && !mapped && (
                         <span style={{ color: "#dc2626", fontSize: 11, marginLeft: 4 }}>required</span>
                       )}
-                      {expectedTypes[tpl] && (
-                        <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 500, marginLeft: 6 }}>
-                          {expectedTypes[tpl]}
-                        </span>
-                      )}
                     </div>
-
-                    {/* Arrow */}
-                    <ArrowForwardIcon sx={{ fontSize: 16, color: "#cbd5e1", flexShrink: 0, transform: "rotate(180deg)" }} />
 
                     {/* Dropdown */}
                     <select
@@ -780,9 +753,9 @@ export default function CSVColumnMapper({
             {previewRows.length > 0 && (
               <div style={{ marginTop: 20 }}>
                 <div style={{ fontSize: 12, fontWeight: 600, color: "#64748B", fontFamily: FONT, marginBottom: 8 }}>
-                  Preview (first {previewRows.length} rows of source data):
+                  Preview ({sourceRows.length > 1000 ? `first 1000 of ${sourceRows.length.toLocaleString()}` : `${previewRows.length}`} rows of source data):
                 </div>
-                <div style={{ overflowX: "auto", borderRadius: 8, border: "1px solid #E2E8F0" }}>
+                <div style={{ overflowX: "auto", maxHeight: 370, overflowY: "auto", borderRadius: 8, border: "1px solid #E2E8F0" }}>
                   <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, fontFamily: "'JetBrains Mono', monospace" }}>
                     <thead>
                       <tr>
@@ -791,7 +764,7 @@ export default function CSVColumnMapper({
                             padding: "6px 10px", textAlign: "left",
                             background: "#f8fafc", borderBottom: "1px solid #E2E8F0",
                             fontWeight: 700, color: selectedCols.has(i) ? "#0F172A" : "#cbd5e1",
-                            whiteSpace: "nowrap",
+                            whiteSpace: "nowrap", position: "sticky", top: 0, zIndex: 1,
                           }}>
                             {h}
                           </th>
