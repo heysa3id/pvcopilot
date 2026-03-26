@@ -1,0 +1,72 @@
+You are a senior full-stack engineer. Create a robust large-file processing upgrade plan for my project (React/Vite frontend + Flask/Python backend with pandas), then implement it in small safe steps.
+
+## Context
+- Current backend has endpoints like `/api/process-csv` and `/api/parse-pvsyst`.
+- Large CSV/PDF uploads can cause freezing/stalls.
+- Current code reads entire CSV into memory (`file.read()` pattern), which must be eliminated.
+- There are existing upload size env vars (e.g., `MAX_CSV_UPLOAD_BYTES`, `MAX_PVSYST_UPLOAD_BYTES`).
+
+## Goals
+1. Handle large files reliably without UI freeze or backend hangs.
+2. Keep API responsive under heavy processing.
+3. Provide user-visible progress and clear errors.
+4. Prevent memory spikes and request timeouts.
+5. Keep changes incremental and production-safe.
+
+## Required Deliverables
+1. **Architecture Plan**
+   - Propose a phased plan (Phase 1 quick wins, Phase 2 async jobs, Phase 3 hardening/observability).
+   - Include tradeoffs and rollback strategy.
+
+2. **Backend Design**
+   - Replace full-buffer CSV reads with streaming/chunked processing.
+   - Refactor CSV processing to accept file path or chunk iterator (not giant string).
+   - Introduce async job model:
+     - `POST /api/process-csv` => returns `job_id`
+     - `GET /api/jobs/{job_id}` => returns status/progress/result/error
+     - optional cancel endpoint
+   - Add temp-file lifecycle + cleanup strategy.
+   - Add timeout/memory guards and bounded worker concurrency.
+   - Add schema validation and fail-fast checks.
+
+3. **Frontend Design**
+   - Non-blocking upload + processing UX.
+   - Progress indicators for upload and server-side processing.
+   - Polling strategy for job status.
+   - Cancel/retry UX and duplicate-submit prevention.
+
+4. **Reliability & Observability**
+   - Structured logs: file size, row count, stage timings, errors.
+   - Metrics: success/fail/timeout counters + latency percentiles.
+   - Clear user-facing errors for invalid/malformed/too-large files.
+
+5. **Testing Strategy**
+   - Synthetic large test files (50MB/100MB/200MB+).
+   - Regression tests for malformed CSV, weird encodings, missing columns.
+   - Load/concurrency tests and acceptance thresholds.
+
+6. **Implementation Order**
+   - Provide exact step-by-step order with smallest-risk-first approach.
+   - For each step include:
+     - files to change,
+     - expected behavior,
+     - verification commands/tests,
+     - rollback notes.
+
+## Constraints
+- Minimize breaking API changes; if changed, document migration.
+- Keep memory usage bounded.
+- Do not block request thread for long-running tasks.
+- Prefer backward compatibility where possible.
+
+## Output Format
+- Start with a concise executive summary.
+- Then provide:
+  1) Phased roadmap,
+  2) API contract examples (request/response JSON),
+  3) Pseudocode for chunked processor and job worker,
+  4) Test matrix,
+  5) Risk register with mitigations,
+  6) Final checklist ready for execution.
+
+Be concrete, not generic. Assume this will be executed immediately by an engineering team.
