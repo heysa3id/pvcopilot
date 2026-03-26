@@ -238,6 +238,18 @@ function clearSkyGhiHaurwitz(cosZenith) {
   return 1098 * cz * Math.exp(-0.059 / cz);
 }
 
+const KT_CLEAR_MIN = 0.88;
+const KT_CLEAR_MAX = 1.12;
+const KT_CLEAR_DAY_RATIO = 0.45;
+const KT_MIN_DAYTIME_SAMPLES = 6;
+
+function computeKt(measuredGhi, clearSkyGhi) {
+  const meas = Number(measuredGhi);
+  const clear = Number(clearSkyGhi);
+  if (!Number.isFinite(meas) || !Number.isFinite(clear) || clear <= 0) return null;
+  return meas / clear;
+}
+
 /** Format ms as YYYY-MM-DD HH:MM (match backend). */
 function formatTimeCell(ms) {
   const d = new Date(ms);
@@ -2288,6 +2300,11 @@ function CSVChart({ title, color, headers, rows, defaultYHeader }) {
 
 function ClearSkyDaysChart({ title, color, headers, rows, systemInfo }) {
   const [expanded, setExpanded] = useState(true);
+  const [ktMin, setKtMin] = useState(KT_CLEAR_MIN);
+  const [ktMax, setKtMax] = useState(KT_CLEAR_MAX);
+  const [editingKt, setEditingKt] = useState(false);
+  const [ktMinInput, setKtMinInput] = useState(String(KT_CLEAR_MIN));
+  const [ktMaxInput, setKtMaxInput] = useState(String(KT_CLEAR_MAX));
   const safeHeaders = Array.isArray(headers) ? headers : [];
   const safeRows = Array.isArray(rows) ? rows : [];
   const cfg = systemInfo && typeof systemInfo === "object" ? (systemInfo.config || systemInfo) : null;
@@ -2342,8 +2359,8 @@ function ClearSkyDaysChart({ title, color, headers, rows, systemInfo }) {
       const meas = ghiMeas[i];
       const modeled = ghiClr[i];
       const isDay = cosZ[i] > 0.08 && (modeled ?? 0) > 150 && meas != null && Number.isFinite(meas) && meas > 0;
-      const kt = isDay && modeled ? (meas / modeled) : null;
-      clearMask.push(Boolean(kt != null && kt >= 0.88 && kt <= 1.12));
+      const kt = isDay ? computeKt(meas, modeled) : null;
+      clearMask.push(Boolean(kt != null && kt >= ktMin && kt <= ktMax));
     }
 
     const dayAgg = new Map();
@@ -2364,18 +2381,19 @@ function ClearSkyDaysChart({ title, color, headers, rows, systemInfo }) {
     const dayIsClear = dayKeys.map((k) => {
       const v = dayAgg.get(k);
       if (!v) return 0;
-      if (v.daySamples < 6) return 0;
-      return (v.clearSamples / v.daySamples) >= 0.45 ? 1 : 0;
+      if (v.daySamples < KT_MIN_DAYTIME_SAMPLES) return 0;
+      return (v.clearSamples / v.daySamples) >= KT_CLEAR_DAY_RATIO ? 1 : 0;
     });
     const clearDaysCount = dayIsClear.reduce((a, b) => a + (b ? 1 : 0), 0);
 
     return { error: null, x, ghiMeas, ghiClr, clearMask, dayKeys, dayIsClear, clearDaysCount, totalDays: dayKeys.length };
-  }, [safeHeaders, safeRows, hasCoords, latitude, longitude]);
+  }, [safeHeaders, safeRows, hasCoords, latitude, longitude, ktMin, ktMax]);
 
   const plotData = useMemo(() => {
     if (!derived || derived.error) return [];
     const clearX = [];
     const clearY = [];
+    const dayBarX = derived.dayKeys.map((k) => `${k} 12:00`);
     for (let i = 0; i < derived.x.length; i++) {
       if (derived.clearMask[i] && derived.ghiMeas[i] != null) {
         clearX.push(derived.x[i]);
@@ -2416,10 +2434,11 @@ function ClearSkyDaysChart({ title, color, headers, rows, systemInfo }) {
         yaxis: "y",
       },
       {
-        x: derived.dayKeys,
+        x: dayBarX,
         y: derived.dayIsClear,
         type: "bar",
         name: "Clear-sky day",
+        width: 24 * 60 * 60 * 1000 * 0.55,
         marker: { color: derived.dayIsClear.map((v) => (v ? "#ff8800" : "#E2E8F0")) },
         hovertemplate: "<b>%{x}</b>: %{y}<extra></extra>",
         yaxis: "y2",
@@ -2461,7 +2480,54 @@ function ClearSkyDaysChart({ title, color, headers, rows, systemInfo }) {
       {expanded && (
         <div style={{ padding: "10px 12px 12px" }}>
           <div style={{ padding: "0 8px 10px", color: "#64748B", fontFamily: FONT, fontSize: 12 }}>
-            Clear interval heuristic: daytime points where measured GHI is within 12% of a scaled clear-sky curve.
+            Clear-sky index method: k_t = GHI_measured / GHI_clear_sky. A timestamp is clear when{" "}
+            {!editingKt ? (
+              <span
+                onClick={() => {
+                  setKtMinInput(String(ktMin));
+                  setKtMaxInput(String(ktMax));
+                  setEditingKt(true);
+                }}
+                style={{ fontFamily: MONO, color: "#0F172A", cursor: "pointer", borderBottom: "1px dashed #94a3b8" }}
+                title="Click to edit thresholds"
+              >
+                {ktMin.toFixed(2)} ≤ k_t ≤ {ktMax.toFixed(2)}
+              </span>
+            ) : (
+              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={ktMinInput}
+                  onChange={(e) => setKtMinInput(e.target.value)}
+                  style={{ width: 62, fontFamily: MONO, fontSize: 11, padding: "2px 4px", border: "1px solid #CBD5E1", borderRadius: 6 }}
+                />
+                <span>≤ k_t ≤</span>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={ktMaxInput}
+                  onChange={(e) => setKtMaxInput(e.target.value)}
+                  style={{ width: 62, fontFamily: MONO, fontSize: 11, padding: "2px 4px", border: "1px solid #CBD5E1", borderRadius: 6 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const min = Number(ktMinInput);
+                    const max = Number(ktMaxInput);
+                    if (Number.isFinite(min) && Number.isFinite(max) && min > 0 && max > min) {
+                      setKtMin(min);
+                      setKtMax(max);
+                    }
+                    setEditingKt(false);
+                  }}
+                  style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, border: "1px solid #CBD5E1", background: "#fff", cursor: "pointer" }}
+                >
+                  Apply
+                </button>
+              </span>
+            )}
+            .
           </div>
 
           {derived?.error === "missing_coords" ? (
@@ -2517,7 +2583,7 @@ function ClearSkyDaysChart({ title, color, headers, rows, systemInfo }) {
   );
 }
 
-function DataAvailabilityCard({ mergedTimes, stepMinutes, color }) {
+function DataAvailabilityCard({ mergedTimes, stepMinutes, color, dateFrom, dateTo }) {
   const [expanded, setExpanded] = useState(true);
   const safeTimes = Array.isArray(mergedTimes) ? mergedTimes : [];
   const step = Number(stepMinutes);
@@ -2525,8 +2591,6 @@ function DataAvailabilityCard({ mergedTimes, stepMinutes, color }) {
   const expectedPerDay = Math.max(1, Math.floor(1440 / stepMin));
 
   const derived = useMemo(() => {
-    if (!safeTimes.length) return { error: "no_data" };
-
     const dayCounts = new Map();
     const dayMs = [];
     for (const t of safeTimes) {
@@ -2536,10 +2600,28 @@ function DataAvailabilityCard({ mergedTimes, stepMinutes, color }) {
       dayCounts.set(key, (dayCounts.get(key) ?? 0) + 1);
       dayMs.push(new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime());
     }
-    if (!dayMs.length) return { error: "no_data" };
 
-    const minDay = Math.min(...dayMs);
-    const maxDay = Math.max(...dayMs);
+    const fromDateParsed = parseDateCellFlexible(dateFrom);
+    const toDateParsed = parseDateCellFlexible(dateTo);
+    const minDayFromFilter = fromDateParsed
+      ? new Date(fromDateParsed.getFullYear(), fromDateParsed.getMonth(), fromDateParsed.getDate()).getTime()
+      : null;
+    const maxDayFromFilter = toDateParsed
+      ? new Date(toDateParsed.getFullYear(), toDateParsed.getMonth(), toDateParsed.getDate()).getTime()
+      : null;
+
+    let minDay = null;
+    let maxDay = null;
+    if (minDayFromFilter != null && maxDayFromFilter != null) {
+      minDay = Math.min(minDayFromFilter, maxDayFromFilter);
+      maxDay = Math.max(minDayFromFilter, maxDayFromFilter);
+    } else if (dayMs.length) {
+      minDay = Math.min(...dayMs);
+      maxDay = Math.max(...dayMs);
+    } else {
+      return { error: "no_data" };
+    }
+
     const keys = [];
     for (let ms = minDay; ms <= maxDay; ms += 24 * 60 * 60 * 1000) {
       keys.push(toYMDLocal(new Date(ms)));
@@ -2552,7 +2634,7 @@ function DataAvailabilityCard({ mergedTimes, stepMinutes, color }) {
     const missingPct = availablePct.map((v) => clamp(100 - v, 0, 100));
 
     return { error: null, keys, availablePct, missingPct };
-  }, [safeTimes, expectedPerDay]);
+  }, [safeTimes, expectedPerDay, dateFrom, dateTo]);
 
   return (
     <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #E2E8F0", overflow: "hidden" }}>
@@ -5508,7 +5590,7 @@ export default function QualityCheckPage() {
                             avgMissingPct = avgAvailPct != null ? (100 - avgAvailPct) : null;
                           }
 
-                          // Clear-sky days count (reuse ClearSkyDaysChart heuristic)
+                          // Clear-sky days count (reuse ClearSkyDaysChart kt rule)
                           let clearDaysCount = null;
                           let totalDays = null;
                           try {
@@ -5534,7 +5616,8 @@ export default function QualityCheckPage() {
                                 keys.push(toYMDLocal(dt));
                                 measArr.push(Number.isFinite(meas) ? meas : null);
                                 modeledArr.push(modeled > 0 ? modeled : null);
-                                if (isDay && Number.isFinite(meas) && meas > 0 && modeled > 0) ratios.push(meas / modeled);
+                                const kt = isDay ? computeKt(meas, modeled) : null;
+                                if (kt != null) ratios.push(kt);
                               }
                               ratios.sort((a, b) => a - b);
                               const p90 = percentileSorted(ratios, 0.9);
@@ -5546,8 +5629,8 @@ export default function QualityCheckPage() {
                                 const meas = measArr[i];
                                 const modeled = (modeledArr[i] ?? 0) * scale;
                                 const isDay = cosZ[i] > 0.08 && modeled > 150 && meas != null && Number.isFinite(meas) && meas > 0;
-                                const kt = isDay && modeled ? (meas / modeled) : null;
-                                clearMask.push(Boolean(kt != null && kt >= 0.88 && kt <= 1.12));
+                                const kt = isDay ? computeKt(meas, modeled) : null;
+                                clearMask.push(Boolean(kt != null && kt >= KT_CLEAR_MIN && kt <= KT_CLEAR_MAX));
                               }
 
                               const dayAgg = new Map();
@@ -5566,8 +5649,8 @@ export default function QualityCheckPage() {
                               totalDays = dayKeys.length;
                               clearDaysCount = dayKeys.reduce((acc, k) => {
                                 const v = dayAgg.get(k);
-                                if (!v || v.daySamples < 6) return acc;
-                                return acc + ((v.clearSamples / v.daySamples) >= 0.45 ? 1 : 0);
+                                if (!v || v.daySamples < KT_MIN_DAYTIME_SAMPLES) return acc;
+                                return acc + ((v.clearSamples / v.daySamples) >= KT_CLEAR_DAY_RATIO ? 1 : 0);
                               }, 0);
                             }
                           } catch (_) {
@@ -5636,6 +5719,8 @@ export default function QualityCheckPage() {
                           mergedTimes={merged.map((d) => d.time)}
                           stepMinutes={resamplingStepMinutes}
                           color={P}
+                          dateFrom={dateFrom}
+                          dateTo={dateTo}
                         />
                       </div>
                     </>
