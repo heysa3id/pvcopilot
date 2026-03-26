@@ -4,6 +4,8 @@
       "period_start": "2021-09-01",
       "period_end": "2024-09-01",
       "adresse": 122,
+      "latitude": 32.218173,
+      "longitude": -7.935658,
       "tot_power": 2.35,
       "n_panels": 7,
       "power": 135,

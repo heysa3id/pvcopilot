@@ -4,6 +4,8 @@ import HelpOutline from "@mui/icons-material/HelpOutline";
 
 const FONT = "Inter, Arial, sans-serif";
 const SYSTEM_INFO_HELP = {
+  latitude: "Site latitude in decimal degrees (north positive). Used for clear-sky day detection and other solar-position calculations.",
+  longitude: "Site longitude in decimal degrees (east positive, west negative). Used for clear-sky day detection and other solar-position calculations.",
   temp_coef: "Temperature coefficient of power (%/°C). Power scales with cell temperature as (1 + (temp_coef/100) × (Tcell − 25)). Typical values are negative (e.g. -0.4).",
   coef_a: "Sandia module temperature model parameter a. Module temperature: T_m = E_POA × exp(a + b×WS) + T_a. Parameter a depends on module construction and mounting (e.g. Polymer/thin-film/steel, open rack: a = -3.58).",
   coef_b: "Sandia module temperature model parameter b (wind-speed term). Same formula as coef_a; b captures cooling by wind (e.g. Polymer/thin-film/steel, open rack: b = -0.113).",
