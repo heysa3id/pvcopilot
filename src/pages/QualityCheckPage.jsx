@@ -242,12 +242,35 @@ const KT_CLEAR_MIN = 0.88;
 const KT_CLEAR_MAX = 1.12;
 const KT_CLEAR_DAY_RATIO = 0.45;
 const KT_MIN_DAYTIME_SAMPLES = 6;
+const CLEAR_SCALE_TARGET_PERCENTILE = 0.75;
+const CLEAR_SCALE_TRIM_LOW = 0.05;
+const CLEAR_SCALE_TRIM_HIGH = 0.95;
+const CLEAR_SCALE_MIN_COSZ = 0.3;
+const CLEAR_SCALE_MIN = 0.7;
+const CLEAR_SCALE_MAX = 1.3;
 
 function computeKt(measuredGhi, clearSkyGhi) {
   const meas = Number(measuredGhi);
   const clear = Number(clearSkyGhi);
   if (!Number.isFinite(meas) || !Number.isFinite(clear) || clear <= 0) return null;
   return meas / clear;
+}
+
+function estimateClearSkyScale(rawRatios) {
+  const ratios = Array.isArray(rawRatios)
+    ? rawRatios.filter((v) => Number.isFinite(v) && v > 0).sort((a, b) => a - b)
+    : [];
+  if (!ratios.length) return 1;
+
+  const lo = percentileSorted(ratios, CLEAR_SCALE_TRIM_LOW);
+  const hi = percentileSorted(ratios, CLEAR_SCALE_TRIM_HIGH);
+  const trimmed = ratios.filter((v) => v >= lo && v <= hi);
+  const pool = trimmed.length ? trimmed : ratios;
+
+  const pTarget = percentileSorted(pool, CLEAR_SCALE_TARGET_PERCENTILE);
+  const med = median(pool);
+  const raw = Number.isFinite(pTarget) ? pTarget : (Number.isFinite(med) ? med : 1);
+  return clamp(raw, CLEAR_SCALE_MIN, CLEAR_SCALE_MAX);
 }
 
 /** Format ms as YYYY-MM-DD HH:MM (match backend). */
@@ -459,7 +482,21 @@ function Spinner({ color, size = 20 }) {
 }
 
 // ── Backend CSV Processing ───────────────────────────────────────────────────
-const API_BASE = import.meta.env.VITE_API_BASE || "http://localhost:5001";
+const LOCAL_API_BASE = "http://localhost:5001";
+
+function resolveApiBase() {
+  const configured = import.meta.env.VITE_API_BASE;
+  const allowRemoteOnLocalhost = String(import.meta.env.VITE_ALLOW_REMOTE_API_ON_LOCALHOST || "").toLowerCase() === "1";
+  if (typeof window !== "undefined") {
+    const h = window.location?.hostname || "";
+    const isLocalhost = h === "localhost" || h === "127.0.0.1";
+    // In local development, prefer the local backend unless explicitly overridden.
+    if (isLocalhost && !allowRemoteOnLocalhost) return LOCAL_API_BASE;
+  }
+  return configured || LOCAL_API_BASE;
+}
+
+const API_BASE = resolveApiBase();
 
 /** True when app is served from a non-local host (e.g. GitHub Pages). */
 function isOnlineDemo() {
@@ -2337,6 +2374,7 @@ function ClearSkyDaysChart({ title, color, headers, rows, systemInfo }) {
       const sp = solarPositionZenithRad(d, latitude, longitude);
       const modeled = clearSkyGhiHaurwitz(sp.cosZenith);
       const isDay = sp.cosZenith > 0.08 && modeled > 50;
+      const isScaleSample = sp.cosZenith > CLEAR_SCALE_MIN_COSZ && modeled > 150;
 
       x.push(tRaw);
       ghiMeas.push(Number.isFinite(meas) ? meas : null);
@@ -2344,14 +2382,11 @@ function ClearSkyDaysChart({ title, color, headers, rows, systemInfo }) {
       cosZ.push(sp.cosZenith);
       dayKey.push(toYMDLocal(d));
 
-      if (isDay && Number.isFinite(meas) && meas > 0 && modeled > 0) ratios.push(meas / modeled);
+      if (isScaleSample && Number.isFinite(meas) && meas > 0 && modeled > 0) ratios.push(meas / modeled);
     }
     if (!x.length) return { error: "no_data" };
 
-    ratios.sort((a, b) => a - b);
-    const p90 = percentileSorted(ratios, 0.9);
-    const med = median(ratios);
-    const scale = clamp(Number.isFinite(p90) ? p90 : (Number.isFinite(med) ? med : 1), 0.05, 20);
+    const scale = estimateClearSkyScale(ratios);
 
     const ghiClr = ghiClrBase.map((v) => (v == null ? null : v * scale));
     const clearMask = [];
@@ -4253,36 +4288,45 @@ export default function QualityCheckPage() {
   const [mapperFile, setMapperFile] = useState(null);
   const [weatherMapperFile, setWeatherMapperFile] = useState(null);
 
+  const pvRangeRawRows = useMemo(
+    () => (pvRawData ? filterRowsByDateRange(pvRawData.headers, pvRawData.rows, dateFrom, dateTo) : []),
+    [pvRawData, dateFrom, dateTo]
+  );
+  const weatherRangeRawRows = useMemo(
+    () => (weatherRawData ? filterRowsByDateRange(weatherRawData.headers, weatherRawData.rows, dateFrom, dateTo) : []),
+    [weatherRawData, dateFrom, dateTo]
+  );
+
   const pvData = useMemo(() => {
     if (!pvRawData?.headers?.length || !pvRawData?.rows?.length) return null;
-    const r = resampleRowsToStep(pvRawData.headers, pvRawData.rows, resamplingStepMinutes);
+    const r = resampleRowsToStep(pvRawData.headers, pvRangeRawRows, resamplingStepMinutes);
     return {
       headers: r.headers,
       rows: r.rows,
-      originalRows: pvRawData.rows.length,
+      originalRows: pvRangeRawRows.length,
       resampledRows: r.rows.length,
       resampled: r.resampled,
       resampledStepMinutes: resamplingStepMinutes,
     };
-  }, [pvRawData, resamplingStepMinutes]);
+  }, [pvRawData, pvRangeRawRows, resamplingStepMinutes]);
 
   const weatherData = useMemo(() => {
     if (!weatherRawData?.headers?.length || !weatherRawData?.rows?.length) return null;
-    const r = resampleRowsToStep(weatherRawData.headers, weatherRawData.rows, resamplingStepMinutes);
+    const r = resampleRowsToStep(weatherRawData.headers, weatherRangeRawRows, resamplingStepMinutes);
     return {
       headers: r.headers,
       rows: r.rows,
-      originalRows: weatherRawData.rows.length,
+      originalRows: weatherRangeRawRows.length,
       resampledRows: r.rows.length,
       resampled: r.resampled,
       resampledStepMinutes: resamplingStepMinutes,
     };
-  }, [weatherRawData, resamplingStepMinutes]);
+  }, [weatherRawData, weatherRangeRawRows, resamplingStepMinutes]);
 
   // Default date range: start = min of PV and weather start; end = max of PV and weather end
   const defaultDateRange = useMemo(() => {
-    const pvRange = pvData ? getDateRangeFromRows(pvData.headers, pvData.rows) : null;
-    const weatherRange = weatherData ? getDateRangeFromRows(weatherData.headers, weatherData.rows) : null;
+    const pvRange = pvRawData ? getDateRangeFromRows(pvRawData.headers, pvRawData.rows) : null;
+    const weatherRange = weatherRawData ? getDateRangeFromRows(weatherRawData.headers, weatherRawData.rows) : null;
     if (!pvRange && !weatherRange) return null;
     let minMs = Infinity, maxMs = -Infinity;
     if (pvRange) {
@@ -4295,7 +4339,7 @@ export default function QualityCheckPage() {
     }
     if (minMs === Infinity || maxMs === -Infinity) return null;
     return { dateFrom: formatDateOnly(minMs), dateTo: formatDateOnly(maxMs) };
-  }, [pvData, weatherData]);
+  }, [pvRawData, weatherRawData]);
 
   useEffect(() => {
     if (defaultDateRange) {
@@ -4349,12 +4393,12 @@ export default function QualityCheckPage() {
   }, []);
 
   const pvFilteredRows = useMemo(
-    () => pvData ? filterRowsByDateRange(pvData.headers, pvData.rows, dateFrom, dateTo) : [],
-    [pvData, dateFrom, dateTo]
+    () => (pvData?.rows ?? []),
+    [pvData]
   );
   const weatherFilteredRows = useMemo(
-    () => weatherData ? filterRowsByDateRange(weatherData.headers, weatherData.rows, dateFrom, dateTo) : [],
-    [weatherData, dateFrom, dateTo]
+    () => (weatherData?.rows ?? []),
+    [weatherData]
   );
 
   const mergedSynced = useMemo(() => {
@@ -4737,7 +4781,7 @@ export default function QualityCheckPage() {
               onDateFromChange={setDateFrom}
               onDateToChange={setDateTo}
               onClear={() => { setDateFrom(null); setDateTo(null); }}
-              totalRows={(pvData?.rows?.length ?? 0) + (weatherData?.rows?.length ?? 0)}
+              totalRows={pvRangeRawRows.length + weatherRangeRawRows.length}
               filteredRows={pvFilteredRows.length + weatherFilteredRows.length}
               accentColor={P}
               resamplingStepMinutes={resamplingStepMinutes}
@@ -5575,8 +5619,23 @@ export default function QualityCheckPage() {
                           let avgAvailPct = null;
                           let avgMissingPct = null;
                           if (dayMs.length) {
-                            const minDay = Math.min(...dayMs);
-                            const maxDay = Math.max(...dayMs);
+                            const fromDateParsed = parseDateCellFlexible(dateFrom);
+                            const toDateParsed = parseDateCellFlexible(dateTo);
+                            const minDayFromFilter = fromDateParsed
+                              ? new Date(fromDateParsed.getFullYear(), fromDateParsed.getMonth(), fromDateParsed.getDate()).getTime()
+                              : null;
+                            const maxDayFromFilter = toDateParsed
+                              ? new Date(toDateParsed.getFullYear(), toDateParsed.getMonth(), toDateParsed.getDate()).getTime()
+                              : null;
+                            let minDay = null;
+                            let maxDay = null;
+                            if (minDayFromFilter != null && maxDayFromFilter != null) {
+                              minDay = Math.min(minDayFromFilter, maxDayFromFilter);
+                              maxDay = Math.max(minDayFromFilter, maxDayFromFilter);
+                            } else {
+                              minDay = Math.min(...dayMs);
+                              maxDay = Math.max(...dayMs);
+                            }
                             let sumAvail = 0;
                             let days = 0;
                             for (let ms = minDay; ms <= maxDay; ms += 24 * 60 * 60 * 1000) {
@@ -5612,17 +5671,16 @@ export default function QualityCheckPage() {
                                 const sp = solarPositionZenithRad(dt, latitude, longitude);
                                 const modeled = clearSkyGhiHaurwitz(sp.cosZenith);
                                 const isDay = sp.cosZenith > 0.08 && modeled > 50;
+                                const isScaleSample = sp.cosZenith > CLEAR_SCALE_MIN_COSZ && modeled > 150;
                                 cosZ.push(sp.cosZenith);
                                 keys.push(toYMDLocal(dt));
                                 measArr.push(Number.isFinite(meas) ? meas : null);
                                 modeledArr.push(modeled > 0 ? modeled : null);
-                                const kt = isDay ? computeKt(meas, modeled) : null;
-                                if (kt != null) ratios.push(kt);
+                                if (isScaleSample && Number.isFinite(meas) && meas > 0 && modeled > 0) {
+                                  ratios.push(meas / modeled);
+                                }
                               }
-                              ratios.sort((a, b) => a - b);
-                              const p90 = percentileSorted(ratios, 0.9);
-                              const med = median(ratios);
-                              const scale = clamp(Number.isFinite(p90) ? p90 : (Number.isFinite(med) ? med : 1), 0.05, 20);
+                              const scale = estimateClearSkyScale(ratios);
 
                               const clearMask = [];
                               for (let i = 0; i < keys.length; i++) {

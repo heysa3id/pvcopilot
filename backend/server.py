@@ -80,8 +80,8 @@ def _write_contacts_csv_atomic(df):
 app = Flask(__name__)
 CORS(app)
 
-MAX_PVSYST_UPLOAD_BYTES = int(os.getenv("MAX_PVSYST_UPLOAD_BYTES", str(10 * 1024 * 1024)))
-app.config["MAX_CONTENT_LENGTH"] = MAX_PVSYST_UPLOAD_BYTES
+MAX_PVSYST_UPLOAD_BYTES = int(os.getenv("MAX_PVSYST_UPLOAD_BYTES", str(50 * 1024 * 1024)))
+MAX_CSV_UPLOAD_BYTES = int(os.getenv("MAX_CSV_UPLOAD_BYTES", str(50 * 1024 * 1024)))
 
 ALLOWED_PDF_MIME = {
     "application/pdf",
@@ -92,7 +92,7 @@ ALLOWED_PDF_MIME = {
 
 @app.errorhandler(413)
 def handle_413(_e):
-    max_mb = round(MAX_PVSYST_UPLOAD_BYTES / (1024 * 1024), 1)
+    max_mb = round(max(MAX_PVSYST_UPLOAD_BYTES, MAX_CSV_UPLOAD_BYTES) / (1024 * 1024), 1)
     return jsonify({"error": f"File too large. Max {max_mb} MB."}), 413
 
 
@@ -109,7 +109,7 @@ def parse_pvsyst():
     if not file.filename.lower().endswith(".pdf"):
         return jsonify({"error": "Please upload a PDF file (.pdf)."}), 400
 
-    # Hard guard in addition to MAX_CONTENT_LENGTH (for cases where content-length is missing).
+    # Hard guard for large uploads; content-length can be absent with some clients/proxies.
     if request.content_length and request.content_length > MAX_PVSYST_UPLOAD_BYTES:
         max_mb = round(MAX_PVSYST_UPLOAD_BYTES / (1024 * 1024), 1)
         return jsonify({"error": f"File too large. Max {max_mb} MB."}), 413
@@ -162,8 +162,16 @@ def process_csv():
     if not file.filename or not file.filename.lower().endswith(".csv"):
         return jsonify({"error": "Please upload a CSV file."}), 400
 
+    if request.content_length and request.content_length > MAX_CSV_UPLOAD_BYTES:
+        max_mb = round(MAX_CSV_UPLOAD_BYTES / (1024 * 1024), 1)
+        return jsonify({"error": f"CSV file too large. Max {max_mb} MB."}), 413
+
     try:
-        raw = file.read().decode("utf-8", errors="replace")
+        raw_bytes = file.read()
+        if len(raw_bytes) > MAX_CSV_UPLOAD_BYTES:
+            max_mb = round(MAX_CSV_UPLOAD_BYTES / (1024 * 1024), 1)
+            return jsonify({"error": f"CSV file too large. Max {max_mb} MB."}), 413
+        raw = raw_bytes.decode("utf-8", errors="replace")
         result = process_quality_check_csv(raw)
         return jsonify(result)
     except ValueError as e:

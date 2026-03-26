@@ -40,7 +40,7 @@ npm run preview
 Backend runs on **port 5001** and provides:
 
 - `POST /api/parse-pvsyst` — parse PVSyst PDF
-- `POST /api/process-csv` — process CSV
+- `POST /api/process-csv` — process CSV (used by Data Quality Check PV Data + Weather Data uploads)
 - `POST /api/contact` — save contact form submissions (CSV, `backend/data/contacts.csv`)
 - `GET /api/contacts` — list saved contacts (JSON)
 - `GET /api/health` — health check
@@ -66,8 +66,9 @@ cd backend && python3 server.py
 cd backend
 # Use a production WSGI server, e.g. gunicorn
 pip install gunicorn
-# Default upload guard for /api/parse-pvsyst is 10MB (configurable):
-# export MAX_PVSYST_UPLOAD_BYTES=10485760
+# Upload size limits (both configurable, defaults are 50MB):
+# export MAX_PVSYST_UPLOAD_BYTES=52428800
+# export MAX_CSV_UPLOAD_BYTES=52428800
 
 # Gunicorn with thread workers helps concurrent PDF parsing requests:
 gunicorn -w 4 --threads 4 -k gthread --timeout 120 -b 0.0.0.0:5001 server:app
