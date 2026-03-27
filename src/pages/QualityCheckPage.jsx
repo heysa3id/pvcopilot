@@ -1,4 +1,5 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from "react";
+import { useJobPoller } from "../hooks/useJobPoller";
 import createPlotlyComponent from "react-plotly.js/factory";
 import Plotly from "plotly.js-dist-min";
 import SearchOutlined from "@mui/icons-material/SearchOutlined";
@@ -433,10 +434,13 @@ function filterRowsByDateRange(headers, rows, dateFrom, dateTo) {
 
 // ── Toast Notification ───────────────────────────────────────────────────────
 function Toast({ message, type, onClose }) {
+  // Use a ref so the latest onClose is always called without re-triggering the effect
+  const onCloseRef = useRef(onClose);
+  useEffect(() => { onCloseRef.current = onClose; }, [onClose]);
   useEffect(() => {
-    const t = setTimeout(onClose, 2000);
+    const t = setTimeout(() => onCloseRef.current(), 2000);
     return () => clearTimeout(t);
-  }, [onClose]);
+  }, []);
 
   const isError = type === "error";
   const bg = isError ? "#FEF2F2" : "#F0FDF4";
@@ -511,39 +515,77 @@ function shouldUseBackendForCsv() {
   return hasRemoteApi || !isOnlineDemo();
 }
 
-async function processCSVFile(file) {
+/**
+ * Upload a CSV and return its processed result.
+ * Tries the async endpoint first (/api/process-csv-async + polling).
+ * Falls back to the synchronous endpoint if async is unavailable.
+ * onProgress(0-100) is called during polling (optional).
+ */
+async function processCSVFile(file, onProgress) {
   if (!shouldUseBackendForCsv()) {
     const text = await readFileAsText(file);
     return processCSVFileClientSide(text);
   }
-  let res;
+
   const formData = new FormData();
   formData.append("file", file);
+
+  // -- Step 1: upload with 60s AbortController timeout --
+  const controller = new AbortController();
+  const tid = setTimeout(() => controller.abort(), 60_000);
+  let uploadRes;
   try {
-    res = await fetch(`${API_BASE}/api/process-csv`, { method: "POST", body: formData });
+    uploadRes = await fetch(`${API_BASE}/api/process-csv-async`, {
+      method: "POST",
+      body: formData,
+      signal: controller.signal,
+    });
   } catch (err) {
-    const msg = (err && err.message) ? String(err.message) : "";
-    const isNetworkError =
-      err.name === "TypeError" && msg.includes("fetch") ||
-      msg === "Load failed" ||
-      /network|failed to load|load failed/i.test(msg);
-    if (isNetworkError) {
-      throw new Error(
-        "Cannot reach the backend. Start it in a terminal: cd backend && python server.py"
-      );
-    }
+    const msg = String(err?.message ?? "");
+    if (err?.name === "AbortError") throw new Error("Upload timed out. The file may be too large or the server is unresponsive.");
+    const isNetwork = (err?.name === "TypeError" && msg.includes("fetch")) || msg === "Load failed" || /network|failed to load|load failed/i.test(msg);
+    if (isNetwork) throw new Error("Cannot reach the backend. Start it in a terminal: cd backend && python server.py");
     throw err;
+  } finally {
+    clearTimeout(tid);
   }
 
-  let data;
-  try {
-    data = await res.json();
-  } catch (_) {
-    throw new Error(res.ok ? "Invalid response from server" : `Server error (${res.status}). Is the backend running?`);
+  // -- Fallback: async endpoint not available, use synchronous --
+  if (uploadRes.status === 404 || uploadRes.status === 405) {
+    const res = await fetch(`${API_BASE}/api/process-csv`, { method: "POST", body: formData });
+    let data;
+    try { data = await res.json(); } catch (_) { throw new Error(`Server error (${res.status}). Is the backend running?`); }
+    if (!res.ok) throw new Error(data.error || "Backend processing failed");
+    return data;
   }
 
-  if (!res.ok) throw new Error(data.error || "Backend processing failed");
-  return data;
+  if (!uploadRes.ok) {
+    let errData;
+    try { errData = await uploadRes.json(); } catch (_) { errData = {}; }
+    throw new Error(errData.error || `Upload failed (${uploadRes.status})`);
+  }
+
+  const { job_id } = await uploadRes.json();
+  if (!job_id) throw new Error("Server did not return a job ID.");
+
+  // -- Step 2: poll /api/jobs/{job_id} until terminal state --
+  const POLL_MS = 2000;
+  const MAX_POLLS = 120; // 4 minutes max
+  for (let i = 0; i < MAX_POLLS; i++) {
+    await new Promise((r) => setTimeout(r, POLL_MS));
+    let poll;
+    try {
+      const pollRes = await fetch(`${API_BASE}/api/jobs/${job_id}`);
+      if (pollRes.status === 404) throw new Error("Job expired or not found. Please re-upload.");
+      poll = await pollRes.json();
+    } catch (e) {
+      throw new Error(`Lost connection while processing: ${e.message}`);
+    }
+    if (onProgress && typeof poll.progress === "number") onProgress(poll.progress);
+    if (poll.status === "done") return poll.result;
+    if (poll.status === "error" || poll.status === "cancelled") throw new Error(poll.error || "Processing failed.");
+  }
+  throw new Error("Processing timed out. Please try again.");
 }
 
 /** Client-side CSV parse for when backend is unavailable. Returns raw { headers, rows } for resampling in UI. */
@@ -587,7 +629,7 @@ async function readFileAsText(file) {
 }
 
 // ── Upload Zone ──────────────────────────────────────────────────────────────
-function UploadZone({ label, icon, accept, color, file, onLoad, onFileUpload, onClear, onError, onDownloadSuccess, templateFile }) {
+function UploadZone({ label, icon, accept, color, file, onLoad, onFileUpload, onClear, onError, onDownloadSuccess, templateFile, uploadProgress, onCancelUpload }) {
   const [drag, setDrag] = useState(false);
   const [loading, setLoading] = useState(false);
   const inputId = useRef(`upload-${Math.random().toString(36).slice(2)}`).current;
@@ -702,14 +744,30 @@ function UploadZone({ label, icon, accept, color, file, onLoad, onFileUpload, on
       {loading && (
         <div style={{
           position: "absolute", inset: 0, borderRadius: 12,
-          background: "rgba(255,255,255,0.85)", display: "flex",
-          alignItems: "center", justifyContent: "center", gap: 10,
-          zIndex: 2,
+          background: "rgba(255,255,255,0.92)", display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center", gap: 8,
+          zIndex: 2, padding: "0 20px",
         }}>
-          <Spinner color={color} />
-          <span style={{ fontSize: 13, fontWeight: 600, color, fontFamily: FONT }}>
-            Reading file...
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <Spinner color={color} />
+            <span style={{ fontSize: 13, fontWeight: 600, color, fontFamily: FONT }}>
+              {uploadProgress > 0 && uploadProgress < 100 ? `Processing… ${uploadProgress}%` : "Reading file..."}
+            </span>
+          </div>
+          {uploadProgress > 0 && (
+            <div style={{ width: "100%", maxWidth: 220, height: 4, background: "#E2E8F0", borderRadius: 2 }}>
+              <div style={{ width: `${uploadProgress}%`, height: "100%", background: color, borderRadius: 2, transition: "width .3s ease" }} />
+            </div>
+          )}
+          {onCancelUpload && (
+            <button
+              type="button"
+              onClick={onCancelUpload}
+              style={{ fontSize: 11, color: "#94A3B8", background: "none", border: "none", cursor: "pointer", textDecoration: "underline", fontFamily: FONT }}
+            >
+              Cancel
+            </button>
+          )}
         </div>
       )}
 
@@ -1173,6 +1231,76 @@ function detectTimeOffset(pvTimes, pvValues, whTimes, whValues, stepMinutes, max
   return { bestLag, bestR2, baselineR2, matchedCount: bestCount };
 }
 
+/**
+ * Segment-aware auto-detection: splits data by calendar month, detects the best
+ * offset per month via detectTimeOffset(), then merges consecutive months that
+ * share the same offset (within ±stepMinutes tolerance).
+ *
+ * Returns an array of segments: [{ start, end, bestLag, bestR2, matchedCount }]
+ * or null if no month has enough data.
+ */
+function detectOffsetsBySegment(pvTimes, pvValues, whTimes, whValues, stepMinutes, maxLagMinutes = 120) {
+  // Group PV by "YYYY-MM"
+  const pvByMonth = new Map();
+  for (let i = 0; i < pvTimes.length; i++) {
+    const t = String(pvTimes[i] ?? "").trim();
+    if (!t) continue;
+    const key = t.slice(0, 7);
+    if (!pvByMonth.has(key)) pvByMonth.set(key, { times: [], values: [] });
+    pvByMonth.get(key).times.push(t);
+    pvByMonth.get(key).values.push(pvValues[i]);
+  }
+
+  // Group weather by "YYYY-MM"
+  const whByMonth = new Map();
+  for (let i = 0; i < whTimes.length; i++) {
+    const t = String(whTimes[i] ?? "").trim();
+    if (!t) continue;
+    const key = t.slice(0, 7);
+    if (!whByMonth.has(key)) whByMonth.set(key, { times: [], values: [] });
+    whByMonth.get(key).times.push(t);
+    whByMonth.get(key).values.push(whValues[i]);
+  }
+
+  // Union of all months present in either dataset, sorted
+  const allMonths = [...new Set([...pvByMonth.keys(), ...whByMonth.keys()])].sort();
+  if (allMonths.length === 0) return null;
+
+  // Detect offset per month
+  const monthResults = [];
+  for (const monthKey of allMonths) {
+    const pv = pvByMonth.get(monthKey) ?? { times: [], values: [] };
+    const wh = whByMonth.get(monthKey) ?? { times: [], values: [] };
+    const result = detectTimeOffset(pv.times, pv.values, wh.times, wh.values, stepMinutes, maxLagMinutes);
+    if (!result) continue;
+    // Month boundaries from PV timestamps (preferred) or weather
+    const allT = [...pv.times].sort();
+    const start = allT[0] ?? monthKey + "-01 00:00";
+    const end = allT[allT.length - 1] ?? monthKey + "-28 23:59";
+    monthResults.push({ monthKey, start, end, ...result });
+  }
+
+  if (monthResults.length === 0) return null;
+
+  // Merge consecutive months within ±stepMinutes of each other
+  const merged = [];
+  let cur = { ...monthResults[0] };
+  for (let i = 1; i < monthResults.length; i++) {
+    const m = monthResults[i];
+    if (Math.abs(m.bestLag - cur.bestLag) <= stepMinutes) {
+      cur.end = m.end;
+      cur.matchedCount += m.matchedCount;
+      // Keep the better R²
+      if (m.bestR2 > cur.bestR2) cur.bestR2 = m.bestR2;
+    } else {
+      merged.push(cur);
+      cur = { ...m };
+    }
+  }
+  merged.push(cur);
+  return merged;
+}
+
 function SyncRuleRangeEditor({ rule, onChange }) {
   const fromValue = rule.start ? rule.start.replace(" ", "T") : "";
   const toValue = rule.end ? rule.end.replace(" ", "T") : "";
@@ -1468,12 +1596,14 @@ function CorrelationHeatmapCard({
   embedded = false,
   defaultExpanded = true,
 }) {
-  const safePvH = Array.isArray(pvHeaders) ? pvHeaders : [];
-  const safePvR = Array.isArray(pvRows) ? pvRows : [];
-  const safeWhH = Array.isArray(weatherHeaders) ? weatherHeaders : [];
-  const safeWhR = Array.isArray(weatherRows) ? weatherRows : [];
-  const safeMergedH = Array.isArray(mergedHeaders) ? mergedHeaders : [];
-  const safeMergedR = Array.isArray(mergedRows) ? mergedRows : [];
+  // Stabilise fallbacks with useMemo so [] is the same reference across renders
+  // (avoids infinite loops in downstream useMemo/useEffect dependency arrays)
+  const safePvH = useMemo(() => Array.isArray(pvHeaders) ? pvHeaders : [], [pvHeaders]);
+  const safePvR = useMemo(() => Array.isArray(pvRows) ? pvRows : [], [pvRows]);
+  const safeWhH = useMemo(() => Array.isArray(weatherHeaders) ? weatherHeaders : [], [weatherHeaders]);
+  const safeWhR = useMemo(() => Array.isArray(weatherRows) ? weatherRows : [], [weatherRows]);
+  const safeMergedH = useMemo(() => Array.isArray(mergedHeaders) ? mergedHeaders : [], [mergedHeaders]);
+  const safeMergedR = useMemo(() => Array.isArray(mergedRows) ? mergedRows : [], [mergedRows]);
   const [expanded, setExpanded] = useState(Boolean(defaultExpanded));
 
   const useMerged = safeMergedH.length > 0 && safeMergedR.length > 0;
@@ -3033,7 +3163,7 @@ function DataSynchronizationCard({
                 setAutoSyncRunning(true);
                 setAutoSyncResult(null);
                 setTimeout(() => {
-                  const result = detectTimeOffset(pvTimes, pvVals, whTimes, whVals, resamplingStepMinutes);
+                  const result = detectOffsetsBySegment(pvTimes, pvVals, whTimes, whVals, resamplingStepMinutes);
                   setAutoSyncResult(result ?? { error: "Could not detect offset — insufficient data overlap" });
                   setAutoSyncRunning(false);
                 }, 0);
@@ -3059,13 +3189,9 @@ function DataSynchronizationCard({
         </div>
 
         {/* Auto-detect result banner */}
-        {autoSyncResult && !autoSyncResult.error && (
+        {Array.isArray(autoSyncResult) && (
           <div
             style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 12,
-              padding: "8px 14px",
               borderRadius: 10,
               border: "1px solid #BBF7D0",
               background: "#F0FDF4",
@@ -3073,57 +3199,80 @@ function DataSynchronizationCard({
               fontSize: 12,
               color: "#15803D",
               marginBottom: 4,
+              overflow: "hidden",
             }}
           >
-            <span style={{ fontWeight: 700 }}>
-              {autoSyncResult.bestLag === 0
-                ? "Offset: 0 min — data appears already synchronized"
-                : `Detected offset: ${autoSyncResult.bestLag > 0 ? "+" : ""}${autoSyncResult.bestLag} min`}
-            </span>
-            <span style={{ color: "#64748B", fontSize: 11 }}>
-              R² {autoSyncResult.baselineR2.toFixed(3)} → {autoSyncResult.bestR2.toFixed(3)}
-            </span>
-            <span style={{ color: "#94A3B8", fontSize: 10 }}>({autoSyncResult.matchedCount} pts)</span>
-            <div style={{ flex: 1 }} />
-            <button
-              type="button"
-              onClick={() => {
-                const firstTime = pvFilteredRows.length ? String(pvFilteredRows[0]?.[0] ?? "") : "";
-                const lastTime = pvFilteredRows.length ? String(pvFilteredRows[pvFilteredRows.length - 1]?.[0] ?? "") : "";
-                setSyncRules([{ id: 1, start: firstTime, end: lastTime, shiftMinutes: autoSyncResult.bestLag }]);
-                setAutoSyncResult(null);
-              }}
-              style={{
-                borderRadius: 999,
-                border: "1px solid #15803D",
-                background: "#15803D",
-                padding: "2px 14px",
-                fontFamily: FONT,
-                fontSize: 11,
-                fontWeight: 600,
-                color: "#fff",
-                cursor: "pointer",
-              }}
-            >
-              Apply
-            </button>
-            <button
-              type="button"
-              onClick={() => setAutoSyncResult(null)}
-              style={{
-                borderRadius: 999,
-                border: "1px solid #E2E8F0",
-                background: "#fff",
-                padding: "2px 10px",
-                fontFamily: FONT,
-                fontSize: 11,
-                fontWeight: 600,
-                color: "#64748B",
-                cursor: "pointer",
-              }}
-            >
-              Dismiss
-            </button>
+            {/* Header row */}
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 14px", borderBottom: autoSyncResult.length > 1 ? "1px solid #D1FAE5" : "none" }}>
+              <span style={{ fontWeight: 700, flex: 1 }}>
+                {autoSyncResult.length === 1
+                  ? (autoSyncResult[0].bestLag === 0
+                      ? "Offset: 0 min — data appears already synchronized"
+                      : `Detected offset: ${autoSyncResult[0].bestLag > 0 ? "+" : ""}${autoSyncResult[0].bestLag} min`)
+                  : `${autoSyncResult.length} distinct offset periods detected`}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setSyncRules(autoSyncResult.map((seg, i) => ({
+                    id: i + 1,
+                    start: seg.start,
+                    end: seg.end,
+                    shiftMinutes: seg.bestLag,
+                  })));
+                  setAutoSyncResult(null);
+                }}
+                style={{
+                  borderRadius: 999, border: "1px solid #15803D", background: "#15803D",
+                  padding: "2px 14px", fontFamily: FONT, fontSize: 11, fontWeight: 600,
+                  color: "#fff", cursor: "pointer", whiteSpace: "nowrap",
+                }}
+              >
+                Apply {autoSyncResult.length > 1 ? `${autoSyncResult.length} rules` : ""}
+              </button>
+              <button
+                type="button"
+                onClick={() => setAutoSyncResult(null)}
+                style={{
+                  borderRadius: 999, border: "1px solid #E2E8F0", background: "#fff",
+                  padding: "2px 10px", fontFamily: FONT, fontSize: 11, fontWeight: 600,
+                  color: "#64748B", cursor: "pointer",
+                }}
+              >
+                Dismiss
+              </button>
+            </div>
+            {/* Per-segment rows (shown only when multiple segments) */}
+            {autoSyncResult.length > 1 && autoSyncResult.map((seg, i) => (
+              <div
+                key={i}
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "1fr auto auto auto",
+                  gap: 12,
+                  alignItems: "center",
+                  padding: "5px 14px",
+                  borderBottom: i < autoSyncResult.length - 1 ? "1px solid #D1FAE5" : "none",
+                  fontSize: 11,
+                }}
+              >
+                <span style={{ color: "#374151", fontFamily: MONO }}>
+                  {seg.start.slice(0, 10)} → {seg.end.slice(0, 10)}
+                </span>
+                <span style={{ fontWeight: 700, color: "#15803D", minWidth: 70, textAlign: "right" }}>
+                  {seg.bestLag > 0 ? "+" : ""}{seg.bestLag} min
+                </span>
+                <span style={{ color: "#64748B" }}>R² {seg.bestR2.toFixed(3)}</span>
+                <span style={{ color: "#94A3B8" }}>({seg.matchedCount} pts)</span>
+              </div>
+            ))}
+            {/* Summary stats for single segment */}
+            {autoSyncResult.length === 1 && (
+              <div style={{ display: "flex", gap: 12, padding: "0 14px 8px", fontSize: 11, color: "#64748B" }}>
+                <span>R² {autoSyncResult[0].baselineR2.toFixed(3)} → {autoSyncResult[0].bestR2.toFixed(3)}</span>
+                <span style={{ color: "#94A3B8" }}>({autoSyncResult[0].matchedCount} pts)</span>
+              </div>
+            )}
           </div>
         )}
         {autoSyncResult?.error && (
@@ -3578,6 +3727,8 @@ function DateRangePickerPopover({ dateFrom, dateTo, onDateFromChange, onDateToCh
   const [leftYear, setLeftYear] = useState(() => (dateFrom ? new Date(dateFrom).getFullYear() : today.getFullYear()));
   const [leftMonth, setLeftMonth] = useState(() => (dateFrom ? new Date(dateFrom).getMonth() : today.getMonth()));
   const containerRef = useRef(null);
+  const onCancelRef = useRef(onCancel);
+  useEffect(() => { onCancelRef.current = onCancel; }, [onCancel]);
 
   useEffect(() => {
     setPendingFrom(dateFrom || null);
@@ -3639,16 +3790,15 @@ function DateRangePickerPopover({ dateFrom, dateTo, onDateFromChange, onDateToCh
   };
 
   useEffect(() => {
-    if (!onCancel) return;
     const handleClickOutside = (e) => {
       if (!containerRef.current) return;
       if (!containerRef.current.contains(e.target)) {
-        onCancel();
+        onCancelRef.current?.();
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [onCancel]);
+  }, []);
 
   return (
     <div
@@ -4285,6 +4435,8 @@ export default function QualityCheckPage() {
   const [syncRules, setSyncRules] = useState(DEFAULT_SYNC_RULES);
   const [autoSyncResult, setAutoSyncResult] = useState(null);
   const [autoSyncRunning, setAutoSyncRunning] = useState(false);
+  const [pvUploadProgress, setPvUploadProgress] = useState(0);
+  const [weatherUploadProgress, setWeatherUploadProgress] = useState(0);
   const [mapperFile, setMapperFile] = useState(null);
   const [weatherMapperFile, setWeatherMapperFile] = useState(null);
 
@@ -4640,10 +4792,11 @@ export default function QualityCheckPage() {
             file={pvFile}
             templateFile="data_pv.csv"
             onFileUpload={async (file) => {
+              setPvUploadProgress(0);
               try {
                 let data;
                 try {
-                  data = await processCSVFile(file);
+                  data = await processCSVFile(file, setPvUploadProgress);
                 } catch (err) {
                   const isOffline = err.message.includes("Cannot reach the backend");
                   if (isOffline) {
@@ -4671,8 +4824,12 @@ export default function QualityCheckPage() {
                 showToast(msg);
               } catch (err) {
                 showToast(`Failed to process "${file.name}": ${err.message}`, "error");
+              } finally {
+                setPvUploadProgress(0);
               }
             }}
+            uploadProgress={pvUploadProgress}
+            onCancelUpload={() => setPvUploadProgress(0)}
             onClear={() => {
               setPvFile(null); setPvRawData(null); setPvLoadError(null);
               saveCache(CACHE_PV, null);
@@ -4688,10 +4845,11 @@ export default function QualityCheckPage() {
             file={weatherFile}
             templateFile="data_meteo.csv"
             onFileUpload={async (file) => {
+              setWeatherUploadProgress(0);
               try {
                 let data;
                 try {
-                  data = await processCSVFile(file);
+                  data = await processCSVFile(file, setWeatherUploadProgress);
                 } catch (err) {
                   const isOffline = err.message.includes("Cannot reach the backend");
                   if (isOffline) {
@@ -4719,8 +4877,12 @@ export default function QualityCheckPage() {
                 showToast(msg);
               } catch (err) {
                 showToast(`Failed to process "${file.name}": ${err.message}`, "error");
+              } finally {
+                setWeatherUploadProgress(0);
               }
             }}
+            uploadProgress={weatherUploadProgress}
+            onCancelUpload={() => setWeatherUploadProgress(0)}
             onClear={() => {
               setWeatherFile(null); setWeatherRawData(null); setWeatherLoadError(null);
               saveCache(CACHE_WEATHER, null);

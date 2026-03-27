@@ -372,6 +372,12 @@ export default function Navbar() {
     };
   }, []);
 
+  // Close menus on every route change (handles browser back/forward + programmatic nav)
+  useEffect(() => {
+    setToolsOpen(false);
+    setMobileMenuOpen(false);
+  }, [pathname]);
+
   const closeMobileMenu = () => setMobileMenuOpen(false);
 
   const selectedNavKey = (() => {

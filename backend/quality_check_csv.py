@@ -2,16 +2,40 @@
 CSV processing for the Quality Check page.
 Resamples time-series to 10-minute grid, detects timestamp column,
 and returns data in the shape expected by the frontend.
+
+Accepts either a raw UTF-8 string (legacy) or a binary file-like object
+(preferred — avoids buffering the entire file in memory).
 """
 
 import io
+import os
+
 import pandas as pd
 
+MAX_CSV_ROWS = int(os.getenv("MAX_CSV_ROWS", "500000"))
+MAX_CSV_COLS = int(os.getenv("MAX_CSV_COLS", "100"))
 
-def process_quality_check_csv(raw_content: str) -> dict:
+_READ_KW = dict(sep=None, engine="python", on_bad_lines="skip")
+
+
+def _make_reader(source):
+    """Return a TextIO suitable for pd.read_csv from str or BinaryIO."""
+    if isinstance(source, str):
+        return io.StringIO(source)
+    # Binary file-like: wrap in TextIOWrapper (UTF-8, replace bad bytes)
+    return io.TextIOWrapper(source, encoding="utf-8", errors="replace")
+
+
+def process_quality_check_csv(source) -> dict:
     """
     Process uploaded CSV: auto-detect delimiter and timestamp column,
     resample to 10-minute grid, interpolate numeric columns.
+
+    Parameters
+    ----------
+    source : str | BinaryIO
+        Raw CSV content as a string, or a binary file-like object.
+        Passing a file-like avoids loading the entire file into memory.
 
     Returns a dict with keys: headers, rows, originalRows, resampledRows,
     timestampCol, resampled. Suitable for jsonify().
@@ -19,18 +43,35 @@ def process_quality_check_csv(raw_content: str) -> dict:
     Raises
     ------
     ValueError
-        For client errors (no file, empty, bad timestamp column) with message.
+        For client errors (no file, empty, bad timestamp column, too wide/long).
     """
+    reader = _make_reader(source)
+
+    # --- Schema fail-fast: peek at first 200 rows ---
     try:
-        df = pd.read_csv(
-            io.StringIO(raw_content),
-            sep=None,
-            engine="python",
-            on_bad_lines="skip",
+        first_chunk = next(pd.read_csv(reader, chunksize=200, **_READ_KW))
+    except StopIteration:
+        raise ValueError("CSV file is empty or has no data rows.")
+    except Exception as exc:
+        raise ValueError(f"Could not parse CSV: {exc}") from exc
+
+    if len(first_chunk.columns) > MAX_CSV_COLS:
+        raise ValueError(
+            f"Too many columns ({len(first_chunk.columns)}). Max {MAX_CSV_COLS}."
         )
+    if first_chunk.empty:
+        raise ValueError("CSV file is empty or has no columns.")
+
+    # Reset to beginning and read full file in chunks (bounded memory)
+    reader.seek(0)
+    try:
+        chunks = pd.read_csv(reader, chunksize=10_000, **_READ_KW)
+        df = pd.concat(list(chunks), ignore_index=True)
     except TypeError:
+        # Fallback for older pandas that don't support on_bad_lines
+        reader.seek(0)
         df = pd.read_csv(
-            io.StringIO(raw_content),
+            reader,
             sep=None,
             engine="python",
             error_bad_lines=False,
@@ -40,6 +81,12 @@ def process_quality_check_csv(raw_content: str) -> dict:
     if df.empty or len(df.columns) == 0:
         raise ValueError("CSV file is empty or has no columns.")
 
+    if len(df) > MAX_CSV_ROWS:
+        raise ValueError(
+            f"CSV has too many rows ({len(df):,}). Max {MAX_CSV_ROWS:,}."
+        )
+
+    # --- Timestamp column detection ---
     ts_col = None
     for col in df.columns:
         if any(kw in col.lower() for kw in ["time", "date", "timestamp"]):
