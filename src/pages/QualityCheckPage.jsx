@@ -432,6 +432,22 @@ function filterRowsByDateRange(headers, rows, dateFrom, dateTo) {
   });
 }
 
+/** Merged sync rows: keep entries whose time falls in the same bounds as filterRowsByDateRange. */
+function filterMergedByDateRange(merged, dateFrom, dateTo) {
+  if (!Array.isArray(merged) || merged.length === 0) return [];
+  const fromMs = dateFrom ? new Date(dateFrom).setHours(0, 0, 0, 0) : null;
+  const toMs = dateTo ? new Date(dateTo).setHours(23, 59, 59, 999) : null;
+  if (fromMs == null && toMs == null) return merged;
+  return merged.filter((d) => {
+    const dt = parseDateCellFlexible(d?.time);
+    if (!dt) return true;
+    const ms = dt.getTime();
+    if (fromMs != null && ms < fromMs) return false;
+    if (toMs != null && ms > toMs) return false;
+    return true;
+  });
+}
+
 // ── Toast Notification ───────────────────────────────────────────────────────
 function Toast({ message, type, onClose }) {
   // Use a ref so the latest onClose is always called without re-triggering the effect
@@ -992,133 +1008,6 @@ function findColIndex(headers, ...names) {
   return -1;
 }
 
-// ── Sync chart: dual Y-axis — PV time/Power (left) + Weather time/POA (right) ─────
-function SyncChart({ pvHeaders, pvRows, weatherHeaders, weatherRows }) {
-  const safePvH = Array.isArray(pvHeaders) ? pvHeaders : [];
-  const safePvR = Array.isArray(pvRows) ? pvRows : [];
-  const safeWh = Array.isArray(weatherHeaders) ? weatherHeaders : [];
-  const safeWr = Array.isArray(weatherRows) ? weatherRows : [];
-
-  const config = useMemo(() => {
-    const timeColPv = safePvH.length > 0 ? 0 : -1;
-    const pdcCol = findColIndex(safePvH, "P_DC", "P DC", "PDC", "P", "Power");
-    const timeColWeather = safeWh.length > 0 ? 0 : -1;
-    const irrCol = findColIndex(safeWh, "POA", "Poa", "poa", "GTI", "GHI", "Ghi");
-    if (timeColPv < 0 || pdcCol < 0 || timeColWeather < 0 || irrCol < 0) return null;
-
-    const pvTimes = safePvR.map((r) => (Array.isArray(r) ? r[timeColPv] : ""));
-    const pvPdc = safePvR.map((r) => {
-      const v = parseFloat(Array.isArray(r) ? r[pdcCol] : "");
-      return isNaN(v) ? null : v;
-    });
-    const weatherTimes = safeWr.map((r) => (Array.isArray(r) ? r[timeColWeather] : ""));
-    const weatherIrr = safeWr.map((r) => {
-      const v = parseFloat(Array.isArray(r) ? r[irrCol] : "");
-      return isNaN(v) ? null : v;
-    });
-
-    const tracePdc = {
-      x: pvTimes,
-      y: pvPdc,
-      type: "scatter",
-      mode: "lines",
-      name: safePvH[pdcCol] ?? "Power",
-      line: { color: O, width: 1.5, shape: "spline", smoothing: 1.2 },
-      yaxis: "y",
-      hovertemplate: `<b>${safePvH[pdcCol] ?? "Power"}</b>: %{y}<extra></extra>`,
-    };
-    const traceIrr = {
-      x: weatherTimes,
-      y: weatherIrr,
-      type: "scatter",
-      mode: "lines",
-      name: safeWh[irrCol] ?? "POA",
-      line: { color: B, width: 1.5, shape: "spline", smoothing: 1.2 },
-      yaxis: "y2",
-      hovertemplate: `<b>${safeWh[irrCol] ?? "POA"}</b>: %{y}<extra></extra>`,
-    };
-
-    const layout = {
-      height: 360,
-      margin: { t: 24, r: 56, b: 50, l: 56 },
-      hovermode: "x unified",
-      showlegend: true,
-      legend: { x: 1, y: 1, xanchor: "right", font: { family: FONT, size: 11 } },
-      xaxis: {
-        title: { text: formatHeaderWithUnit("Time"), font: { family: FONT, size: 12, color: "#94a3b8" } },
-        gridcolor: "#F1F5F9",
-        tickfont: { family: MONO, size: 10, color: "#94a3b8" },
-      },
-      yaxis: {
-        title: { text: formatHeaderWithUnit(safePvH[pdcCol] ?? "P_DC"), font: { family: FONT, size: 12, color: O } },
-        gridcolor: "#F1F5F9",
-        tickfont: { family: MONO, size: 10, color: "#94a3b8" },
-        side: "left",
-      },
-      yaxis2: {
-        title: { text: formatHeaderWithUnit(safeWh[irrCol] ?? "POA"), font: { family: FONT, size: 12, color: B } },
-        gridcolor: "rgba(0,0,0,0)",
-        tickfont: { family: MONO, size: 10, color: "#94a3b8" },
-        side: "right",
-        overlaying: "y",
-        anchor: "x",
-      },
-      plot_bgcolor: "#fff",
-      paper_bgcolor: "#fff",
-      font: { family: FONT },
-    };
-
-    return { data: [tracePdc, traceIrr], layout };
-  }, [safePvH, safePvR, safeWh, safeWr]);
-
-  if (!config) return null;
-
-  return (
-    <div style={{
-      background: "#ffffff",
-      borderRadius: 16,
-      border: "1px solid #E2E8F0",
-      boxShadow: "0 18px 45px rgba(15, 23, 42, 0.10)",
-      padding: "16px 18px 20px",
-      display: "flex",
-      flexDirection: "column",
-      gap: 14,
-    }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-        <div style={{
-          width: 30,
-          height: 30,
-          borderRadius: 10,
-          background: `${P}12`,
-          border: `1px solid ${P}35`,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}>
-          <TimelineOutlined sx={{ fontSize: 18, color: P }} />
-        </div>
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <span style={{ fontFamily: FONT, fontSize: 14, fontWeight: 800, color: "#0F172A" }}>
-            Power vs POA
-          </span>
-          <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>
-            PV Power (left axis) and plane-of-array irradiance (right axis) over time.
-          </span>
-        </div>
-      </div>
-      <Plot
-        data={config.data}
-        layout={config.layout}
-        config={{
-          displaylogo: false,
-          responsive: true,
-          modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d"],
-        }}
-        style={{ width: "100%" }}
-      />
-    </div>
-  );
-}
 
 // ── Helpers to build synced-series arrays from rules on the frontend ───────────
 function parseRuleDate(str) {
@@ -1126,6 +1015,16 @@ function parseRuleDate(str) {
   const s = String(str).trim().replace(" ", "T");
   const d = new Date(s);
   return Number.isNaN(d.getTime()) ? null : d;
+}
+
+/** At least one rule has valid start/end and a non-zero shift (0 min = unsynced; default rule stays disabled). */
+function hasApplicableTimeSyncRule(rules) {
+  if (!Array.isArray(rules) || rules.length === 0) return false;
+  return rules.some((r) => {
+    if (!parseRuleDate(r.start) || !parseRuleDate(r.end)) return false;
+    const minutes = Number(r.shiftMinutes);
+    return Number.isFinite(minutes) && minutes !== 0;
+  });
 }
 
 function applySyncRulesToTimes(times, rules, shiftColUnits = "minutes") {
@@ -1151,6 +1050,50 @@ function applySyncRulesToTimes(times, rules, shiftColUnits = "minutes") {
     const MM = String(shifted.getMinutes()).padStart(2, "0");
     return `${yyyy}-${mm}-${dd} ${HH}:${MM}`;
   });
+}
+
+/** Inner-join PV and weather on timestamps (weather times optionally shifted by rules). */
+function computeMergedWithSyncRules(pvData, weatherData, pvFilteredRows, weatherFilteredRows, syncRulesForShift) {
+  try {
+    if (!pvData || !weatherData) return [];
+    const pvH = Array.isArray(pvData.headers) ? pvData.headers : [];
+    const whH = Array.isArray(weatherData.headers) ? weatherData.headers : [];
+    const timeColPvIdx = pvH.length > 0 ? 0 : -1;
+    const timeColWhIdx = whH.length > 0 ? 0 : -1;
+    const pdcIdx = findColIndex(pvH, "P_DC", "P DC", "PDC", "P", "Power");
+    const irrIdx = findColIndex(whH, "POA", "Poa", "poa", "GTI", "GHI", "Ghi");
+    if (timeColPvIdx < 0 || timeColWhIdx < 0 || pdcIdx < 0 || irrIdx < 0) return [];
+
+    const pvTimes = pvFilteredRows.map((r) => (Array.isArray(r) ? r[timeColPvIdx] : ""));
+    const rules = Array.isArray(syncRulesForShift) ? syncRulesForShift : [];
+    const whTimesShifted = applySyncRulesToTimes(
+      weatherFilteredRows.map((r) => (Array.isArray(r) ? r[timeColWhIdx] : "")),
+      rules,
+    );
+
+    const whMap = new Map();
+    whTimesShifted.forEach((t, i) => {
+      const row = weatherFilteredRows[i];
+      if (!Array.isArray(row) || !t) return;
+      whMap.set(t, row);
+    });
+
+    const merged = [];
+    pvTimes.forEach((t, i) => {
+      const pvRow = pvFilteredRows[i];
+      if (!Array.isArray(pvRow) || !t) return;
+      const pdcVal = parseFloat(pvRow[pdcIdx]);
+      if (!Number.isFinite(pdcVal)) return;
+      const whRow = whMap.get(t);
+      if (!Array.isArray(whRow)) return;
+      const irrVal = parseFloat(whRow[irrIdx]);
+      if (!Number.isFinite(irrVal)) return;
+      merged.push({ time: t, pdc: pdcVal, poa: irrVal, pvRow, whRow });
+    });
+    return merged;
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -1412,144 +1355,45 @@ function pearsonCorrelation(x, y) {
   return { r: clamp(num / denom, -1, 1), n: count };
 }
 
-// ── Correlation chart: x = POA, y = Power (aligned by time, same filtered data) ───
-function CorrelationChart({ pvHeaders, pvRows, weatherHeaders, weatherRows }) {
-  const safePvH = Array.isArray(pvHeaders) ? pvHeaders : [];
-  const safePvR = Array.isArray(pvRows) ? pvRows : [];
-  const safeWh = Array.isArray(weatherHeaders) ? weatherHeaders : [];
-  const safeWr = Array.isArray(weatherRows) ? weatherRows : [];
 
-  const config = useMemo(() => {
-    const timeColPv = safePvH.length > 0 ? 0 : -1;
-    const pdcCol = findColIndex(safePvH, "P_DC", "P DC", "PDC", "P", "Power");
-    const timeColWeather = safeWh.length > 0 ? 0 : -1;
-    const irrCol = findColIndex(safeWh, "POA", "Poa", "poa", "GTI", "GHI", "Ghi");
-    if (timeColPv < 0 || pdcCol < 0 || timeColWeather < 0 || irrCol < 0) return null;
+// ── Synced data charts (after applying frontend rules) ─────────────────────────
+function timeSyncToggleButtonStyle(active, disabled = false) {
+  return {
+    borderRadius: 8,
+    border: `1.5px solid ${active && !disabled ? P : "#E2E8F0"}`,
+    background: active && !disabled ? `${P}18` : "#fff",
+    padding: "6px 14px",
+    fontFamily: FONT,
+    fontSize: 12,
+    fontWeight: 600,
+    color: active && !disabled ? P : "#64748B",
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.48 : 1,
+  };
+}
 
-    // Map time -> POA (or fallback) from weather
-    const timeToIrr = new Map();
-    for (const r of safeWr) {
-      const t = Array.isArray(r) ? String(r[timeColWeather] ?? "").trim() : "";
-      const g = parseFloat(Array.isArray(r) ? r[irrCol] : "");
-      if (t && !isNaN(g) && isFinite(g)) timeToIrr.set(t, g);
-    }
+function SyncedLineChart({ merged, timeSyncRulesActive, onTimeSyncRulesActiveChange, syncModeAvailable = false }) {
+  const sync = timeSyncRulesActive;
+  const titleMain = sync ? "Synced Data — Time Series" : "Unsynced Data — Time Series";
+  const titleSub = sync
+    ? "PV Power and Weather POA after applying time-shift rules."
+    : "PV Power and weather POA on identical timestamps (no time shifts).";
+  const powerLegend = sync ? "Power (synced)" : "Power (unsynced)";
+  const poaLegend = sync ? "POA (synced)" : "POA (unsynced)";
+  const xAxisTitle = sync ? "Synced time" : "Time";
 
-    const irrArr = [];
-    const pdcArr = [];
-    for (const r of safePvR) {
-      const t = Array.isArray(r) ? String(r[timeColPv] ?? "").trim() : "";
-      const pdc = parseFloat(Array.isArray(r) ? r[pdcCol] : "");
-      if (t === "" || isNaN(pdc) || !isFinite(pdc)) continue;
-      const irr = timeToIrr.get(t);
-      if (irr == null) continue;
-      irrArr.push(irr);
-      pdcArr.push(pdc);
-    }
-    if (irrArr.length === 0) return null;
-
-    const { slope, intercept, r2 } = linearRegression(irrArr, pdcArr);
-    const minX = Math.min(...irrArr);
-    const maxX = Math.max(...irrArr);
-    const lineX = [minX, maxX];
-    const lineY = [slope * minX + intercept, slope * maxX + intercept];
-
-    const traceScatter = {
-      x: irrArr,
-      y: pdcArr,
-      type: "scattergl",
-      mode: "markers",
-      name: "Data",
-      marker: {
-        size: 8,
-        color: P,
-        opacity: 0.65,
-        line: { width: 1, color: "rgba(255,255,255,0.9)" },
-        symbol: "circle",
-      },
-      hovertemplate: `<b>${safeWh[irrCol] ?? "POA"}</b>: %{x:.2f}<br><b>${safePvH[pdcCol] ?? "Power"}</b>: %{y:.2f}<extra></extra>`,
-    };
-
-    const traceLine = {
-      x: lineX,
-      y: lineY,
-      type: "scattergl",
-      mode: "lines",
-      name: `Trend (R² = ${r2.toFixed(3)})`,
-      line: {
-        color: O,
-        width: 2.5,
-        dash: "solid",
-      },
-      hovertemplate: "Trend: P_DC = %{y:.2f}<extra></extra>",
-    };
-
-    const layout = {
-      height: 380,
-      margin: { t: 40, r: 40, b: 56, l: 60 },
-      hovermode: "x unified",
-      showlegend: true,
-      legend: {
-        x: 1,
-        y: 1.02,
-        xanchor: "right",
-        yanchor: "bottom",
-        font: { family: FONT, size: 12, color: "#475569" },
-        bgcolor: "rgba(255,255,255,0.9)",
-        bordercolor: "#E2E8F0",
-        borderwidth: 1,
-      },
-      xaxis: {
-        title: {
-          text: formatHeaderWithUnit(safeWh[irrCol] ?? "POA"),
-          font: { family: FONT, size: 13, color: "#334155", standoff: 10 },
-        },
-        gridcolor: "#E2E8F0",
-        zerolinecolor: "#E2E8F0",
-        zerolinewidth: 1,
-        tickfont: { family: MONO, size: 11, color: "#64748B" },
-        ticklen: 4,
-        showline: true,
-        linecolor: "#E2E8F0",
-        linewidth: 1,
-        mirror: false,
-      },
-      yaxis: {
-        title: {
-          text: formatHeaderWithUnit(safePvH[pdcCol] ?? "Power"),
-          font: { family: FONT, size: 13, color: "#334155", standoff: 10 },
-        },
-        gridcolor: "#E2E8F0",
-        zerolinecolor: "#E2E8F0",
-        zerolinewidth: 1,
-        tickfont: { family: MONO, size: 11, color: "#64748B" },
-        ticklen: 4,
-        showline: true,
-        linecolor: "#E2E8F0",
-        linewidth: 1,
-        mirror: false,
-      },
-      plot_bgcolor: "#FFFFFF",
-      paper_bgcolor: "#FFFFFF",
-      font: { family: FONT },
-    };
-
-    return { data: [traceScatter, traceLine], layout };
-  }, [safePvH, safePvR, safeWh, safeWr]);
-
-  if (!config) return null;
-
-  return (
-    <div style={{
-      background: "#ffffff",
-      borderRadius: 16,
-      border: "1px solid #E2E8F0",
-      boxShadow: "0 18px 45px rgba(15, 23, 42, 0.10)",
-      padding: "16px 18px 20px",
-      display: "flex",
-      flexDirection: "column",
-      gap: 14,
-    }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+  const titleHeader = (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "flex-start",
+        justifyContent: "space-between",
+        gap: 12,
+        marginBottom: 4,
+        flexWrap: "wrap",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0, flex: "1 1 200px" }}>
         <div style={{
           width: 30,
           height: 30,
@@ -1559,28 +1403,563 @@ function CorrelationChart({ pvHeaders, pvRows, weatherHeaders, weatherRows }) {
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
+          flexShrink: 0,
         }}>
-          <TimelineOutlined sx={{ fontSize: 18, color: P }} />
+          <ShowChartOutlined sx={{ fontSize: 18, color: P }} />
         </div>
-        <div style={{ display: "flex", flexDirection: "column" }}>
+        <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
           <span style={{ fontFamily: FONT, fontSize: 14, fontWeight: 800, color: "#0F172A" }}>
-            Correlation: POA vs P_DC
+            {titleMain}
           </span>
-          <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>
-            Scatter of PV power vs irradiance (points aligned by time). Same date range as above.
-          </span>
+          <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>{titleSub}</span>
         </div>
       </div>
-      <Plot
-        data={config.data}
-        layout={config.layout}
-        config={{
-          displaylogo: false,
-          responsive: true,
-          modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d"],
+      <div style={{ display: "flex", flexDirection: "row", alignItems: "center", gap: 8, flexShrink: 0 }}>
+        <button
+          type="button"
+          onClick={() => onTimeSyncRulesActiveChange(false)}
+          style={timeSyncToggleButtonStyle(!sync, false)}
+        >
+          Unsynced
+        </button>
+        <button
+          type="button"
+          disabled={!syncModeAvailable}
+          onClick={() => syncModeAvailable && onTimeSyncRulesActiveChange(true)}
+          style={timeSyncToggleButtonStyle(sync, !syncModeAvailable)}
+          title={!syncModeAvailable ? "Set a non-zero time shift (minutes) on at least one rule with valid start and end" : undefined}
+        >
+          Synced
+        </button>
+      </div>
+    </div>
+  );
+
+  const cardWrap = (body) => (
+    <div style={{
+      background: "#ffffff",
+      borderRadius: 16,
+      border: "1px solid #E2E8F0",
+      boxShadow: "0 18px 45px rgba(15, 23, 42, 0.10)",
+      padding: "16px 18px 20px",
+      display: "flex",
+      flexDirection: "column",
+      gap: 14,
+    }}
+    >
+      {titleHeader}
+      {body}
+    </div>
+  );
+
+  if (!merged || merged.length === 0) {
+    return cardWrap(
+      <div style={{ fontFamily: FONT, fontSize: 13, color: "#64748B" }}>
+        No matched PV/weather points for this alignment.
+      </div>,
+    );
+  }
+
+  const x = merged.map((d) => d.time);
+  const pdc = merged.map((d) => d.pdc);
+  const poa = merged.map((d) => d.poa);
+
+  const data = [
+    {
+      x,
+      y: pdc,
+      type: "scatter",
+      mode: "lines",
+      name: powerLegend,
+      line: { color: O, width: 1.6, shape: "spline", smoothing: 1.2 },
+      yaxis: "y",
+      hovertemplate: "<b>Power</b>: %{y:.2f}<extra></extra>",
+    },
+    {
+      x,
+      y: poa,
+      type: "scatter",
+      mode: "lines",
+      name: poaLegend,
+      line: { color: B, width: 1.6, shape: "spline", smoothing: 1.2 },
+      yaxis: "y2",
+      hovertemplate: "<b>POA</b>: %{y:.2f}<extra></extra>",
+    },
+  ];
+
+  const layout = {
+    height: 360,
+    margin: { t: 30, r: 56, b: 50, l: 56 },
+    hovermode: "x unified",
+    showlegend: true,
+    legend: {
+      x: 1,
+      y: 1,
+      xanchor: "right",
+      font: { family: FONT, size: 11, color: "#475569" },
+    },
+    xaxis: {
+      title: { text: xAxisTitle, font: { family: FONT, size: 12, color: "#94a3b8" } },
+      gridcolor: "#F1F5F9",
+      tickfont: { family: MONO, size: 10, color: "#94a3b8" },
+    },
+    yaxis: {
+      title: { text: formatHeaderWithUnit("Power"), font: { family: FONT, size: 12, color: O } },
+      gridcolor: "#F1F5F9",
+      tickfont: { family: MONO, size: 10, color: "#94a3b8" },
+      side: "left",
+    },
+    yaxis2: {
+      title: { text: formatHeaderWithUnit("POA"), font: { family: FONT, size: 12, color: B } },
+      gridcolor: "rgba(0,0,0,0)",
+      tickfont: { family: MONO, size: 10, color: "#94a3b8" },
+      side: "right",
+      overlaying: "y",
+      anchor: "x",
+    },
+    plot_bgcolor: "#fff",
+    paper_bgcolor: "#fff",
+    font: { family: FONT },
+  };
+
+  return cardWrap(
+    <Plot
+      data={data}
+      layout={layout}
+      config={{
+        displaylogo: false,
+        responsive: true,
+        modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d"],
+      }}
+      style={{ width: "100%" }}
+    />,
+  );
+}
+
+function SyncedCorrelationChart({ merged, timeSyncRulesActive }) {
+  const poaAxisLabel = timeSyncRulesActive
+    ? `${formatHeaderWithUnit("POA")} (synced time alignment)`
+    : `${formatHeaderWithUnit("POA")} (unsynced — same timestamps)`;
+  const scatterName = timeSyncRulesActive ? "Synced alignment" : "Unsynced alignment";
+  const subtitle = timeSyncRulesActive
+    ? "Power vs POA with time-shift rules applied to weather timestamps."
+    : "Power vs POA matched on raw timestamps (no time-shift rules).";
+  const titleMain = timeSyncRulesActive ? "Synced Data — Correlation" : "Unsynced Data — Correlation";
+
+  const titleRow = (
+    <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+      <div style={{
+        width: 30,
+        height: 30,
+        borderRadius: 10,
+        background: `${P}12`,
+        border: `1px solid ${P}35`,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+      >
+        <ShowChartOutlined sx={{ fontSize: 18, color: P }} />
+      </div>
+      <div style={{ display: "flex", flexDirection: "column" }}>
+        <span style={{ fontFamily: FONT, fontSize: 14, fontWeight: 800, color: "#0F172A" }}>
+          {titleMain}
+        </span>
+        <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>{subtitle}</span>
+      </div>
+    </div>
+  );
+
+  const cardShell = (children) => (
+    <div style={{
+      background: "#ffffff",
+      borderRadius: 16,
+      border: "1px solid #E2E8F0",
+      boxShadow: "0 18px 45px rgba(15, 23, 42, 0.10)",
+      padding: "16px 18px 20px",
+      display: "flex",
+      flexDirection: "column",
+      gap: 14,
+    }}
+    >
+      {titleRow}
+      {children}
+    </div>
+  );
+
+  if (!merged || merged.length === 0) {
+    return cardShell(
+      <div style={{ fontFamily: FONT, fontSize: 13, color: "#64748B", padding: "4px 0 0" }}>
+        No matched PV/weather points for this alignment.
+      </div>,
+    );
+  }
+
+  const x = merged.map((d) => d.poa);
+  const y = merged.map((d) => d.pdc);
+  const { slope, intercept, r2 } = linearRegression(x, y);
+  const minX = Math.min(...x);
+  const maxX = Math.max(...x);
+  const lineX = [minX, maxX];
+  const lineY = [slope * minX + intercept, slope * maxX + intercept];
+
+  const traceScatter = {
+    x,
+    y,
+    type: "scattergl",
+    mode: "markers",
+    name: scatterName,
+    marker: {
+      size: 8,
+      color: P,
+      opacity: 0.65,
+      line: { width: 1, color: "rgba(255,255,255,0.9)" },
+      symbol: "circle",
+    },
+    hovertemplate: "<b>POA</b>: %{x:.2f}<br><b>Power</b>: %{y:.2f}<extra></extra>",
+  };
+
+  const traceLine = {
+    x: lineX,
+    y: lineY,
+    type: "scattergl",
+    mode: "lines",
+    name: `Trend (R² = ${r2.toFixed(3)})`,
+    line: { color: O, width: 2.5, dash: "solid" },
+    hovertemplate: "Trend: P_DC = %{y:.2f}<extra></extra>",
+  };
+
+  const layout = {
+    height: 360,
+    margin: { t: 32, r: 40, b: 56, l: 60 },
+    hovermode: "x unified",
+    showlegend: true,
+    legend: {
+      x: 1,
+      y: 1.02,
+      xanchor: "right",
+      yanchor: "bottom",
+      font: { family: FONT, size: 12, color: "#475569" },
+      bgcolor: "rgba(255,255,255,0.9)",
+      bordercolor: "#E2E8F0",
+      borderwidth: 1,
+    },
+    xaxis: {
+      title: {
+        text: poaAxisLabel,
+        font: { family: FONT, size: 13, color: "#334155", standoff: 10 },
+      },
+      gridcolor: "#E2E8F0",
+      zerolinecolor: "#E2E8F0",
+      zerolinewidth: 1,
+      tickfont: { family: MONO, size: 11, color: "#64748B" },
+      ticklen: 4,
+      showline: true,
+      linecolor: "#E2E8F0",
+      linewidth: 1,
+    },
+    yaxis: {
+      title: {
+        text: formatHeaderWithUnit("Power"),
+        font: { family: FONT, size: 13, color: "#334155", standoff: 10 },
+      },
+      gridcolor: "#E2E8F0",
+      zerolinecolor: "#E2E8F0",
+      zerolinewidth: 1,
+      tickfont: { family: MONO, size: 11, color: "#64748B" },
+      ticklen: 4,
+      showline: true,
+      linecolor: "#E2E8F0",
+      linewidth: 1,
+    },
+    plot_bgcolor: "#FFFFFF",
+    paper_bgcolor: "#FFFFFF",
+    font: { family: FONT },
+  };
+
+  return cardShell(
+    <Plot
+      data={[traceScatter, traceLine]}
+      layout={layout}
+      config={{
+        displaylogo: false,
+        responsive: true,
+        modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d"],
+      }}
+      style={{ width: "100%" }}
+    />,
+  );
+}
+
+function ColumnMultiSelect({ options, selected, onChange }) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef(null);
+  const popRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => {
+      if (btnRef.current && btnRef.current.contains(e.target)) return;
+      if (popRef.current && popRef.current.contains(e.target)) return;
+      setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  const selectedLabels = useMemo(() => {
+    const map = new Map(options.map((o) => [o.index, o.header]));
+    return selected.map((i) => map.get(i)).filter(Boolean);
+  }, [options, selected]);
+
+  return (
+    <div style={{ position: "relative", minWidth: 182 }}>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          width: "100%",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: 6,
+          padding: "5px 8px",
+          borderRadius: 8,
+          border: "1px solid #E2E8F0",
+          background: "#FAFBFC",
+          cursor: "pointer",
+          fontFamily: FONT,
+          color: "#475569",
+          fontSize: 11,
+          fontWeight: 500,
         }}
-        style={{ width: "100%" }}
-      />
+        title="Select columns"
+      >
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {selectedLabels.length === 0 ? "Select columns" : selectedLabels.slice(0, 2).join(", ")}
+          {selectedLabels.length > 2 ? ` +${selectedLabels.length - 2}` : ""}
+        </span>
+        <span style={{ display: "flex", alignItems: "center", color: "#94a3b8" }}>
+          {open ? <ExpandLessIcon sx={{ fontSize: 14 }} /> : <ExpandMoreIcon sx={{ fontSize: 14 }} />}
+        </span>
+      </button>
+
+      {open && (
+        <div
+          ref={popRef}
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            right: 0,
+            zIndex: 20,
+            width: 280,
+            maxHeight: 280,
+            overflow: "auto",
+            background: "#fff",
+            border: "1px solid #E2E8F0",
+            borderRadius: 10,
+            boxShadow: "0 8px 24px rgba(2, 6, 23, 0.1)",
+            padding: 8,
+          }}
+        >
+          <div style={{ fontFamily: FONT, fontSize: 11, fontWeight: 500, color: "#94a3b8", padding: "2px 6px 4px" }}>
+            Columns
+          </div>
+          {options.map((opt) => {
+            const checked = selected.includes(opt.index);
+            return (
+              <button
+                key={opt.index}
+                type="button"
+                onClick={() => {
+                  const next = checked ? selected.filter((i) => i !== opt.index) : [...selected, opt.index];
+                  onChange(next.length ? next : [options[0].index]);
+                  setOpen(false); // collapse after selection
+                }}
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 8,
+                  padding: "6px 8px",
+                  border: "none",
+                  background: checked ? "#EEF2FF" : "transparent",
+                  borderRadius: 8,
+                  cursor: "pointer",
+                  textAlign: "left",
+                  fontFamily: FONT,
+                  fontSize: 11,
+                  fontWeight: 500,
+                }}
+              >
+                <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                  <span
+                    style={{
+                      width: 14,
+                      height: 14,
+                      borderRadius: 4,
+                      border: checked ? "none" : "1px solid #CBD5E1",
+                      background: checked ? "#8b5cf6" : "#fff",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {checked && <CheckCircleOutline sx={{ fontSize: 10, color: "#fff" }} />}
+                  </span>
+                  <span style={{ fontFamily: FONT, fontSize: 11, fontWeight: 500, color: "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {opt.header}
+                  </span>
+                </span>
+                <span style={{ fontFamily: FONT, fontSize: 10, fontWeight: 500, color: "#94a3b8" }}>
+                  #{opt.index}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CSVChart({ title, color, headers, rows, defaultYHeader }) {
+  const [expanded, setExpanded] = useState(true);
+  const safeHeaders = Array.isArray(headers) ? headers : [];
+  const safeRows = Array.isArray(rows) ? rows : [];
+
+  const plottableCols = useMemo(() => {
+    return safeHeaders
+      .map((h, i) => ({ header: h, index: i }))
+      .filter(({ index }) => {
+        const sample = safeRows.slice(0, Math.min(100, safeRows.length));
+        let numCount = 0;
+        for (const row of sample) {
+          const raw = (Array.isArray(row) ? (row[index] ?? "") : "").trim();
+          if (raw === "") continue;
+          const n = parseFloat(raw);
+          if (!isNaN(n) && isFinite(n)) numCount++;
+        }
+        return numCount >= Math.max(2, sample.length * 0.15);
+      });
+  }, [safeHeaders, safeRows]);
+
+  const [selectedIndices, setSelectedIndices] = useState(() => {
+    // If a preferred default header is provided (e.g. "P_DC" for PV data),
+    // and it exists beyond the time column, select it.
+    if (defaultYHeader && safeHeaders.length > 1) {
+      const target = String(defaultYHeader).trim().toLowerCase();
+      const idx = safeHeaders.findIndex(
+        (h, i) => i > 0 && String(h ?? "").trim().toLowerCase() === target,
+      );
+      if (idx > 0) return [idx];
+    }
+    // Otherwise prefer second column (index 1) as default y-series if available,
+    // or fall back to the first plottable numeric column.
+    if (safeHeaders.length > 1) return [1];
+    return plottableCols.length > 0 ? [plottableCols[0].index] : [];
+  });
+
+  const xValues = useMemo(() => {
+    if (safeRows.length === 0) return [];
+    const first = safeHeaders[0];
+    if (first) {
+      return safeRows.map(r => (Array.isArray(r) ? r[0] : ""));
+    }
+    return safeRows.map((_, i) => i + 1);
+  }, [safeHeaders, safeRows]);
+
+  const chartData = useMemo(() => {
+    return selectedIndices.map((colIndex, i) => {
+      const yValues = safeRows.map(r => {
+        const v = parseFloat(Array.isArray(r) ? r[colIndex] : "");
+        return isNaN(v) ? null : v;
+      });
+      return {
+        x: xValues,
+        y: yValues,
+        type: "scatter",
+        mode: "lines",
+        name: safeHeaders[colIndex] ?? `Col ${colIndex}`,
+        line: { color: CHART_COLORS[i % CHART_COLORS.length], width: 1.5, shape: "spline", smoothing: 1.2 },
+        hovertemplate: `<b>%{fullData.name}</b>: %{y}<extra></extra>`,
+      };
+    });
+  }, [safeRows, safeHeaders, selectedIndices, xValues]);
+
+  if (plottableCols.length === 0) return null;
+
+  return (
+    <div style={{
+      background: "#fff", borderRadius: 14, border: "1px solid #E2E8F0",
+      overflow: "hidden",
+    }}>
+      <div
+        onClick={() => setExpanded(!expanded)}
+        style={{
+          display: "flex", alignItems: "center", justifyContent: "space-between",
+          padding: "14px 20px", cursor: "pointer", userSelect: "none",
+          borderBottom: expanded ? "1px solid #E2E8F0" : "none",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <LightModeOutlined sx={{ fontSize: 20, color }} />
+          <span style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: FONT }}>
+            {title} — Chart
+          </span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }} onClick={(e) => e.stopPropagation()}>
+          <ColumnMultiSelect
+            options={plottableCols}
+            selected={selectedIndices}
+            onChange={setSelectedIndices}
+          />
+          {expanded
+            ? <ExpandLessIcon sx={{ fontSize: 20, color: "#94a3b8" }} />
+            : <ExpandMoreIcon sx={{ fontSize: 20, color: "#94a3b8" }} />
+          }
+        </div>
+      </div>
+      {expanded && (
+      <div style={{ padding: "8px 12px 12px" }}>
+        {chartData.length === 0 ? (
+          <div style={{ height: 200, display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", fontFamily: FONT }}>Select at least one column</div>
+        ) : (
+        <Plot
+          data={chartData}
+          layout={{
+            height: 340,
+            margin: { t: 20, r: 24, b: 50, l: 60 },
+            hovermode: "x unified",
+            showlegend: chartData.length > 1,
+            legend: { x: 1, y: 1, xanchor: "right", font: { family: FONT, size: 11 } },
+            xaxis: {
+              title: { text: formatHeaderWithUnit(safeHeaders[0] ?? "Index"), font: { family: FONT, size: 12, color: "#94a3b8" } },
+              gridcolor: "#F1F5F9",
+              tickfont: { family: MONO, size: 10, color: "#94a3b8" },
+            },
+            yaxis: {
+              title: { text: selectedIndices.length === 1 ? formatHeaderWithUnit(safeHeaders[selectedIndices[0]] ?? "") : "Value", font: { family: FONT, size: 12, color: "#94a3b8" } },
+              gridcolor: "#F1F5F9",
+              tickfont: { family: MONO, size: 10, color: "#94a3b8" },
+            },
+            plot_bgcolor: "#fff",
+            paper_bgcolor: "#fff",
+            font: { family: FONT },
+          }}
+          config={{
+            displaylogo: false,
+            responsive: true,
+            modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d"],
+          }}
+          style={{ width: "100%" }}
+        />
+        )}
+      </div>
+      )}
     </div>
   );
 }
@@ -1949,521 +2328,6 @@ function CorrelationHeatmapCard({
   );
 }
 
-// ── Synced data charts (after applying frontend rules) ─────────────────────────
-function SyncedLineChart({ merged }) {
-  if (!merged || merged.length === 0) return null;
-  const x = merged.map((d) => d.time);
-  const pdc = merged.map((d) => d.pdc);
-  const poa = merged.map((d) => d.poa);
-
-  const data = [
-    {
-      x,
-      y: pdc,
-      type: "scatter",
-      mode: "lines",
-      name: "Power (synced)",
-      line: { color: O, width: 1.6, shape: "spline", smoothing: 1.2 },
-      yaxis: "y",
-      hovertemplate: "<b>Power</b>: %{y:.2f}<extra></extra>",
-    },
-    {
-      x,
-      y: poa,
-      type: "scatter",
-      mode: "lines",
-      name: "POA (synced)",
-      line: { color: B, width: 1.6, shape: "spline", smoothing: 1.2 },
-      yaxis: "y2",
-      hovertemplate: "<b>POA</b>: %{y:.2f}<extra></extra>",
-    },
-  ];
-
-  const layout = {
-    height: 360,
-    margin: { t: 30, r: 56, b: 50, l: 56 },
-    hovermode: "x unified",
-    showlegend: true,
-    legend: {
-      x: 1,
-      y: 1,
-      xanchor: "right",
-      font: { family: FONT, size: 11, color: "#475569" },
-    },
-    xaxis: {
-      title: { text: "Synced time", font: { family: FONT, size: 12, color: "#94a3b8" } },
-      gridcolor: "#F1F5F9",
-      tickfont: { family: MONO, size: 10, color: "#94a3b8" },
-    },
-    yaxis: {
-      title: { text: formatHeaderWithUnit("Power"), font: { family: FONT, size: 12, color: O } },
-      gridcolor: "#F1F5F9",
-      tickfont: { family: MONO, size: 10, color: "#94a3b8" },
-      side: "left",
-    },
-    yaxis2: {
-      title: { text: formatHeaderWithUnit("POA"), font: { family: FONT, size: 12, color: B } },
-      gridcolor: "rgba(0,0,0,0)",
-      tickfont: { family: MONO, size: 10, color: "#94a3b8" },
-      side: "right",
-      overlaying: "y",
-      anchor: "x",
-    },
-    plot_bgcolor: "#fff",
-    paper_bgcolor: "#fff",
-    font: { family: FONT },
-  };
-
-  return (
-    <div style={{
-      background: "#ffffff",
-      borderRadius: 16,
-      border: "1px solid #E2E8F0",
-      boxShadow: "0 18px 45px rgba(15, 23, 42, 0.10)",
-      padding: "16px 18px 20px",
-      display: "flex",
-      flexDirection: "column",
-      gap: 14,
-    }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-        <div style={{
-          width: 30,
-          height: 30,
-          borderRadius: 10,
-          background: `${P}12`,
-          border: `1px solid ${P}35`,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}>
-            <ShowChartOutlined sx={{ fontSize: 18, color: P }} />
-        </div>
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <span style={{ fontFamily: FONT, fontSize: 14, fontWeight: 800, color: "#0F172A" }}>
-            Synced Data — Time Series
-          </span>
-          <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>
-            PV Power and Weather POA after applying time-shift rules.
-          </span>
-        </div>
-      </div>
-      <Plot
-        data={data}
-        layout={layout}
-        config={{
-          displaylogo: false,
-          responsive: true,
-          modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d"],
-        }}
-        style={{ width: "100%" }}
-      />
-    </div>
-  );
-}
-
-function SyncedCorrelationChart({ merged }) {
-  if (!merged || merged.length === 0) return null;
-  const x = merged.map((d) => d.poa);
-  const y = merged.map((d) => d.pdc);
-  const { slope, intercept, r2 } = linearRegression(x, y);
-  const minX = Math.min(...x);
-  const maxX = Math.max(...x);
-  const lineX = [minX, maxX];
-  const lineY = [slope * minX + intercept, slope * maxX + intercept];
-
-  const traceScatter = {
-    x,
-    y,
-    type: "scattergl",
-    mode: "markers",
-    name: "Synced data",
-    marker: {
-      size: 8,
-      color: P,
-      opacity: 0.65,
-      line: { width: 1, color: "rgba(255,255,255,0.9)" },
-      symbol: "circle",
-    },
-    hovertemplate: "<b>POA (synced)</b>: %{x:.2f}<br><b>Power</b>: %{y:.2f}<extra></extra>",
-  };
-
-  const traceLine = {
-    x: lineX,
-    y: lineY,
-    type: "scattergl",
-    mode: "lines",
-    name: `Trend (R² = ${r2.toFixed(3)})`,
-    line: { color: O, width: 2.5, dash: "solid" },
-    hovertemplate: "Trend: P_DC = %{y:.2f}<extra></extra>",
-  };
-
-  const layout = {
-    height: 360,
-    margin: { t: 32, r: 40, b: 56, l: 60 },
-    hovermode: "x unified",
-    showlegend: true,
-    legend: {
-      x: 1,
-      y: 1.02,
-      xanchor: "right",
-      yanchor: "bottom",
-      font: { family: FONT, size: 12, color: "#475569" },
-      bgcolor: "rgba(255,255,255,0.9)",
-      bordercolor: "#E2E8F0",
-      borderwidth: 1,
-    },
-    xaxis: {
-      title: {
-        text: `${formatHeaderWithUnit("POA")} (synced)`,
-        font: { family: FONT, size: 13, color: "#334155", standoff: 10 },
-      },
-      gridcolor: "#E2E8F0",
-      zerolinecolor: "#E2E8F0",
-      zerolinewidth: 1,
-      tickfont: { family: MONO, size: 11, color: "#64748B" },
-      ticklen: 4,
-      showline: true,
-      linecolor: "#E2E8F0",
-      linewidth: 1,
-    },
-    yaxis: {
-      title: {
-        text: formatHeaderWithUnit("Power"),
-        font: { family: FONT, size: 13, color: "#334155", standoff: 10 },
-      },
-      gridcolor: "#E2E8F0",
-      zerolinecolor: "#E2E8F0",
-      zerolinewidth: 1,
-      tickfont: { family: MONO, size: 11, color: "#64748B" },
-      ticklen: 4,
-      showline: true,
-      linecolor: "#E2E8F0",
-      linewidth: 1,
-    },
-    plot_bgcolor: "#FFFFFF",
-    paper_bgcolor: "#FFFFFF",
-    font: { family: FONT },
-  };
-
-  return (
-    <div style={{
-      background: "#ffffff",
-      borderRadius: 16,
-      border: "1px solid #E2E8F0",
-      boxShadow: "0 18px 45px rgba(15, 23, 42, 0.10)",
-      padding: "16px 18px 20px",
-      display: "flex",
-      flexDirection: "column",
-      gap: 14,
-    }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
-        <div style={{
-          width: 30,
-          height: 30,
-          borderRadius: 10,
-          background: `${P}12`,
-          border: `1px solid ${P}35`,
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-        }}>
-            <ShowChartOutlined sx={{ fontSize: 18, color: P }} />
-        </div>
-        <div style={{ display: "flex", flexDirection: "column" }}>
-          <span style={{ fontFamily: FONT, fontSize: 14, fontWeight: 800, color: "#0F172A" }}>
-            Synced Data — Correlation
-          </span>
-          <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>
-            Correlation of Power vs POA after applying time-shift rules.
-          </span>
-        </div>
-      </div>
-      <Plot
-        data={[traceScatter, traceLine]}
-        layout={layout}
-        config={{
-          displaylogo: false,
-          responsive: true,
-          modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d"],
-        }}
-        style={{ width: "100%" }}
-      />
-    </div>
-  );
-}
-
-function ColumnMultiSelect({ options, selected, onChange }) {
-  const [open, setOpen] = useState(false);
-  const btnRef = useRef(null);
-  const popRef = useRef(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e) => {
-      if (btnRef.current && btnRef.current.contains(e.target)) return;
-      if (popRef.current && popRef.current.contains(e.target)) return;
-      setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [open]);
-
-  const selectedLabels = useMemo(() => {
-    const map = new Map(options.map((o) => [o.index, o.header]));
-    return selected.map((i) => map.get(i)).filter(Boolean);
-  }, [options, selected]);
-
-  return (
-    <div style={{ position: "relative", minWidth: 182 }}>
-      <button
-        ref={btnRef}
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        style={{
-          width: "100%",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: 6,
-          padding: "5px 8px",
-          borderRadius: 8,
-          border: "1px solid #E2E8F0",
-          background: "#FAFBFC",
-          cursor: "pointer",
-          fontFamily: FONT,
-          color: "#475569",
-          fontSize: 11,
-          fontWeight: 500,
-        }}
-        title="Select columns"
-      >
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {selectedLabels.length === 0 ? "Select columns" : selectedLabels.slice(0, 2).join(", ")}
-          {selectedLabels.length > 2 ? ` +${selectedLabels.length - 2}` : ""}
-        </span>
-        <span style={{ display: "flex", alignItems: "center", color: "#94a3b8" }}>
-          {open ? <ExpandLessIcon sx={{ fontSize: 14 }} /> : <ExpandMoreIcon sx={{ fontSize: 14 }} />}
-        </span>
-      </button>
-
-      {open && (
-        <div
-          ref={popRef}
-          style={{
-            position: "absolute",
-            top: "calc(100% + 4px)",
-            right: 0,
-            zIndex: 20,
-            width: 280,
-            maxHeight: 280,
-            overflow: "auto",
-            background: "#fff",
-            border: "1px solid #E2E8F0",
-            borderRadius: 10,
-            boxShadow: "0 8px 24px rgba(2, 6, 23, 0.1)",
-            padding: 8,
-          }}
-        >
-          <div style={{ fontFamily: FONT, fontSize: 11, fontWeight: 500, color: "#94a3b8", padding: "2px 6px 4px" }}>
-            Columns
-          </div>
-          {options.map((opt) => {
-            const checked = selected.includes(opt.index);
-            return (
-              <button
-                key={opt.index}
-                type="button"
-                onClick={() => {
-                  const next = checked ? selected.filter((i) => i !== opt.index) : [...selected, opt.index];
-                  onChange(next.length ? next : [options[0].index]);
-                  setOpen(false); // collapse after selection
-                }}
-                style={{
-                  width: "100%",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: 8,
-                  padding: "6px 8px",
-                  border: "none",
-                  background: checked ? "#EEF2FF" : "transparent",
-                  borderRadius: 8,
-                  cursor: "pointer",
-                  textAlign: "left",
-                  fontFamily: FONT,
-                  fontSize: 11,
-                  fontWeight: 500,
-                }}
-              >
-                <span style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                  <span
-                    style={{
-                      width: 14,
-                      height: 14,
-                      borderRadius: 4,
-                      border: checked ? "none" : "1px solid #CBD5E1",
-                      background: checked ? "#8b5cf6" : "#fff",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      flexShrink: 0,
-                    }}
-                  >
-                    {checked && <CheckCircleOutline sx={{ fontSize: 10, color: "#fff" }} />}
-                  </span>
-                  <span style={{ fontFamily: FONT, fontSize: 11, fontWeight: 500, color: "#475569", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {opt.header}
-                  </span>
-                </span>
-                <span style={{ fontFamily: FONT, fontSize: 10, fontWeight: 500, color: "#94a3b8" }}>
-                  #{opt.index}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CSVChart({ title, color, headers, rows, defaultYHeader }) {
-  const [expanded, setExpanded] = useState(true);
-  const safeHeaders = Array.isArray(headers) ? headers : [];
-  const safeRows = Array.isArray(rows) ? rows : [];
-
-  const plottableCols = useMemo(() => {
-    return safeHeaders
-      .map((h, i) => ({ header: h, index: i }))
-      .filter(({ index }) => {
-        const sample = safeRows.slice(0, Math.min(100, safeRows.length));
-        let numCount = 0;
-        for (const row of sample) {
-          const raw = (Array.isArray(row) ? (row[index] ?? "") : "").trim();
-          if (raw === "") continue;
-          const n = parseFloat(raw);
-          if (!isNaN(n) && isFinite(n)) numCount++;
-        }
-        return numCount >= Math.max(2, sample.length * 0.15);
-      });
-  }, [safeHeaders, safeRows]);
-
-  const [selectedIndices, setSelectedIndices] = useState(() => {
-    // If a preferred default header is provided (e.g. "P_DC" for PV data),
-    // and it exists beyond the time column, select it.
-    if (defaultYHeader && safeHeaders.length > 1) {
-      const target = String(defaultYHeader).trim().toLowerCase();
-      const idx = safeHeaders.findIndex(
-        (h, i) => i > 0 && String(h ?? "").trim().toLowerCase() === target,
-      );
-      if (idx > 0) return [idx];
-    }
-    // Otherwise prefer second column (index 1) as default y-series if available,
-    // or fall back to the first plottable numeric column.
-    if (safeHeaders.length > 1) return [1];
-    return plottableCols.length > 0 ? [plottableCols[0].index] : [];
-  });
-
-  const xValues = useMemo(() => {
-    if (safeRows.length === 0) return [];
-    const first = safeHeaders[0];
-    if (first) {
-      return safeRows.map(r => (Array.isArray(r) ? r[0] : ""));
-    }
-    return safeRows.map((_, i) => i + 1);
-  }, [safeHeaders, safeRows]);
-
-  const chartData = useMemo(() => {
-    return selectedIndices.map((colIndex, i) => {
-      const yValues = safeRows.map(r => {
-        const v = parseFloat(Array.isArray(r) ? r[colIndex] : "");
-        return isNaN(v) ? null : v;
-      });
-      return {
-        x: xValues,
-        y: yValues,
-        type: "scatter",
-        mode: "lines",
-        name: safeHeaders[colIndex] ?? `Col ${colIndex}`,
-        line: { color: CHART_COLORS[i % CHART_COLORS.length], width: 1.5, shape: "spline", smoothing: 1.2 },
-        hovertemplate: `<b>%{fullData.name}</b>: %{y}<extra></extra>`,
-      };
-    });
-  }, [safeRows, safeHeaders, selectedIndices, xValues]);
-
-  if (plottableCols.length === 0) return null;
-
-  return (
-    <div style={{
-      background: "#fff", borderRadius: 14, border: "1px solid #E2E8F0",
-      overflow: "hidden",
-    }}>
-      <div
-        onClick={() => setExpanded(!expanded)}
-        style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between",
-          padding: "14px 20px", cursor: "pointer", userSelect: "none",
-          borderBottom: expanded ? "1px solid #E2E8F0" : "none",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <LightModeOutlined sx={{ fontSize: 20, color }} />
-          <span style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: FONT }}>
-            {title} — Chart
-          </span>
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }} onClick={(e) => e.stopPropagation()}>
-          <ColumnMultiSelect
-            options={plottableCols}
-            selected={selectedIndices}
-            onChange={setSelectedIndices}
-          />
-          {expanded
-            ? <ExpandLessIcon sx={{ fontSize: 20, color: "#94a3b8" }} />
-            : <ExpandMoreIcon sx={{ fontSize: 20, color: "#94a3b8" }} />
-          }
-        </div>
-      </div>
-      {expanded && (
-      <div style={{ padding: "8px 12px 12px" }}>
-        {chartData.length === 0 ? (
-          <div style={{ height: 200, display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", fontFamily: FONT }}>Select at least one column</div>
-        ) : (
-        <Plot
-          data={chartData}
-          layout={{
-            height: 340,
-            margin: { t: 20, r: 24, b: 50, l: 60 },
-            hovermode: "x unified",
-            showlegend: chartData.length > 1,
-            legend: { x: 1, y: 1, xanchor: "right", font: { family: FONT, size: 11 } },
-            xaxis: {
-              title: { text: formatHeaderWithUnit(safeHeaders[0] ?? "Index"), font: { family: FONT, size: 12, color: "#94a3b8" } },
-              gridcolor: "#F1F5F9",
-              tickfont: { family: MONO, size: 10, color: "#94a3b8" },
-            },
-            yaxis: {
-              title: { text: selectedIndices.length === 1 ? formatHeaderWithUnit(safeHeaders[selectedIndices[0]] ?? "") : "Value", font: { family: FONT, size: 12, color: "#94a3b8" } },
-              gridcolor: "#F1F5F9",
-              tickfont: { family: MONO, size: 10, color: "#94a3b8" },
-            },
-            plot_bgcolor: "#fff",
-            paper_bgcolor: "#fff",
-            font: { family: FONT },
-          }}
-          config={{
-            displaylogo: false,
-            responsive: true,
-            modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d"],
-          }}
-          style={{ width: "100%" }}
-        />
-        )}
-      </div>
-      )}
-    </div>
-  );
-}
 
 function ClearSkyDaysChart({ title, color, headers, rows, systemInfo }) {
   const [expanded, setExpanded] = useState(true);
@@ -2889,12 +2753,21 @@ function DataAvailabilityCard({ mergedTimes, stepMinutes, color, dateFrom, dateT
   );
 }
 
-function DataQualityCheckSummaryCard({ mergedTimes, mergedCount, stepMinutes, clearDaysCount, totalDays, avgAvailPct, avgMissingPct, color }) {
+function DataQualityCheckSummaryCard({ mergedTimes, mergedCount, stepMinutes, clearDaysCount, totalDays, avgAvailPct, avgMissingPct, color, dateFrom, dateTo }) {
   const step = Number(stepMinutes);
   const stepMin = Number.isFinite(step) && step > 0 ? step : 10;
   const expectedPerDay = Math.max(1, Math.floor(1440 / stepMin));
 
   const range = useMemo(() => {
+    const fromP = parseDateCellFlexible(dateFrom);
+    const toP = parseDateCellFlexible(dateTo);
+    if (fromP && toP) {
+      const t0 = new Date(fromP.getFullYear(), fromP.getMonth(), fromP.getDate()).getTime();
+      const t1 = new Date(toP.getFullYear(), toP.getMonth(), toP.getDate()).getTime();
+      const lo = Math.min(t0, t1);
+      const hi = Math.max(t0, t1);
+      return { minDay: toYMDLocal(new Date(lo)), maxDay: toYMDLocal(new Date(hi)) };
+    }
     const safe = Array.isArray(mergedTimes) ? mergedTimes : [];
     const days = safe
       .map((t) => parseDateCellFlexible(t))
@@ -2903,7 +2776,7 @@ function DataQualityCheckSummaryCard({ mergedTimes, mergedCount, stepMinutes, cl
     if (!days.length) return { minDay: "—", maxDay: "—" };
     days.sort();
     return { minDay: days[0], maxDay: days[days.length - 1] };
-  }, [mergedTimes]);
+  }, [mergedTimes, dateFrom, dateTo]);
 
   const tileStyle = {
     flex: "1 1 0",
@@ -3011,6 +2884,9 @@ function DataSynchronizationCard({
   autoSyncResult,
   setAutoSyncResult,
   merged,
+  timeSyncRulesActive,
+  setTimeSyncRulesActive,
+  syncModeAvailable,
 }) {
   if (!pvData || !weatherData) return null;
 
@@ -3047,24 +2923,10 @@ function DataSynchronizationCard({
             Data Synchronization
           </span>
           <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>
-            Power vs POA, correlation, time-shift rules, and synced dataset export.
+            Time-shift rules, synced time series, and POA vs Power correlation.
           </span>
         </div>
       </div>
-
-      <SyncChart
-        pvHeaders={pvData.headers}
-        pvRows={pvFilteredRows}
-        weatherHeaders={weatherData.headers}
-        weatherRows={weatherFilteredRows}
-      />
-
-      <CorrelationChart
-        pvHeaders={pvData.headers}
-        pvRows={pvFilteredRows}
-        weatherHeaders={weatherData.headers}
-        weatherRows={weatherFilteredRows}
-      />
 
       {/* Time sync rules (unchanged UI) */}
       <div
@@ -3220,6 +3082,7 @@ function DataSynchronizationCard({
                     end: seg.end,
                     shiftMinutes: seg.bestLag,
                   })));
+                  setTimeSyncRulesActive(true);
                   setAutoSyncResult(null);
                 }}
                 style={{
@@ -3392,7 +3255,6 @@ function DataSynchronizationCard({
       {(() => {
         try {
           const mergedSafe = Array.isArray(merged) ? merged : [];
-          if (mergedSafe.length === 0) return null;
 
           const pvH = Array.isArray(pvData.headers) ? pvData.headers : [];
           const whH = Array.isArray(weatherData.headers) ? weatherData.headers : [];
@@ -3401,6 +3263,7 @@ function DataSynchronizationCard({
           const pdcIdx = findColIndex(pvH, "P_DC", "P DC", "PDC", "P", "Power");
           const irrIdx = findColIndex(whH, "POA", "Poa", "poa", "GTI", "GHI", "Ghi");
           if (timeColPvIdx < 0 || timeColWhIdx < 0 || pdcIdx < 0 || irrIdx < 0) return null;
+          if (mergedSafe.length === 0) return null;
 
           const xs = mergedSafe.map((d) => d.poa);
           const ys = mergedSafe.map((d) => d.pdc);
@@ -3448,8 +3311,13 @@ function DataSynchronizationCard({
 
           return (
             <>
-              <SyncedLineChart merged={mergedSafe} />
-              <SyncedCorrelationChart merged={mergedSafe} />
+              <SyncedLineChart
+                merged={mergedSafe}
+                timeSyncRulesActive={timeSyncRulesActive}
+                onTimeSyncRulesActiveChange={setTimeSyncRulesActive}
+                syncModeAvailable={syncModeAvailable}
+              />
+              <SyncedCorrelationChart merged={mergedSafe} timeSyncRulesActive={timeSyncRulesActive} />
               {/* Synced Data Summary + download (existing UI) */}
               <div
                 style={{
@@ -4433,6 +4301,7 @@ export default function QualityCheckPage() {
   const [dateTo, setDateTo] = useState(null);
   const [resamplingStepMinutes, setResamplingStepMinutes] = useState(10);
   const [syncRules, setSyncRules] = useState(DEFAULT_SYNC_RULES);
+  const [timeSyncRulesActive, setTimeSyncRulesActive] = useState(true);
   const [autoSyncResult, setAutoSyncResult] = useState(null);
   const [autoSyncRunning, setAutoSyncRunning] = useState(false);
   const [pvUploadProgress, setPvUploadProgress] = useState(0);
@@ -4553,47 +4422,33 @@ export default function QualityCheckPage() {
     [weatherData]
   );
 
-  const mergedSynced = useMemo(() => {
-    try {
-      if (!pvData || !weatherData) return [];
-      const pvH = Array.isArray(pvData.headers) ? pvData.headers : [];
-      const whH = Array.isArray(weatherData.headers) ? weatherData.headers : [];
-      const timeColPvIdx = pvH.length > 0 ? 0 : -1;
-      const timeColWhIdx = whH.length > 0 ? 0 : -1;
-      const pdcIdx = findColIndex(pvH, "P_DC", "P DC", "PDC", "P", "Power");
-      const irrIdx = findColIndex(whH, "POA", "Poa", "poa", "GTI", "GHI", "Ghi");
-      if (timeColPvIdx < 0 || timeColWhIdx < 0 || pdcIdx < 0 || irrIdx < 0) return [];
+  const hasApplicableSyncRules = useMemo(
+    () => hasApplicableTimeSyncRule(syncRules),
+    [syncRules],
+  );
 
-      const pvTimes = pvFilteredRows.map((r) => (Array.isArray(r) ? r[timeColPvIdx] : ""));
-      const whTimesShifted = applySyncRulesToTimes(
-        weatherFilteredRows.map((r) => (Array.isArray(r) ? r[timeColWhIdx] : "")),
-        syncRules,
-      );
-
-      const whMap = new Map();
-      whTimesShifted.forEach((t, i) => {
-        const row = weatherFilteredRows[i];
-        if (!Array.isArray(row) || !t) return;
-        whMap.set(t, row);
-      });
-
-      const merged = [];
-      pvTimes.forEach((t, i) => {
-        const pvRow = pvFilteredRows[i];
-        if (!Array.isArray(pvRow) || !t) return;
-        const pdcVal = parseFloat(pvRow[pdcIdx]);
-        if (!Number.isFinite(pdcVal)) return;
-        const whRow = whMap.get(t);
-        if (!Array.isArray(whRow)) return;
-        const irrVal = parseFloat(whRow[irrIdx]);
-        if (!Number.isFinite(irrVal)) return;
-        merged.push({ time: t, pdc: pdcVal, poa: irrVal, pvRow, whRow });
-      });
-      return merged;
-    } catch {
-      return [];
+  useEffect(() => {
+    if (!hasApplicableSyncRules && timeSyncRulesActive) {
+      setTimeSyncRulesActive(false);
     }
-  }, [pvData, weatherData, pvFilteredRows, weatherFilteredRows, syncRules]);
+  }, [hasApplicableSyncRules, timeSyncRulesActive]);
+
+  const mergedSynced = useMemo(
+    () =>
+      computeMergedWithSyncRules(
+        pvData,
+        weatherData,
+        pvFilteredRows,
+        weatherFilteredRows,
+        timeSyncRulesActive && hasApplicableSyncRules ? syncRules : [],
+      ),
+    [pvData, weatherData, pvFilteredRows, weatherFilteredRows, syncRules, timeSyncRulesActive, hasApplicableSyncRules],
+  );
+
+  const mergedQualityCheck = useMemo(
+    () => filterMergedByDateRange(mergedSynced, dateFrom, dateTo),
+    [mergedSynced, dateFrom, dateTo],
+  );
 
   return (
     <div style={{
@@ -5169,6 +5024,9 @@ export default function QualityCheckPage() {
               autoSyncResult={autoSyncResult}
               setAutoSyncResult={setAutoSyncResult}
               merged={mergedSynced}
+              timeSyncRulesActive={timeSyncRulesActive}
+              setTimeSyncRulesActive={setTimeSyncRulesActive}
+              syncModeAvailable={hasApplicableSyncRules}
             />
           )}
 
@@ -5177,18 +5035,6 @@ export default function QualityCheckPage() {
             <>
               {false && (
                 <>
-              <SyncChart
-                pvHeaders={pvData.headers}
-                pvRows={pvFilteredRows}
-                weatherHeaders={weatherData.headers}
-                weatherRows={weatherFilteredRows}
-              />
-              <CorrelationChart
-                pvHeaders={pvData.headers}
-                pvRows={pvFilteredRows}
-                weatherHeaders={weatherData.headers}
-                weatherRows={weatherFilteredRows}
-              />
               {/* Editable sync rules (start, end, shift minutes) */}
               <div
                 style={{
@@ -5492,7 +5338,8 @@ export default function QualityCheckPage() {
                   if (timeColPvIdx < 0 || timeColWhIdx < 0 || pdcIdx < 0 || irrIdx < 0) return null;
 
                   const merged = Array.isArray(mergedSynced) ? mergedSynced : [];
-                  if (merged.length === 0) return null;
+
+                  const mergedForQC = Array.isArray(mergedQualityCheck) ? mergedQualityCheck : [];
 
                   const xs = merged.map((d) => d.poa);
                   const ys = merged.map((d) => d.pdc);
@@ -5547,8 +5394,13 @@ export default function QualityCheckPage() {
                     <>
                       {false && (
                         <>
-                      <SyncedLineChart merged={merged} />
-                      <SyncedCorrelationChart merged={merged} />
+                      <SyncedLineChart
+                        merged={merged}
+                        timeSyncRulesActive={timeSyncRulesActive}
+                        onTimeSyncRulesActiveChange={setTimeSyncRulesActive}
+                        syncModeAvailable={hasApplicableSyncRules}
+                      />
+                      <SyncedCorrelationChart merged={merged} timeSyncRulesActive={timeSyncRulesActive} />
                       <div style={{
                         marginTop: 12,
                         background: "#ffffff",
@@ -5763,12 +5615,12 @@ export default function QualityCheckPage() {
                         </div>
 
                         {(() => {
-                          const mergedTimes = merged.map((d) => d.time);
+                          const mergedTimes = mergedForQC.map((d) => d.time);
                           const step = Number(resamplingStepMinutes);
                           const stepMin = Number.isFinite(step) && step > 0 ? step : 10;
                           const expectedPerDay = Math.max(1, Math.floor(1440 / stepMin));
 
-                          // Daily availability mean
+                          // Daily availability mean (same window logic as DataAvailabilityCard)
                           const dayCounts = new Map();
                           const dayMs = [];
                           for (const t of mergedTimes) {
@@ -5780,24 +5632,24 @@ export default function QualityCheckPage() {
                           }
                           let avgAvailPct = null;
                           let avgMissingPct = null;
-                          if (dayMs.length) {
-                            const fromDateParsed = parseDateCellFlexible(dateFrom);
-                            const toDateParsed = parseDateCellFlexible(dateTo);
-                            const minDayFromFilter = fromDateParsed
-                              ? new Date(fromDateParsed.getFullYear(), fromDateParsed.getMonth(), fromDateParsed.getDate()).getTime()
-                              : null;
-                            const maxDayFromFilter = toDateParsed
-                              ? new Date(toDateParsed.getFullYear(), toDateParsed.getMonth(), toDateParsed.getDate()).getTime()
-                              : null;
-                            let minDay = null;
-                            let maxDay = null;
-                            if (minDayFromFilter != null && maxDayFromFilter != null) {
-                              minDay = Math.min(minDayFromFilter, maxDayFromFilter);
-                              maxDay = Math.max(minDayFromFilter, maxDayFromFilter);
-                            } else {
-                              minDay = Math.min(...dayMs);
-                              maxDay = Math.max(...dayMs);
-                            }
+                          const fromDateParsed = parseDateCellFlexible(dateFrom);
+                          const toDateParsed = parseDateCellFlexible(dateTo);
+                          const minDayFromFilter = fromDateParsed
+                            ? new Date(fromDateParsed.getFullYear(), fromDateParsed.getMonth(), fromDateParsed.getDate()).getTime()
+                            : null;
+                          const maxDayFromFilter = toDateParsed
+                            ? new Date(toDateParsed.getFullYear(), toDateParsed.getMonth(), toDateParsed.getDate()).getTime()
+                            : null;
+                          let minDay = null;
+                          let maxDay = null;
+                          if (minDayFromFilter != null && maxDayFromFilter != null) {
+                            minDay = Math.min(minDayFromFilter, maxDayFromFilter);
+                            maxDay = Math.max(minDayFromFilter, maxDayFromFilter);
+                          } else if (dayMs.length) {
+                            minDay = Math.min(...dayMs);
+                            maxDay = Math.max(...dayMs);
+                          }
+                          if (minDay != null && maxDay != null) {
                             let sumAvail = 0;
                             let days = 0;
                             for (let ms = minDay; ms <= maxDay; ms += 24 * 60 * 60 * 1000) {
@@ -5826,7 +5678,7 @@ export default function QualityCheckPage() {
                               const keys = [];
                               const measArr = [];
                               const modeledArr = [];
-                              for (const d of merged) {
+                              for (const d of mergedForQC) {
                                 const dt = parseDateCellFlexible(d.time);
                                 if (!dt) continue;
                                 const meas = parseFloat(d?.whRow?.[ghiIdx]);
@@ -5866,12 +5718,27 @@ export default function QualityCheckPage() {
                                 dayAgg.set(k, cur);
                               }
                               const dayKeys = Array.from(dayAgg.keys()).sort();
-                              totalDays = dayKeys.length;
-                              clearDaysCount = dayKeys.reduce((acc, k) => {
-                                const v = dayAgg.get(k);
-                                if (!v || v.daySamples < KT_MIN_DAYTIME_SAMPLES) return acc;
-                                return acc + ((v.clearSamples / v.daySamples) >= KT_CLEAR_DAY_RATIO ? 1 : 0);
-                              }, 0);
+                              const useCalendarSpan =
+                                minDayFromFilter != null && maxDayFromFilter != null;
+                              if (useCalendarSpan) {
+                                const calMin = Math.min(minDayFromFilter, maxDayFromFilter);
+                                const calMax = Math.max(minDayFromFilter, maxDayFromFilter);
+                                totalDays = Math.round((calMax - calMin) / (24 * 60 * 60 * 1000)) + 1;
+                                clearDaysCount = 0;
+                                for (let ms = calMin; ms <= calMax; ms += 24 * 60 * 60 * 1000) {
+                                  const k = toYMDLocal(new Date(ms));
+                                  const v = dayAgg.get(k);
+                                  if (!v || v.daySamples < KT_MIN_DAYTIME_SAMPLES) continue;
+                                  if ((v.clearSamples / v.daySamples) >= KT_CLEAR_DAY_RATIO) clearDaysCount += 1;
+                                }
+                              } else {
+                                totalDays = dayKeys.length;
+                                clearDaysCount = dayKeys.reduce((acc, k) => {
+                                  const v = dayAgg.get(k);
+                                  if (!v || v.daySamples < KT_MIN_DAYTIME_SAMPLES) return acc;
+                                  return acc + ((v.clearSamples / v.daySamples) >= KT_CLEAR_DAY_RATIO ? 1 : 0);
+                                }, 0);
+                              }
                             }
                           } catch (_) {
                             // ignore
@@ -5880,13 +5747,15 @@ export default function QualityCheckPage() {
                           return (
                             <DataQualityCheckSummaryCard
                               mergedTimes={mergedTimes}
-                              mergedCount={merged.length}
+                              mergedCount={mergedForQC.length}
                               stepMinutes={resamplingStepMinutes}
                               clearDaysCount={clearDaysCount}
                               totalDays={totalDays}
                               avgAvailPct={avgAvailPct}
                               avgMissingPct={avgMissingPct}
                               color={P}
+                              dateFrom={dateFrom}
+                              dateTo={dateTo}
                             />
                           );
                         })()}
@@ -5906,7 +5775,7 @@ export default function QualityCheckPage() {
                             const whNonTime = whH
                               .map((name, idx) => ({ name, idx }))
                               .filter(({ idx }) => idx !== timeColWhIdx);
-                            return merged.map((row) => {
+                            return mergedForQC.map((row) => {
                               const pvVals = pvHeader.map((_, idx) => (Array.isArray(row.pvRow) ? (row.pvRow[idx] ?? "") : ""));
                               const whVals = whNonTime.map(({ idx }) => (Array.isArray(row.whRow) ? (row.whRow[idx] ?? "") : ""));
                               return pvVals.concat(whVals);
@@ -5920,7 +5789,7 @@ export default function QualityCheckPage() {
                           const syncedGhiRows =
                             ghiIdx < 0
                               ? []
-                              : merged.map((d) => {
+                              : mergedForQC.map((d) => {
                                   const ghiRaw = d?.whRow?.[ghiIdx];
                                   return [d.time, ghiRaw];
                                 });
@@ -5936,7 +5805,7 @@ export default function QualityCheckPage() {
                         })()}
 
                         <DataAvailabilityCard
-                          mergedTimes={merged.map((d) => d.time)}
+                          mergedTimes={mergedForQC.map((d) => d.time)}
                           stepMinutes={resamplingStepMinutes}
                           color={P}
                           dateFrom={dateFrom}
