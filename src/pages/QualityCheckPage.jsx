@@ -168,6 +168,18 @@ function toYMDLocal(d) {
   return `${yyyy}-${mm}-${dd}`;
 }
 
+/** Local calendar YYYY-MM-DD from minDayMs through maxDayMs inclusive (use local-midnight stamps). DST-safe vs +24h steps. */
+function enumerateYMDLocalDaysInclusive(minDayMs, maxDayMs) {
+  const out = [];
+  const cur = new Date(minDayMs);
+  const end = new Date(maxDayMs);
+  while (cur.getTime() <= end.getTime()) {
+    out.push(toYMDLocal(cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return out;
+}
+
 function degToRad(deg) {
   return (deg * Math.PI) / 180;
 }
@@ -2651,10 +2663,7 @@ function DataAvailabilityCard({ mergedTimes, stepMinutes, color, dateFrom, dateT
       return { error: "no_data" };
     }
 
-    const keys = [];
-    for (let ms = minDay; ms <= maxDay; ms += 24 * 60 * 60 * 1000) {
-      keys.push(toYMDLocal(new Date(ms)));
-    }
+    const keys = enumerateYMDLocalDaysInclusive(minDay, maxDay);
 
     const availablePct = keys.map((k) => {
       const c = dayCounts.get(k) ?? 0;
@@ -2723,6 +2732,7 @@ function DataAvailabilityCard({ mergedTimes, stepMinutes, color, dateFrom, dateT
                 showlegend: true,
                 legend: { orientation: "h", x: 0.5, y: 1.08, xanchor: "center", yanchor: "bottom", font: { family: FONT, size: 11 } },
                 xaxis: {
+                  type: "category",
                   title: { text: "Day", font: { family: FONT, size: 12, color: "#94a3b8" } },
                   gridcolor: "#F1F5F9",
                   tickfont: { family: MONO, size: 10, color: "#94a3b8" },
@@ -5651,14 +5661,13 @@ export default function QualityCheckPage() {
                           }
                           if (minDay != null && maxDay != null) {
                             let sumAvail = 0;
-                            let days = 0;
-                            for (let ms = minDay; ms <= maxDay; ms += 24 * 60 * 60 * 1000) {
-                              const key = toYMDLocal(new Date(ms));
+                            const dayKeyList = enumerateYMDLocalDaysInclusive(minDay, maxDay);
+                            for (const key of dayKeyList) {
                               const c = dayCounts.get(key) ?? 0;
                               const avail = clamp((c / expectedPerDay) * 100, 0, 100);
                               sumAvail += avail;
-                              days += 1;
                             }
+                            const days = dayKeyList.length;
                             avgAvailPct = days ? sumAvail / days : null;
                             avgMissingPct = avgAvailPct != null ? (100 - avgAvailPct) : null;
                           }
@@ -5723,10 +5732,10 @@ export default function QualityCheckPage() {
                               if (useCalendarSpan) {
                                 const calMin = Math.min(minDayFromFilter, maxDayFromFilter);
                                 const calMax = Math.max(minDayFromFilter, maxDayFromFilter);
-                                totalDays = Math.round((calMax - calMin) / (24 * 60 * 60 * 1000)) + 1;
+                                const calendarDayKeys = enumerateYMDLocalDaysInclusive(calMin, calMax);
+                                totalDays = calendarDayKeys.length;
                                 clearDaysCount = 0;
-                                for (let ms = calMin; ms <= calMax; ms += 24 * 60 * 60 * 1000) {
-                                  const k = toYMDLocal(new Date(ms));
+                                for (const k of calendarDayKeys) {
                                   const v = dayAgg.get(k);
                                   if (!v || v.daySamples < KT_MIN_DAYTIME_SAMPLES) continue;
                                   if ((v.clearSamples / v.daySamples) >= KT_CLEAR_DAY_RATIO) clearDaysCount += 1;
