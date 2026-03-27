@@ -12,6 +12,7 @@ import DocsPage from './pages/DocsPage'
 import PlaceholderPage from './pages/PlaceholderPage'
 import DataIngestionPage from './pages/QualityCheckPage'
 import DataFilteringPage from './pages/DataFilteringPage'
+import DataQualityPage from './pages/DataQualityPage'
 import KpiAnalysisPage from './pages/KpiAnalysisPage'
 import AutoFixHigh from '@mui/icons-material/AutoFixHigh'
 import ElectricBolt from '@mui/icons-material/ElectricBolt'
@@ -349,6 +350,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           <Route path="/workflow" element={<WorkflowPage />} />
           <Route path="/power-prediction" element={<PowerPredictionPage />} />
           <Route path="/data-filtering" element={<DataFilteringPage />} />
+          <Route path="/data-quality" element={<DataQualityPage />} />
           <Route path="/lcoe-tool" element={<LcoeTool />} />
         </Routes>
       </div>

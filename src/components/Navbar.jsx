@@ -21,6 +21,7 @@ import {
   FilterAltOutlined,
   AccountTree,
   Calculate,
+  ShowChartOutlined,
 } from "@mui/icons-material";
 import CurrencyExchangeIcon from "@mui/icons-material/CurrencyExchange";
 
@@ -36,6 +37,7 @@ const DROPDOWN_SHADOW = "rgba(0,0,0,0.12)";
 
 const TOOLS = [
   { path: "/data-ingestion", label: "Data Ingestion & Synchronization", icon: <SearchOutlined sx={{ fontSize: 18, color: ACCENT }} /> },
+  { path: "/data-quality", label: "Data Quality Check", icon: <ShowChartOutlined sx={{ fontSize: 18, color: ACCENT }} /> },
   { path: "/data-filtering", label: "Data Filtering", icon: <FilterAltOutlined sx={{ fontSize: 18, color: ACCENT }} /> },
   { path: "/kpi-analysis", label: "KPI Analysis", icon: <QueryStats sx={{ fontSize: 18, color: ACCENT }} /> },
   { path: "/gap-filling", label: "Gap Filling", icon: <AutoFixHigh sx={{ fontSize: 18, color: ACCENT }} /> },
