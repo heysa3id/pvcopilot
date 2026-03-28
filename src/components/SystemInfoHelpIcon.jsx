@@ -10,11 +10,13 @@ const SYSTEM_INFO_HELP = {
   coef_a: "Sandia module temperature model parameter a. Module temperature: T_m = E_POA × exp(a + b×WS) + T_a. Parameter a depends on module construction and mounting (e.g. Polymer/thin-film/steel, open rack: a = -3.58).",
   coef_b: "Sandia module temperature model parameter b (wind-speed term). Same formula as coef_a; b captures cooling by wind (e.g. Polymer/thin-film/steel, open rack: b = -0.113).",
   delta: "Additive correction term (°C per 1000 W/m²) in the cell temperature model: Tcell = T_air + E_POA×exp(a+b×WS) + (E_POA×delta)/1000. Used for cell-to-module offset or empirical adjustment.",
+  tcell_typ_avg_c:
+    "Optional override (°C) for T_cell,typ,avg used in KPI weather-corrected PR (NREL/TP-5200-57991). When omitted, the app uses an irradiance-weighted mean cell temperature over the loaded PV+weather series (G_POA > 20 W/m²). Use this when you have a project-weather-file value (e.g. from TMY) that must match contractual guarantees.",
 };
 const SANDIA_MODEL_URL = "https://pvpmc.sandia.gov/modeling-guide/2-dc-module-iv/module-temperature/sandia-module-temperature-model/";
 
 /**
- * ? icon that opens a scrollable popup explaining System Info JSON fields (temp_coef, coef_a, coef_b, delta).
+ * ? icon that opens a scrollable popup explaining System Info JSON fields (temp_coef, coef_a, coef_b, delta, tcell_typ_avg_c).
  * Use next to "System Info" on Data Filtering, KPI Analysis, and Quality Check pages.
  * @param {string} [linkColor] - Color for the Sandia link (e.g. "#e11d48", "#ff7a45")
  */
@@ -144,6 +146,9 @@ export default function SystemInfoHelpIcon({ linkColor = "#e11d48" }) {
                 </li>
                 <li style={{ marginBottom: 8 }}>
                   <strong style={{ color: "#0F172A" }}>delta</strong> — {SYSTEM_INFO_HELP.delta}
+                </li>
+                <li style={{ marginBottom: 8 }}>
+                  <strong style={{ color: "#0F172A" }}>tcell_typ_avg_c</strong> — {SYSTEM_INFO_HELP.tcell_typ_avg_c}
                 </li>
               </ul>
               <p style={{ margin: "8px 0 0 0" }}>

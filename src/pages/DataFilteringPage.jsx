@@ -27,6 +27,7 @@ import Button from "@mui/material/Button";
 import TableColumnSelector from "../components/TableColumnSelector";
 import SystemInfoHelpIcon from "../components/SystemInfoHelpIcon";
 import { PV_SYNONYMS, PV_TEMPLATE_COLUMNS, PV_TEMPLATE_LABELS, WEATHER_SYNONYMS, WEATHER_TEMPLATE_COLUMNS, WEATHER_TEMPLATE_LABELS } from "../components/CSVColumnMapper";
+import { computePvwattsCellTempC } from "../utils/pvwattsCellTemp";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -263,7 +264,8 @@ function computePdcComparison(headers, rows, config, lossFactor = 0.97) {
     const wind = parseFloat(row[windIdx]);
     const pdc = parseFloat(row[pdcIdx]);
     if (!Number.isFinite(gti) || !Number.isFinite(airTemp) || !Number.isFinite(wind)) continue;
-    const tcell = airTemp + (gti * Math.exp(coef_a + coef_b * wind)) + (gti * delta / 1000);
+    const tcell = computePvwattsCellTempC(airTemp, gti, wind, coef_a, coef_b, delta);
+    if (tcell == null) continue;
     const factor = resolveLossFactorForTime(row[timeIdx]);
     // PVWatts is computed from the GTI model; scale by /1000 to match kW-based `Power` units.
     const pvWatts = (gti * tot_power * (1 + (temp_coef * 1e-2) * (tcell - 25))) * factor / 1000;
@@ -423,97 +425,6 @@ function parseDateCellFlexible(val) {
   const b = new Date(raw.replace(" ", "T"));
   if (!Number.isNaN(b.getTime())) return b;
   return null;
-}
-
-function toYMDLocal(d) {
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-function degToRad(deg) {
-  return (deg * Math.PI) / 180;
-}
-
-function clamp(n, lo, hi) {
-  return Math.max(lo, Math.min(hi, n));
-}
-
-function dayOfYearLocal(d) {
-  const start = new Date(d.getFullYear(), 0, 1);
-  const ms = d.getTime() - start.getTime();
-  return Math.floor(ms / (24 * 60 * 60 * 1000)) + 1;
-}
-
-function median(sorted) {
-  if (!sorted.length) return NaN;
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-}
-
-function percentileSorted(sorted, p) {
-  if (!sorted.length) return NaN;
-  const pp = clamp(p, 0, 1);
-  const idx = (sorted.length - 1) * pp;
-  const lo = Math.floor(idx);
-  const hi = Math.ceil(idx);
-  if (lo === hi) return sorted[lo];
-  const t = idx - lo;
-  return sorted[lo] * (1 - t) + sorted[hi] * t;
-}
-
-function solarPositionZenithRad(date, latitudeDeg, longitudeDeg) {
-  const lat = degToRad(latitudeDeg);
-  const n = dayOfYearLocal(date);
-  const hours = date.getHours() + date.getMinutes() / 60 + date.getSeconds() / 3600;
-  const gamma = (2 * Math.PI / 365) * (n - 1 + (hours - 12) / 24);
-
-  // NOAA-style approximations
-  const eqTimeMin =
-    229.18 *
-    (0.000075 +
-      0.001868 * Math.cos(gamma) -
-      0.032077 * Math.sin(gamma) -
-      0.014615 * Math.cos(2 * gamma) -
-      0.040849 * Math.sin(2 * gamma));
-  const decl =
-    0.006918 -
-    0.399912 * Math.cos(gamma) +
-    0.070257 * Math.sin(gamma) -
-    0.006758 * Math.cos(2 * gamma) +
-    0.000907 * Math.sin(2 * gamma) -
-    0.002697 * Math.cos(3 * gamma) +
-    0.00148 * Math.sin(3 * gamma);
-
-  const tzHours = -date.getTimezoneOffset() / 60;
-  const minutes = date.getHours() * 60 + date.getMinutes() + date.getSeconds() / 60;
-  const timeOffsetMin = eqTimeMin + 4 * longitudeDeg - 60 * tzHours;
-  const trueSolarTimeMin = minutes + timeOffsetMin;
-  const hourAngleDeg = (trueSolarTimeMin / 4) - 180;
-  const ha = degToRad(hourAngleDeg);
-
-  const cosZ = Math.sin(lat) * Math.sin(decl) + Math.cos(lat) * Math.cos(decl) * Math.cos(ha);
-  const z = Math.acos(clamp(cosZ, -1, 1));
-  return { zenithRad: z, cosZenith: cosZ };
-}
-
-function clearSkyGhiHaurwitz(cosZenith) {
-  const cz = Number(cosZenith);
-  if (!Number.isFinite(cz) || cz <= 0) return 0;
-  return 1098 * cz * Math.exp(-0.059 / cz);
-}
-
-const KT_CLEAR_MIN = 0.88;
-const KT_CLEAR_MAX = 1.12;
-const KT_CLEAR_DAY_RATIO = 0.45;
-const KT_MIN_DAYTIME_SAMPLES = 6;
-
-function computeKt(measuredGhi, clearSkyGhi) {
-  const meas = Number(measuredGhi);
-  const clear = Number(clearSkyGhi);
-  if (!Number.isFinite(meas) || !Number.isFinite(clear) || clear <= 0) return null;
-  return meas / clear;
 }
 
 function formatTimeCell(ms) {
@@ -2745,293 +2656,23 @@ function FilterCSVChart({ title, color, headers, rows, defaultYHeader, defaultRi
   );
 }
 
-function ClearSkyDaysChart({ title, color, headers, rows, systemInfo }) {
-  const [expanded, setExpanded] = useState(true);
-  const [ktMin, setKtMin] = useState(KT_CLEAR_MIN);
-  const [ktMax, setKtMax] = useState(KT_CLEAR_MAX);
-  const [editingKt, setEditingKt] = useState(false);
-  const [ktMinInput, setKtMinInput] = useState(String(KT_CLEAR_MIN));
-  const [ktMaxInput, setKtMaxInput] = useState(String(KT_CLEAR_MAX));
-  const safeHeaders = Array.isArray(headers) ? headers : [];
-  const safeRows = Array.isArray(rows) ? rows : [];
-  const cfg = systemInfo && typeof systemInfo === "object" ? (systemInfo.config || systemInfo) : null;
-  const latitude = Number(cfg?.latitude);
-  const longitude = Number(cfg?.longitude);
-  const hasCoords = Number.isFinite(latitude) && Number.isFinite(longitude) && Math.abs(latitude) <= 90 && Math.abs(longitude) <= 180;
-
-  const derived = useMemo(() => {
-    if (!safeHeaders.length || !safeRows.length) return null;
-    if (!hasCoords) return { error: "missing_coords" };
-
-    const timeIdx = getDateColumnIndex(safeHeaders);
-    const ghiIdx = getColumnIndex(safeHeaders, ["weather_GHI", "GHI"]);
-    if (timeIdx < 0 || ghiIdx < 0) return { error: "missing_columns" };
-
-    const x = [];
-    const ghiMeas = [];
-    const ghiClrBase = [];
-    const cosZ = [];
-    const dayKey = [];
-
-    const ratios = [];
-    for (const r of safeRows) {
-      if (!Array.isArray(r)) continue;
-      const tRaw = r[timeIdx];
-      const d = parseDateCellFlexible(tRaw);
-      const meas = Number.parseFloat(r[ghiIdx]);
-      if (!d) continue;
-
-      const sp = solarPositionZenithRad(d, latitude, longitude);
-      const modeled = clearSkyGhiHaurwitz(sp.cosZenith);
-      const isDay = sp.cosZenith > 0.08 && modeled > 50;
-
-      x.push(tRaw);
-      ghiMeas.push(Number.isFinite(meas) ? meas : null);
-      ghiClrBase.push(modeled > 0 ? modeled : null);
-      cosZ.push(sp.cosZenith);
-      dayKey.push(toYMDLocal(d));
-
-      if (isDay && Number.isFinite(meas) && meas > 0 && modeled > 0) ratios.push(meas / modeled);
-    }
-    if (!x.length) return { error: "no_data" };
-
-    ratios.sort((a, b) => a - b);
-    const p90 = percentileSorted(ratios, 0.9);
-    const med = median(ratios);
-    const scale = clamp(Number.isFinite(p90) ? p90 : (Number.isFinite(med) ? med : 1), 0.05, 20);
-
-    const ghiClr = ghiClrBase.map((v) => (v == null ? null : v * scale));
-    const clearMask = [];
-    for (let i = 0; i < x.length; i++) {
-      const meas = ghiMeas[i];
-      const modeled = ghiClr[i];
-      const isDay = cosZ[i] > 0.08 && (modeled ?? 0) > 150 && meas != null && Number.isFinite(meas) && meas > 0;
-      const kt = isDay ? computeKt(meas, modeled) : null;
-      clearMask.push(Boolean(kt != null && kt >= ktMin && kt <= ktMax));
-    }
-
-    const dayAgg = new Map();
-    for (let i = 0; i < x.length; i++) {
-      const k = dayKey[i];
-      if (!k) continue;
-      const modeled = ghiClr[i];
-      const meas = ghiMeas[i];
-      const isDay = cosZ[i] > 0.08 && (modeled ?? 0) > 150 && meas != null && Number.isFinite(meas) && meas > 0;
-      if (!isDay) continue;
-      const cur = dayAgg.get(k) || { daySamples: 0, clearSamples: 0 };
-      cur.daySamples += 1;
-      if (clearMask[i]) cur.clearSamples += 1;
-      dayAgg.set(k, cur);
-    }
-
-    const dayKeys = Array.from(dayAgg.keys()).sort();
-    const dayIsClear = dayKeys.map((k) => {
-      const v = dayAgg.get(k);
-      if (!v) return 0;
-      if (v.daySamples < KT_MIN_DAYTIME_SAMPLES) return 0;
-      return (v.clearSamples / v.daySamples) >= KT_CLEAR_DAY_RATIO ? 1 : 0;
-    });
-    const clearDaysCount = dayIsClear.reduce((a, b) => a + (b ? 1 : 0), 0);
-
-    return { error: null, x, ghiMeas, ghiClr, clearMask, dayKeys, dayIsClear, clearDaysCount, totalDays: dayKeys.length };
-  }, [safeHeaders, safeRows, hasCoords, latitude, longitude, ktMin, ktMax]);
-
-  const plotData = useMemo(() => {
-    if (!derived || derived.error) return [];
-    const clearX = [];
-    const clearY = [];
-    const dayBarX = derived.dayKeys.map((k) => `${k} 12:00`);
-    for (let i = 0; i < derived.x.length; i++) {
-      if (derived.clearMask[i] && derived.ghiMeas[i] != null) {
-        clearX.push(derived.x[i]);
-        clearY.push(derived.ghiMeas[i]);
-      }
-    }
-    return [
-      {
-        x: derived.x,
-        y: derived.ghiMeas,
-        type: "scatter",
-        mode: "lines",
-        connectgaps: false,
-        name: "Measured GHI",
-        line: { color: "#0ea5e9", width: 1.6, shape: "spline", smoothing: 1.1 },
-        hovertemplate: "<b>Measured GHI</b>: %{y}<extra></extra>",
-        yaxis: "y",
-      },
-      {
-        x: derived.x,
-        y: derived.ghiClr,
-        type: "scatter",
-        mode: "lines",
-        connectgaps: false,
-        name: "Clear-sky GHI (scaled)",
-        line: { color: "#94a3b8", width: 1.6, dash: "dash", shape: "spline", smoothing: 1.1 },
-        hovertemplate: "<b>Clear-sky (scaled)</b>: %{y}<extra></extra>",
-        yaxis: "y",
-      },
-      {
-        x: clearX,
-        y: clearY,
-        type: "scatter",
-        mode: "markers",
-        name: "Clear intervals",
-        marker: { color: "#ff8800", size: 5, opacity: 0.9 },
-        hovertemplate: "<b>Clear interval</b>: %{y}<extra></extra>",
-        yaxis: "y",
-      },
-      {
-        x: dayBarX,
-        y: derived.dayIsClear,
-        type: "bar",
-        name: "Clear-sky day",
-        width: 24 * 60 * 60 * 1000 * 0.55,
-        marker: { color: derived.dayIsClear.map((v) => (v ? "#ff8800" : "#E2E8F0")) },
-        hovertemplate: "<b>%{x}</b>: %{y}<extra></extra>",
-        yaxis: "y2",
-      },
-    ];
-  }, [derived]);
-
-  if (!safeHeaders.length || !safeRows.length) return null;
-
-  const headerRight = derived?.error
-    ? null
-    : (
-      <span style={{ fontFamily: MONO, fontSize: 11, color: "#94a3b8" }}>
-        clear-days {derived?.clearDaysCount ?? 0}/{derived?.totalDays ?? 0}
-      </span>
-    );
-
-  return (
-    <div style={{ background: "#fff", borderRadius: 14, border: "1px solid #E2E8F0", overflow: "hidden" }}>
-      <div
-        onClick={() => setExpanded(!expanded)}
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          padding: "14px 20px",
-          cursor: "pointer",
-          userSelect: "none",
-          borderBottom: expanded ? "1px solid #E2E8F0" : "none",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <TimelineOutlined sx={{ fontSize: 20, color }} />
-          <span style={{ fontSize: 15, fontWeight: 700, color: "#0F172A", fontFamily: FONT }}>{title} — Clear-sky days</span>
-          {headerRight}
-        </div>
-        {expanded ? <ExpandLessIcon sx={{ fontSize: 20, color: "#94a3b8" }} /> : <ExpandMoreIcon sx={{ fontSize: 20, color: "#94a3b8" }} />}
-      </div>
-      {expanded && (
-        <div style={{ padding: "10px 12px 12px" }}>
-          <div style={{ padding: "0 8px 10px", color: "#64748B", fontFamily: FONT, fontSize: 12 }}>
-            Clear-sky index method: k_t = GHI_measured / GHI_clear_sky. A timestamp is clear when{" "}
-            {!editingKt ? (
-              <span
-                onClick={() => {
-                  setKtMinInput(String(ktMin));
-                  setKtMaxInput(String(ktMax));
-                  setEditingKt(true);
-                }}
-                style={{ fontFamily: MONO, color: "#0F172A", cursor: "pointer", borderBottom: "1px dashed #94a3b8" }}
-                title="Click to edit thresholds"
-              >
-                {ktMin.toFixed(2)} ≤ k_t ≤ {ktMax.toFixed(2)}
-              </span>
-            ) : (
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={ktMinInput}
-                  onChange={(e) => setKtMinInput(e.target.value)}
-                  style={{ width: 62, fontFamily: MONO, fontSize: 11, padding: "2px 4px", border: "1px solid #CBD5E1", borderRadius: 6 }}
-                />
-                <span>≤ k_t ≤</span>
-                <input
-                  type="number"
-                  step="0.01"
-                  value={ktMaxInput}
-                  onChange={(e) => setKtMaxInput(e.target.value)}
-                  style={{ width: 62, fontFamily: MONO, fontSize: 11, padding: "2px 4px", border: "1px solid #CBD5E1", borderRadius: 6 }}
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    const min = Number(ktMinInput);
-                    const max = Number(ktMaxInput);
-                    if (Number.isFinite(min) && Number.isFinite(max) && min > 0 && max > min) {
-                      setKtMin(min);
-                      setKtMax(max);
-                    }
-                    setEditingKt(false);
-                  }}
-                  style={{ fontSize: 11, padding: "2px 8px", borderRadius: 6, border: "1px solid #CBD5E1", background: "#fff", cursor: "pointer" }}
-                >
-                  Apply
-                </button>
-              </span>
-            )}
-            .
-          </div>
-
-          {derived?.error === "missing_coords" ? (
-            <div style={{ padding: "12px 20px", color: "#64748B", fontFamily: FONT, fontSize: 12 }}>
-              Add <span style={{ fontFamily: MONO }}>latitude</span> and <span style={{ fontFamily: MONO }}>longitude</span> to <span style={{ fontFamily: MONO }}>system_info.json</span> to detect clear-sky days from <span style={{ fontFamily: MONO }}>weather_GHI</span>.
-            </div>
-          ) : derived?.error === "missing_columns" ? (
-            <div style={{ padding: "12px 20px", color: "#64748B", fontFamily: FONT, fontSize: 12 }}>
-              This chart needs <span style={{ fontFamily: MONO }}>Time</span> and <span style={{ fontFamily: MONO }}>weather_GHI</span> columns in the PV & Weather CSV.
-            </div>
-          ) : derived?.error ? (
-            <div style={{ padding: "12px 20px", color: "#64748B", fontFamily: FONT, fontSize: 12 }}>
-              No usable GHI/time data found in the current filtered range.
-            </div>
-          ) : (
-            <Plot
-              data={plotData}
-              layout={{
-                height: 420,
-                margin: { t: 30, r: 50, b: 50, l: 60 },
-                hovermode: "x unified",
-                showlegend: true,
-                legend: { orientation: "h", x: 0.5, y: 1.08, xanchor: "center", yanchor: "bottom", font: { family: FONT, size: 11 } },
-                xaxis: {
-                  title: { text: "Time", font: { family: FONT, size: 12, color: "#94a3b8" } },
-                  gridcolor: "#F1F5F9",
-                  tickfont: { family: MONO, size: 10, color: "#94a3b8" },
-                },
-                yaxis: {
-                  title: { text: "GHI", font: { family: FONT, size: 12, color: "#94a3b8" } },
-                  gridcolor: "#F1F5F9",
-                  tickfont: { family: MONO, size: 10, color: "#94a3b8" },
-                  domain: [0.34, 1],
-                },
-                yaxis2: {
-                  title: { text: "Clear day", font: { family: FONT, size: 12, color: "#94a3b8" } },
-                  gridcolor: "#F1F5F9",
-                  tickfont: { family: MONO, size: 10, color: "#94a3b8" },
-                  domain: [0, 0.22],
-                  range: [-0.05, 1.05],
-                },
-                plot_bgcolor: "#fff",
-                paper_bgcolor: "#fff",
-                font: { family: FONT },
-              }}
-              config={{ displaylogo: false, responsive: true, modeBarButtonsToRemove: ["lasso2d", "select2d", "autoScale2d"] }}
-              style={{ width: "100%" }}
-            />
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
 const CACHE_KEY_PV = "pvcopilot_datafiltering_pv_cache";
 const CACHE_KEY_SYSTEM = "pvcopilot_datafiltering_system_cache";
+
+function buildFilteredDataDownloadFilename(systemInfo) {
+  const cfg = systemInfo && typeof systemInfo === "object" ? (systemInfo.config || systemInfo) : null;
+  const rawName = cfg?.Name ?? cfg?.name;
+  const systemSlug = String(rawName ?? "")
+    .trim()
+    .replace(/[/\\?%*:|"<>.\s]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_|_$/g, "");
+  const safeSystem = systemSlug || "unknown";
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const dt = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  return `pvcopilot_filteredData_${safeSystem}_${dt}.csv`;
+}
 
 export default function DataFilteringPage() {
   const [pvFile, setPvFile] = useState(null);
@@ -3526,7 +3167,6 @@ export default function DataFilteringPage() {
                 ]}
               />
               <FilterCSVChart title="PV & Weather Data" color={O} headers={pvData.headers} rows={pvFilteredRows} defaultYHeader="Power" defaultRightYHeader="weather_POA" />
-              <ClearSkyDaysChart title="PV & Weather Data" color={O} headers={pvData.headers} rows={pvFilteredRows} systemInfo={sysData} />
 
               {/* Data Filtering card */}
               <div
@@ -3585,7 +3225,17 @@ export default function DataFilteringPage() {
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                    <div style={{ fontFamily: FONT, fontSize: 12, color: "#334155", lineHeight: 1.6, position: "relative" }}>
+                    <div
+                      style={{
+                        fontFamily: FONT,
+                        fontSize: 12,
+                        color: "#334155",
+                        lineHeight: 1.6,
+                        position: "relative",
+                        flex: 1,
+                        minWidth: 0,
+                      }}
+                    >
                       <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                         <FunctionsOutlined sx={{ fontSize: 16, color: DF }} />
                         <span style={{ fontWeight: 700, color: "#0F172A", fontSize: 12 }}>PVWatts formula</span>
@@ -3624,7 +3274,9 @@ export default function DataFilteringPage() {
                               border: "1px solid #E2E8F0",
                               boxShadow: "0 12px 40px rgba(0,0,0,0.15)",
                               padding: 14,
-                              maxWidth: 380,
+                              boxSizing: "border-box",
+                              width: "min(440px, 100%)",
+                              maxWidth: "min(440px, calc(100vw - 32px))",
                               fontFamily: FONT,
                               fontSize: 11,
                               color: "#475569",
@@ -4307,7 +3959,7 @@ export default function DataFilteringPage() {
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement("a");
                   a.href = url;
-                  a.download = `filtered_labeled_data_${downloadFilter}.csv`;
+                  a.download = buildFilteredDataDownloadFilename(sysData);
                   document.body.appendChild(a);
                   a.click();
                   document.body.removeChild(a);

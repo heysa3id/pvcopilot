@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { createPortal } from "react-dom";
 import createPlotlyComponent from "react-plotly.js/factory";
 import Plotly from "plotly.js-dist-min";
 import QueryStats from "@mui/icons-material/QueryStats";
@@ -28,6 +29,7 @@ import Button from "@mui/material/Button";
 import TableColumnSelector from "../components/TableColumnSelector";
 import SystemInfoHelpIcon from "../components/SystemInfoHelpIcon";
 import { PV_SYNONYMS, PV_TEMPLATE_COLUMNS, PV_TEMPLATE_LABELS, WEATHER_SYNONYMS, WEATHER_TEMPLATE_COLUMNS, WEATHER_TEMPLATE_LABELS } from "../components/CSVColumnMapper";
+import { computePvwattsCellTempC } from "../utils/pvwattsCellTemp";
 
 const Plot = createPlotlyComponent(Plotly);
 
@@ -38,6 +40,8 @@ const O = "#ff7a45";
 const B = "#1d9bf0";
 const KPI = "#16a34a"; // KPI page accent (green)
 const Y = "#16a34a"; // green for resampled badge
+/** CSV Power column is kW; IEC filter inputs are shown in W (divide by this when comparing to data). */
+const W_PER_KW = 1000;
 
 function parseJSON(text) {
   try {
@@ -45,6 +49,14 @@ function parseJSON(text) {
   } catch {
     return null;
   }
+}
+
+/** KPI formulas help: fixed layer under trigger, horizontal clamp to viewport. */
+function kpiFormulasHelpPopoverLayout(anchor) {
+  const vw = anchor.vw;
+  const panelW = Math.min(400, vw - 32);
+  const left = Math.min(Math.max(8, anchor.left), Math.max(8, vw - panelW - 8));
+  return { panelW, left, top: anchor.bottom + 8 };
 }
 
 function extractUnitFromTemplateLabel(templateLabel) {
@@ -336,33 +348,38 @@ const DAILY_AGG_MAP = {
 };
 
 /**
- * Resample rows to daily and compute E_DC, Ya, Yr, PR, and temperature-corrected PR (PR_Tcorr).
+ * Resample rows to daily and compute E_DC, Ya, Yr, PR, weather-corrected PR (PR_Tcorr), and ENDC_corr.
  *
- * Temperature-corrected PR_Tcorr (NREL-style) at daily level:
+ * PR_Tcorr follows the DC analogue of NREL/TP-5200-57991 (Weather-Corrected Performance Ratio):
+ *   PR_Tcorr = Σ E_DC,i / Σ E_NDC,i
+ * NREL defines δ as the temperature coefficient for power (%/°C, negative). Here that is **`temp_coef`**
+ * in system_info.json (same field as PVWatts). Typical datasheet values use the bracket in %/°C form:
+ *   [1 − (temp_coef/100) × (T_cell,typ,avg − T_cell,i)]
+ * If |temp_coef| < 0.1 it is treated as already decimal per °C (same rule as PVWatts). In code,
+ *   E_NDC,i = P_STC × (G_i / G_STC) × Δt × [1 − γ × (T_cell,typ,avg − T_cell,i)]
+ * with γ = temp_coef converted to 1/°C. When T_cell,i is missing, the bracket is 1. G_STC = 1000 W/m².
  *
- *   PR_Tcorr = Ya / [ Yr × (1 + γ × (T_cell_day - 25)) ]
+ * T_cell,typ,avg is the irradiance-weighted mean cell temperature over the same row set (Eq. 5 style):
+ *   Σ (G_j × T_cell,j) / Σ G_j for G_j > 20 W/m² and valid T_cell.
+ * Optional system config `tcell_typ_avg_c` (°C) overrides this when set (e.g. from a TMY analysis).
  *
- * where:
- * - Ya          : daily array yield (kWh/kWp), already computed as E_DC / P_STC.
- * - Yr          : daily reference yield from irradiance (kWh/kWp).
- * - γ           : module temperature coefficient of power (1/°C). If provided in %/°C,
- *                 it is converted to decimal per °C (e.g. -0.38 %/°C → -0.0038 1/°C).
- * - T_cell_day  : daily representative cell temperature (°C), taken as the mean of
- *                 valid T_cell over the day (irradiance above threshold).
+ * If temp_coef is missing or invalid, PR_Tcorr and ENDC_corr are blank.
  *
- * T_cell at the timestep level is determined by:
- *   1) Direct Tcell column if available
- *   2) Otherwise module temperature (e.g. T1) plus 3°C
- *   3) Otherwise an ambient-based thermal model (same as backend.datafiltering.py)
+ * T_cell at each timestep uses the same PVWatts model as Data Filtering:
+ *   T_a + G_POA·e^{a+b·WS} + G_POA·delta/1000
+ * where **delta** is the conduction term from config (°C per 1000 W/m²), not temp_coef. Columns:
+ * weather_Air_Temp, weather_POA|weather_GTI|GTI, weather_Wind_speed — not measured Tcell or module temp.
+ * ENDC_corr is Σ E_NDC,i for the day (kWh).
  *
- * Rows with G_POA <= 20 W/m² or invalid temperature do not contribute to T_cell_day.
- * If Yr <= 0, γ is invalid, or T_cell_day is missing, PR_Tcorr is left blank.
+ * Measured DC power (Power / P_DC) is in kW. E_DC (kWh) = Σ P_i × (stepMinutesForEnergy / 60).
  *
  * tot_power from system (kW). Returns { headers, rows } or null if missing columns.
  */
-function resampleRowsToDaily(headers, rows, tot_power, systemConfig) {
+function resampleRowsToDaily(headers, rows, tot_power, systemConfig, stepMinutesForEnergy = 60) {
   if (!headers?.length || !rows?.length || !Number.isFinite(tot_power) || tot_power <= 0)
     return null;
+  const stepMin = Math.max(1, Math.min(1440, Number(stepMinutesForEnergy) || 60));
+  const dtHours = stepMin / 60;
   const timeColIdx = getDateColumnIndex(headers);
   if (timeColIdx < 0) return null;
 
@@ -370,9 +387,9 @@ function resampleRowsToDaily(headers, rows, tot_power, systemConfig) {
   const gtiIdx = getColumnIndex(headers, ["GTI", "weather_GTI", "weather_POA"]);
   if (pdcIdx < 0 || gtiIdx < 0) return null;
 
-  // Extract γ (temperature coefficient of power) and thermal model coefficients from system config.
+  // temp_coef → γ (1/°C) for NREL bracket; coef_a/b and delta are for PVWatts T_cell (delta = conduction, not temp_coef).
   const cfg = systemConfig && typeof systemConfig === "object" ? systemConfig.config || systemConfig : null;
-  let gamma = null; // temperature coefficient in 1/°C
+  let gamma = null; // NREL δ in 1/°C: temp_coef from system_info.json, converted like PVWatts
   let coef_a = null;
   let coef_b = null;
   let delta = null;
@@ -389,44 +406,48 @@ function resampleRowsToDaily(headers, rows, tot_power, systemConfig) {
     delta = cfg.delta != null ? Number(cfg.delta) : null;
   }
 
-  // Temperature source column indices.
-  const tcellIdx = getColumnIndex(headers, ["Tcell"]);
-  const tModuleIdx = getColumnIndex(headers, ["T_module", "Tmod", "T1", "Module_Temp"]);
-  const airIdx = getColumnIndex(headers, ["Air_Temp", "weather_Air_Temp"]);
-  const windIdx = getColumnIndex(headers, ["Wind_speed", "weather_Wind_speed"]);
+  // PVWatts T_cell columns — same order as DataFilteringPage.computePdcComparison (not measured Tcell / module temp).
+  const pvwattsAirIdx = getColumnIndex(headers, ["weather_Air_Temp"]);
+  const pvwattsGtiIdx = getColumnIndex(headers, ["weather_POA", "weather_GTI", "GTI"]);
+  const pvwattsWindIdx = getColumnIndex(headers, ["weather_Wind_speed"]);
 
-  const canUseThermalModel =
+  const canUsePvwattsTemp =
     Number.isFinite(coef_a) &&
     Number.isFinite(coef_b) &&
     Number.isFinite(delta) &&
-    airIdx >= 0 &&
-    windIdx >= 0 &&
-    gtiIdx >= 0;
+    pvwattsAirIdx >= 0 &&
+    pvwattsWindIdx >= 0 &&
+    pvwattsGtiIdx >= 0;
 
-  // Helper to determine cell temperature per row following the priority:
-  // 1) direct Tcell column
-  // 2) module temperature (e.g. T1) + 3°C
-  // 3) ambient-based thermal model (Air_Temp, GTI, Wind_speed, and system coefficients)
-  function getCellTemperature(row) {
-    if (!Array.isArray(row)) return null;
-    if (tcellIdx >= 0) {
-      const t = parseFloat(row[tcellIdx]);
-      if (Number.isFinite(t)) return t;
+  function getPvwattsStyleCellTemp(row) {
+    if (!Array.isArray(row) || !canUsePvwattsTemp) return null;
+    const airTemp = parseFloat(row[pvwattsAirIdx]);
+    const gti = parseFloat(row[pvwattsGtiIdx]);
+    const wind = parseFloat(row[pvwattsWindIdx]);
+    return computePvwattsCellTempC(airTemp, gti, wind, coef_a, coef_b, delta);
+  }
+
+  const MIN_G_POA_TYP = 20; // W/m² — same threshold as for typical cell temperature weighting
+  let T_cell_typ_avg = null;
+  const rawTypAvg =
+    cfg && cfg.tcell_typ_avg_c != null && String(cfg.tcell_typ_avg_c).trim() !== ""
+      ? Number(cfg.tcell_typ_avg_c)
+      : NaN;
+  if (Number.isFinite(rawTypAvg)) {
+    T_cell_typ_avg = rawTypAvg;
+  } else if (canUsePvwattsTemp) {
+    let weightedT = 0;
+    let sumG = 0;
+    for (const row of rows) {
+      if (!Array.isArray(row)) continue;
+      const gpoa = parseFloat(row[pvwattsGtiIdx]);
+      if (!Number.isFinite(gpoa) || gpoa <= MIN_G_POA_TYP) continue;
+      const tcell = getPvwattsStyleCellTemp(row);
+      if (!Number.isFinite(tcell)) continue;
+      weightedT += gpoa * tcell;
+      sumG += gpoa;
     }
-    if (tModuleIdx >= 0) {
-      const tm = parseFloat(row[tModuleIdx]);
-      if (Number.isFinite(tm)) return tm + 3; // module → cell offset
-    }
-    if (canUseThermalModel) {
-      const airTemp = parseFloat(row[airIdx]);
-      const gpoa = parseFloat(row[gtiIdx]);
-      const wind = parseFloat(row[windIdx]);
-      if (Number.isFinite(airTemp) && Number.isFinite(gpoa) && Number.isFinite(wind)) {
-        // Same structure as backend/datafiltering.py and DataFilteringPage.computePdcComparison.
-        return airTemp + gpoa * Math.exp(coef_a + coef_b * wind) + (gpoa * delta) / 1000;
-      }
-    }
-    return null;
+    if (sumG > 0) T_cell_typ_avg = weightedT / sumG;
   }
 
   const sumCols = new Set();
@@ -477,60 +498,74 @@ function resampleRowsToDaily(headers, rows, tot_power, systemConfig) {
     }
     const pdcSum = group.reduce((s, { row }) => s + (parseFloat(row[pdcIdx]) || 0), 0);
     const gtiSum = group.reduce((s, { row }) => s + (parseFloat(row[gtiIdx]) || 0), 0);
-    // Standard (uncorrected) daily metrics. E_DC in kWh (P_DC assumed in W, sum in Wh → /1000).
-    const E_DC = pdcSum / 1000;
+    // E_DC (kWh): Power in kW × row duration in hours (filtered CSV template).
+    const E_DC = pdcSum * dtHours;
     const Ya = E_DC / tot_power;
     const Yr = gtiSum / 1000;
     const PR = Yr > 0 ? Ya / Yr : "";
-    // Temperature-corrected PR_Tcorr = Ya / [ Yr × (1 + γ × (T_cell_day - 25)) ].
-    const MIN_G_POA = 20; // W/m² irradiance threshold for valid temperature contribution
-    let tSum = 0;
-    let tCount = 0;
-    if (gamma != null && Number.isFinite(gamma) && group.length > 0) {
-      for (const { row } of group) {
-        const gpoa = parseFloat(row[gtiIdx]);
-        if (!Number.isFinite(gpoa) || gpoa <= MIN_G_POA) continue;
-        const tcell = getCellTemperature(row);
-        if (!Number.isFinite(tcell)) continue;
-        tSum += tcell;
-        tCount++;
-      }
-    }
-    const T_cell_day = tCount > 0 ? tSum / tCount : null;
-    let PR_Tcorr = "";
+    let sum_ENDC = 0;
     if (
-      T_cell_day != null &&
-      Number.isFinite(T_cell_day) &&
       gamma != null &&
       Number.isFinite(gamma) &&
-      Yr > 0
+      T_cell_typ_avg != null &&
+      Number.isFinite(T_cell_typ_avg) &&
+      group.length > 0
     ) {
-      const tempFactorDay = 1 + gamma * (T_cell_day - 25);
-      if (Number.isFinite(tempFactorDay) && Math.abs(tempFactorDay) > 1e-9) {
-        PR_Tcorr = Ya / (Yr * tempFactorDay);
+      for (const { row } of group) {
+        const gpoa = parseFloat(row[gtiIdx]);
+        const gSafe = Number.isFinite(gpoa) ? gpoa : 0;
+        const eRef = tot_power * (gSafe / 1000) * dtHours;
+        const tcell = getPvwattsStyleCellTemp(row);
+        let bracket = 1;
+        if (Number.isFinite(tcell)) {
+          // Same as [1 − (temp_coef/100)×(T_typ − T_cell)] when temp_coef is in %/°C
+          const b = 1 - gamma * (T_cell_typ_avg - tcell);
+          if (Number.isFinite(b) && Math.abs(b) > 1e-12) bracket = b;
+        }
+        sum_ENDC += eRef * bracket;
       }
     }
-    return { row: newRow, E_DC, Ya, Yr, PR, PR_Tcorr };
+    let PR_Tcorr = "";
+    let ENDC_corr = "";
+    if (
+      gamma != null &&
+      Number.isFinite(gamma) &&
+      T_cell_typ_avg != null &&
+      Number.isFinite(T_cell_typ_avg) &&
+      sum_ENDC > 0 &&
+      Yr > 0
+    ) {
+      PR_Tcorr = E_DC / sum_ENDC;
+      ENDC_corr = sum_ENDC;
+    }
+    return { row: newRow, E_DC, Ya, Yr, PR, ENDC_corr, PR_Tcorr };
   });
 
-  const dailyHeaders = [...headers, "E_DC", "Ya", "Yr", "PR", "PR_Tcorr"];
-  const outRows = dailyRows.map(({ row, E_DC, Ya, Yr, PR, PR_Tcorr }) => [
+  const dailyHeaders = [...headers, "E_DC", "Ya", "Yr", "PR", "ENDC_corr", "PR_Tcorr"];
+  const outRows = dailyRows.map(({ row, E_DC, Ya, Yr, PR, ENDC_corr, PR_Tcorr }) => [
     ...row,
     E_DC.toFixed(6),
     Ya.toFixed(6),
     Yr.toFixed(6),
     PR !== "" ? Number(PR).toFixed(6) : "",
+    ENDC_corr !== "" ? Number(ENDC_corr).toFixed(6) : "",
     PR_Tcorr !== "" ? Number(PR_Tcorr).toFixed(6) : "",
   ]);
   return { headers: dailyHeaders, rows: outRows };
 }
 
-/** Aggregate daily KPI data to monthly or yearly by taking the mean of daily KPIs. */
+/**
+ * Aggregate daily KPI data to monthly or yearly.
+ * Most numeric columns: mean of daily values. E_DC and ENDC_corr: sum. PR_Tcorr: Σ E_DC / Σ ENDC_corr.
+ */
 function aggregateDailyKpi(dailyKpiData, mode) {
   if (!dailyKpiData?.headers?.length || !dailyKpiData?.rows?.length) return dailyKpiData ?? null;
   if (mode === "daily") return dailyKpiData;
   const headers = dailyKpiData.headers;
   const timeIdx = 0;
+  const edcIdx = headers.findIndex((h) => String(h ?? "").trim() === "E_DC");
+  const endcIdx = headers.findIndex((h) => String(h ?? "").trim() === "ENDC_corr");
+  const prTcorrIdx = headers.findIndex((h) => String(h ?? "").trim() === "PR_Tcorr");
   const groups = new Map();
   for (const row of dailyKpiData.rows) {
     if (!Array.isArray(row)) continue;
@@ -553,6 +588,19 @@ function aggregateDailyKpi(dailyKpiData, mode) {
     const outRow = new Array(headers.length).fill("");
     outRow[timeIdx] = key;
     for (let c = 1; c < headers.length; c++) {
+      if (c === prTcorrIdx && edcIdx >= 0 && endcIdx >= 0) {
+        let sumEdc = 0;
+        let sumEndc = 0;
+        for (const r of group) {
+          const e = parseFloat(r[edcIdx]);
+          const n = parseFloat(r[endcIdx]);
+          if (Number.isFinite(e)) sumEdc += e;
+          if (Number.isFinite(n)) sumEndc += n;
+        }
+        outRow[c] = sumEndc > 0 ? String(sumEdc / sumEndc) : "";
+        continue;
+      }
+      const sumAgg = c === edcIdx || c === endcIdx;
       let sum = 0;
       let count = 0;
       for (const r of group) {
@@ -562,7 +610,11 @@ function aggregateDailyKpi(dailyKpiData, mode) {
           count++;
         }
       }
-      outRow[c] = count > 0 ? String(sum / count) : "";
+      if (sumAgg) {
+        outRow[c] = count > 0 ? String(sum) : "";
+      } else {
+        outRow[c] = count > 0 ? String(sum / count) : "";
+      }
     }
     outRows.push(outRow);
   }
@@ -1708,7 +1760,7 @@ function KpiCSVChart({
           type: "scatter",
           mode,
           connectgaps: false,
-          name: singleYAxis ? "PR Temperature Corrected" : "PR Temperature Corrected (L)",
+          name: singleYAxis ? "PR weather-corrected (NREL)" : "PR weather-corrected (NREL) (L)",
           line: {
             color: YA_YR_BAR_COLORS.Yr,
             width: 1.5,
@@ -2166,6 +2218,21 @@ function KpiSystemInfo({ data }) {
 const CACHE_KEY_PV = "pvcopilot_kpi_pv_cache";
 const CACHE_KEY_SYSTEM = "pvcopilot_kpi_system_cache";
 
+function buildKpiDataDownloadFilename(systemInfo) {
+  const cfg = systemInfo && typeof systemInfo === "object" ? (systemInfo.config || systemInfo) : null;
+  const rawName = cfg?.Name ?? cfg?.name;
+  const systemSlug = String(rawName ?? "")
+    .trim()
+    .replace(/[/\\?%*:|"<>.\s]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_|_$/g, "");
+  const safeSystem = systemSlug || "unknown";
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const dt = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  return `pvcopilot_kpiData_${safeSystem}_${dt}.csv`;
+}
+
 export default function KpiAnalysisPage() {
   const [pvFile, setPvFile] = useState(null);
   const [pvRawData, setPvRawData] = useState(null);
@@ -2184,7 +2251,7 @@ export default function KpiAnalysisPage() {
   const [iecAirTempMax, setIecAirTempMax] = useState("60");
   const [iecWindSpeedMin, setIecWindSpeedMin] = useState("0");
   const [iecWindSpeedMax, setIecWindSpeedMax] = useState("30");
-  const [iecPowerMin, setIecPowerMin] = useState("10");
+  const [iecPowerMin, setIecPowerMin] = useState("0");
   const [iecPowerMax, setIecPowerMax] = useState(""); // empty = use max of P_DC in data
   const [iecDataAvailabilityPct, setIecDataAvailabilityPct] = useState("0"); // percent threshold; 0 = disabled
   const [iecStatusFilter, setIecStatusFilter] = useState("all"); // "all" | "valid"
@@ -2222,7 +2289,17 @@ export default function KpiAnalysisPage() {
   const powerMaxInputRef = useRef(null);
   const availabilityInputRef = useRef(null);
   const [kpiFormulasHelpOpen, setKpiFormulasHelpOpen] = useState(false);
+  const [kpiFormulasHelpAnchor, setKpiFormulasHelpAnchor] = useState({ top: 0, left: 0, bottom: 0, vw: 400 });
   const kpiFormulasHelpRef = useRef(null);
+  const kpiFormulasHelpTriggerRef = useRef(null);
+
+  const updateKpiFormulasHelpAnchor = useCallback(() => {
+    const el = kpiFormulasHelpTriggerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const vw = typeof window !== "undefined" ? window.innerWidth : 400;
+    setKpiFormulasHelpAnchor({ top: r.top, left: r.left, bottom: r.bottom, vw });
+  }, []);
   // Applied IEC61724 + status filter (used for actual filtering; draft = inputs until Apply)
   const [appliedIecGhiMin, setAppliedIecGhiMin] = useState("20");
   const [appliedIecGhiMax, setAppliedIecGhiMax] = useState("1500");
@@ -2230,7 +2307,7 @@ export default function KpiAnalysisPage() {
   const [appliedIecAirTempMax, setAppliedIecAirTempMax] = useState("60");
   const [appliedIecWindSpeedMin, setAppliedIecWindSpeedMin] = useState("0");
   const [appliedIecWindSpeedMax, setAppliedIecWindSpeedMax] = useState("30");
-  const [appliedIecPowerMin, setAppliedIecPowerMin] = useState("10");
+  const [appliedIecPowerMin, setAppliedIecPowerMin] = useState("0");
   const [appliedIecPowerMax, setAppliedIecPowerMax] = useState(null); // null = use max P_DC in data
   const [appliedIecDataAvailabilityPct, setAppliedIecDataAvailabilityPct] = useState(0); // 0 = disabled
   const [appliedIecStatusFilter, setAppliedIecStatusFilter] = useState("all");
@@ -2239,7 +2316,7 @@ export default function KpiAnalysisPage() {
     setToast({ message, type, key: Date.now() });
   }, []);
 
-  const IEC_DEFAULTS = useMemo(() => ({ ghiMin: "20", ghiMax: "1500", airMin: "-40", airMax: "60", windMin: "0", windMax: "30", powerMin: "10", powerMax: "", dataAvailabilityPct: "0", status: "all" }), []);
+  const IEC_DEFAULTS = useMemo(() => ({ ghiMin: "20", ghiMax: "1500", airMin: "-40", airMax: "60", windMin: "0", windMax: "30", powerMin: "0", powerMax: "", dataAvailabilityPct: "0", status: "all" }), []);
   const iecAppliedSignature = useMemo(
     () =>
       [
@@ -2427,7 +2504,7 @@ export default function KpiAnalysisPage() {
     [pvRawData, dateFrom, dateTo]
   );
 
-  // Max P_DC in current (date-filtered) data for Power (kW) filter default
+  // Max P_DC in current (date-filtered) data (kW in CSV); used for filter compare + max W for UI
   const maxPdcInData = useMemo(() => {
     if (!pvData?.headers?.length || !pvFilteredRows.length) return null;
     const pdcIdx = getColumnIndex(pvData.headers, ["P_DC", "Power"]);
@@ -2440,9 +2517,14 @@ export default function KpiAnalysisPage() {
     return max === -Infinity ? null : max;
   }, [pvData, pvFilteredRows]);
 
+  const maxPdcW = useMemo(() => {
+    if (maxPdcInData == null || !Number.isFinite(maxPdcInData)) return null;
+    return Math.round(maxPdcInData * W_PER_KW);
+  }, [maxPdcInData]);
+
   const commitInlineEdit = useCallback((field) => {
     const clampInt = (n, min, max) => Math.round(Math.min(max, Math.max(min, n)));
-    const maxP = Math.max(0, Number(maxPdcInData) || 0);
+    const maxPW = Math.max(0, maxPdcW ?? 0);
 
     if (field === "ghiMin" || field === "ghiMax") {
       const a = Number(field === "ghiMin" ? iecGhiMin : iecGhiMax);
@@ -2468,7 +2550,7 @@ export default function KpiAnalysisPage() {
     if (field === "powerMin" || field === "powerMax") {
       if (field === "powerMin") {
         const a = Number(iecPowerMin);
-        const v = Number.isFinite(a) ? clampInt(a, 0, maxP) : 0;
+        const v = Number.isFinite(a) ? clampInt(a, 0, maxPW) : 0;
         setIecPowerMin(String(v));
       } else {
         // allow empty max (means "auto/max(P_DC)")
@@ -2476,12 +2558,12 @@ export default function KpiAnalysisPage() {
           setIecPowerMax("");
         } else {
           const a = Number(iecPowerMax);
-          const v = Number.isFinite(a) ? clampInt(a, 0, maxP) : maxP;
+          const v = Number.isFinite(a) ? clampInt(a, 0, maxPW) : maxPW;
           setIecPowerMax(String(v));
         }
       }
       const lo = Number(iecPowerMin);
-      const hi = iecPowerMax === "" ? maxP : Number(iecPowerMax);
+      const hi = iecPowerMax === "" ? maxPW : Number(iecPowerMax);
       if (Number.isFinite(lo) && Number.isFinite(hi) && lo > hi) { setIecPowerMin(String(Math.round(hi))); setIecPowerMax(String(Math.round(lo))); }
     }
     if (field === "availability") {
@@ -2500,7 +2582,7 @@ export default function KpiAnalysisPage() {
     iecPowerMin,
     iecPowerMax,
     iecDataAvailabilityPct,
-    maxPdcInData,
+    maxPdcW,
   ]);
 
   useEffect(() => {
@@ -2565,13 +2647,13 @@ export default function KpiAnalysisPage() {
 
   useEffect(() => {
     if (!powerPopoverOpen) return;
-    const max = Math.max(0, Number(maxPdcInData) || 0);
+    const maxW = Math.max(0, maxPdcW ?? 0);
     const rawMin = Number(iecPowerMin);
-    const rawMax = iecPowerMax === "" ? max : Number(iecPowerMax);
+    const rawMax = iecPowerMax === "" ? maxW : Number(iecPowerMax);
     let lo = Number.isFinite(rawMin) ? rawMin : 0;
-    let hi = Number.isFinite(rawMax) ? rawMax : max;
-    lo = Math.min(max, Math.max(0, lo));
-    hi = Math.min(max, Math.max(0, hi));
+    let hi = Number.isFinite(rawMax) ? rawMax : maxW;
+    lo = Math.min(maxW, Math.max(0, lo));
+    hi = Math.min(maxW, Math.max(0, hi));
     if (lo > hi) [lo, hi] = [hi, lo];
     setPowerDraftValue([Math.round(lo), Math.round(hi)]);
     const onDown = (e) => {
@@ -2582,7 +2664,7 @@ export default function KpiAnalysisPage() {
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
-  }, [powerPopoverOpen, iecPowerMin, iecPowerMax, maxPdcInData]);
+  }, [powerPopoverOpen, iecPowerMin, iecPowerMax, maxPdcW]);
 
   // IEC61724 filter (uses APPLIED bounds; Apply button commits draft inputs)
   const pvIecFilteredRows = useMemo(() => {
@@ -2598,8 +2680,12 @@ export default function KpiAnalysisPage() {
     const airMax = Number(appliedIecAirTempMax);
     const windMin = Number(appliedIecWindSpeedMin);
     const windMax = Number(appliedIecWindSpeedMax);
-    const powerMin = Number(appliedIecPowerMin) || 0;
-    const powerMax = appliedIecPowerMax != null && appliedIecPowerMax !== "" ? Number(appliedIecPowerMax) : maxPdcInData;
+    // UI bounds are watts; CSV Power is kW
+    const powerMinKw = (Number(appliedIecPowerMin) || 0) / W_PER_KW;
+    const powerMaxKw =
+      appliedIecPowerMax != null && appliedIecPowerMax !== ""
+        ? Number(appliedIecPowerMax) / W_PER_KW
+        : maxPdcInData;
     return pvFilteredRows.filter((row) => {
       if (!Array.isArray(row)) return false;
       if (ghiIdx >= 0) {
@@ -2614,9 +2700,9 @@ export default function KpiAnalysisPage() {
         const v = parseFloat(row[windIdx]);
         if (Number.isFinite(v) && (v < windMin || v > windMax)) return false;
       }
-      if (pdcIdx >= 0 && powerMax != null && Number.isFinite(powerMax)) {
+      if (pdcIdx >= 0 && powerMaxKw != null && Number.isFinite(powerMaxKw)) {
         const v = parseFloat(row[pdcIdx]);
-        if (Number.isFinite(v) && (v < powerMin || v > powerMax)) return false;
+        if (Number.isFinite(v) && (v < powerMinKw || v > powerMaxKw)) return false;
       }
       return true;
     });
@@ -2696,7 +2782,8 @@ export default function KpiAnalysisPage() {
     if (!pvData?.headers?.length || totPower == null) return null;
     const rowsForDaily = pvHourlyForKpi ?? pvAvailabilityFilteredRows;
     if (!rowsForDaily.length) return null;
-    const base = resampleRowsToDaily(pvData.headers, rowsForDaily, totPower, sysData);
+    const energyStepMinutes = pvHourlyForKpi != null ? 60 : (pvData.resampledStepMinutes ?? 10);
+    const base = resampleRowsToDaily(pvData.headers, rowsForDaily, totPower, sysData, energyStepMinutes);
     if (!base?.headers?.length || !base?.rows?.length) return base;
 
     const pctByDay = availabilityStatsByDay?.pctByDay;
@@ -2765,13 +2852,18 @@ export default function KpiAnalysisPage() {
     const meanPrTcorr = prTcorrCount > 0 ? prTcorrSum / prTcorrCount : null;
     const meanYa = yaCount > 0 ? yaSum / yaCount : null;
     const meanYr = yrCount > 0 ? yrSum / yrCount : null;
-    const powerMaxDisplay = appliedIecPowerMax != null && appliedIecPowerMax !== "" ? appliedIecPowerMax : (maxPdcInData != null ? String(maxPdcInData) : "max(P_DC)");
+    const powerMaxDisplay =
+      appliedIecPowerMax != null && appliedIecPowerMax !== ""
+        ? appliedIecPowerMax
+        : maxPdcW != null
+          ? String(maxPdcW)
+          : "max(Power)";
     const filters = [
       `Date range: ${minTime ?? "—"} → ${maxTime ?? "—"}`,
       `GHI ∈ [${appliedIecGhiMin}, ${appliedIecGhiMax}] W/m²`,
       `Air Temp ∈ [${appliedIecAirTempMin}, ${appliedIecAirTempMax}] °C`,
       `Wind speed ∈ [${appliedIecWindSpeedMin}, ${appliedIecWindSpeedMax}] m/s`,
-      `Power ∈ [${appliedIecPowerMin}, ${powerMaxDisplay}] kW`,
+      `Power ∈ [${appliedIecPowerMin}, ${powerMaxDisplay}] W`,
       `Data availability ≥ ${appliedIecDataAvailabilityPct != null ? `${appliedIecDataAvailabilityPct}%` : "—"}`,
       `Status: ${appliedIecStatusFilter === "valid" ? "Valid only" : "All statuses"}`,
     ];
@@ -2797,6 +2889,7 @@ export default function KpiAnalysisPage() {
     appliedIecDataAvailabilityPct,
     appliedIecStatusFilter,
     maxPdcInData,
+    maxPdcW,
   ]);
 
   // Ya / Yr grouped bar chart data (from (possibly aggregated) KPI)
@@ -2848,12 +2941,24 @@ export default function KpiAnalysisPage() {
   useEffect(() => {
     if (!kpiFormulasHelpOpen) return;
     const onDown = (e) => {
-      if (kpiFormulasHelpRef.current?.contains(e.target)) return;
+      if (kpiFormulasHelpTriggerRef.current?.contains(e.target) || kpiFormulasHelpRef.current?.contains(e.target)) return;
       setKpiFormulasHelpOpen(false);
     };
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [kpiFormulasHelpOpen]);
+
+  useEffect(() => {
+    if (!kpiFormulasHelpOpen) return;
+    updateKpiFormulasHelpAnchor();
+    const onScrollOrResize = () => updateKpiFormulasHelpAnchor();
+    window.addEventListener("scroll", onScrollOrResize, true);
+    window.addEventListener("resize", onScrollOrResize);
+    return () => {
+      window.removeEventListener("scroll", onScrollOrResize, true);
+      window.removeEventListener("resize", onScrollOrResize);
+    };
+  }, [kpiFormulasHelpOpen, updateKpiFormulasHelpAnchor]);
 
   const handleSysLoad = useCallback(
     (name, text) => {
@@ -3209,7 +3314,7 @@ export default function KpiAnalysisPage() {
                           >
                             <div style={{ fontWeight: 700, color: "#0F172A", marginBottom: 6 }}>IEC-61724 Filters</div>
                             <p style={{ margin: "0 0 10px 0", fontFamily: FONT, fontWeight: 400 }}>
-                              IEC61724 filters are used to improve PV monitoring data quality by excluding weather measurements outside realistic operating ranges. The filtering step screens global horizontal irradiance (GHI), ambient temperature, and wind speed to remove implausible values, sensor faults, and abnormal spikes before KPI calculation and performance analysis. These variables are commonly checked because they directly influence PV performance interpretation and downstream diagnostics.
+                              IEC61724 filters are used to improve PV monitoring data quality by excluding weather measurements outside realistic operating ranges. The filtering step screens global horizontal irradiance (GHI), ambient temperature, wind speed, and DC power to remove implausible values, sensor faults, and abnormal spikes before KPI calculation and performance analysis. The power bounds are entered in <strong>watts (W)</strong>; the uploaded CSV still stores <strong>Power</strong> in kW, so values are divided by 1000 when filtering rows.
                             </p>
                             <p style={{ margin: "0 0 8px 0" }}>
                               <strong>References:</strong>
@@ -3599,10 +3704,10 @@ export default function KpiAnalysisPage() {
                     </div>
                   </div>
                   </div>
-                  {/* Power (kW) — P_DC */}
+                  {/* Power (W) — CSV column is kW; bounds converted when filtering */}
                   <div style={{ display: "flex", justifyContent: "center", minWidth: 0 }}>
                     <div style={{ display: "flex", flexDirection: "column", gap: 1, padding: "3px 4px", background: "#fff", borderRadius: 6, border: "1px solid #E2E8F0", minWidth: 0, width: "92%", maxWidth: "100%", boxSizing: "border-box" }}>
-                    <span style={{ fontFamily: FONT, fontSize: 7, fontWeight: 600, color: "#64748B", letterSpacing: "0.02em", textAlign: "center", width: "100%" }}>Power (kW)</span>
+                    <span style={{ fontFamily: FONT, fontSize: 7, fontWeight: 600, color: "#64748B", letterSpacing: "0.02em", textAlign: "center", width: "100%" }}>Power (W)</span>
                     <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 2 }}>
                       <div ref={powerTriggerRef} style={{ flex: 1, minWidth: 0, position: "relative" }}>
                         <input
@@ -3626,13 +3731,13 @@ export default function KpiAnalysisPage() {
                           ref={powerMaxInputRef}
                           readOnly={inlineEditField !== "powerMax"}
                           className="kpi-iec-num-input"
-                          value={iecPowerMax !== "" ? iecPowerMax : (maxPdcInData != null ? String(maxPdcInData) : "")}
+                          value={iecPowerMax !== "" ? iecPowerMax : (maxPdcW != null ? String(maxPdcW) : "")}
                           onChange={(e) => setIecPowerMax(e.target.value)}
                           onClick={(e) => { if (e.detail > 1) return; if (inlineEditField) return; setPowerPopoverOpen(true); }}
                           onDoubleClick={(e) => { e.preventDefault(); e.stopPropagation(); setInlineEditField("powerMax"); }}
                           onBlur={() => inlineEditField === "powerMax" && commitInlineEdit("powerMax")}
                           onKeyDown={(e) => e.key === "Enter" && commitInlineEdit("powerMax")}
-                          placeholder={maxPdcInData != null ? String(maxPdcInData) : "—"}
+                          placeholder={maxPdcW != null ? String(maxPdcW) : "—"}
                           style={{ width: "100%", height: 26, padding: "6px 4px", borderRadius: 6, border: "none", background: "transparent", fontFamily: FONT, fontSize: 10, fontWeight: 600, letterSpacing: "-0.02em", color: "#94a3b8", textAlign: "center", fontVariantNumeric: "tabular-nums", boxSizing: "border-box", cursor: inlineEditField === "powerMax" ? "text" : "pointer" }}
                         />
                       </div>
@@ -3656,7 +3761,7 @@ export default function KpiAnalysisPage() {
                           }}
                         >
                           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
-                            <span style={{ fontFamily: FONT, fontSize: 12, fontWeight: 500, color: "#0F172A" }}>Power range (kW)</span>
+                            <span style={{ fontFamily: FONT, fontSize: 12, fontWeight: 500, color: "#0F172A" }}>Power range (W)</span>
                             <button
                               type="button"
                               onClick={() => setPowerPopoverOpen(false)}
@@ -3673,19 +3778,19 @@ export default function KpiAnalysisPage() {
                                 setPowerDraftValue(v);
                                 const a = Number(v?.[0]);
                                 const b = Number(v?.[1]);
-                                const max = Math.max(0, Number(maxPdcInData) || 0);
+                                const maxW = Math.max(0, maxPdcW ?? 0);
                                 let lo = Number.isFinite(a) ? a : 0;
-                                let hi = Number.isFinite(b) ? b : max;
-                                lo = Math.min(max, Math.max(0, Math.round(lo)));
-                                hi = Math.min(max, Math.max(0, Math.round(hi)));
+                                let hi = Number.isFinite(b) ? b : maxW;
+                                lo = Math.min(maxW, Math.max(0, Math.round(lo)));
+                                hi = Math.min(maxW, Math.max(0, Math.round(hi)));
                                 if (lo > hi) [lo, hi] = [hi, lo];
                                 setIecPowerMin(String(lo));
                                 setIecPowerMax(String(hi));
                               }}
                               min={0}
-                              max={Math.max(1, Math.round(Number(maxPdcInData) || 0))}
+                              max={Math.max(1, maxPdcW ?? 0)}
                               step={1}
-                              aria-label="Power range"
+                              aria-label="Power range in watts"
                             />
                           </div>
                           <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, gap: 8 }}>
@@ -3956,57 +4061,75 @@ export default function KpiAnalysisPage() {
                       <span style={{ fontFamily: FONT, fontSize: 14, fontWeight: 800, color: "#0F172A" }}>KPI Analysis</span>
                       <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>Daily performance metrics: E_DC, Ya, Yr, and PR.</span>
                     </div>
-                    <span ref={kpiFormulasHelpRef} style={{ position: "relative", display: "inline-flex" }}>
+                    <span style={{ display: "inline-flex" }}>
                       <button
+                        ref={kpiFormulasHelpTriggerRef}
                         type="button"
-                        onClick={() => setKpiFormulasHelpOpen((o) => !o)}
-                        aria-label="Explain Yr, Ya, PR and PR Temperature Corrected"
+                        onClick={() => {
+                          setKpiFormulasHelpOpen((open) => {
+                            if (!open) {
+                              const r = kpiFormulasHelpTriggerRef.current?.getBoundingClientRect();
+                              if (r) {
+                                const vw = typeof window !== "undefined" ? window.innerWidth : 400;
+                                setKpiFormulasHelpAnchor({ top: r.top, left: r.left, bottom: r.bottom, vw });
+                              }
+                            }
+                            return !open;
+                          });
+                        }}
+                        aria-label="Explain Yr, Ya, PR and NREL weather-corrected PR"
+                        aria-expanded={kpiFormulasHelpOpen}
                         style={{ width: 20, height: 20, borderRadius: "50%", border: "1px solid #E2E8F0", background: "#F8FAFC", color: "#64748B", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", padding: 0 }}
                       >
                         <HelpOutline sx={{ fontSize: 14 }} />
                       </button>
-                      {kpiFormulasHelpOpen && (
-                        <div
-                          style={{
-                            position: "absolute",
-                            left: 0,
-                            bottom: "100%",
-                            marginBottom: 8,
-                            zIndex: 1002,
-                            width: 400,
-                            maxWidth: "90vw",
-                            maxHeight: "70vh",
-                            overflow: "auto",
-                            background: "#fff",
-                            borderRadius: 12,
-                            border: "1px solid #E2E8F0",
-                            boxShadow: "0 12px 40px rgba(0,0,0,0.15)",
-                            padding: 14,
-                            fontFamily: FONT,
-                            fontSize: 11,
-                            color: "#475569",
-                            lineHeight: 1.55,
-                          }}
-                        >
-                          <div style={{ fontWeight: 700, color: "#0F172A", marginBottom: 8 }}>KPI formulas (IEC 61724)</div>
-                          <p style={{ margin: "0 0 8px 0" }}>
-                            <strong>E_DC</strong> — Daily DC energy (kWh): sum of measured DC power over the period, divided by 1000 when P_DC is in watts.
-                          </p>
-                          <p style={{ margin: "0 0 8px 0" }}>
-                            <strong>Yr</strong> (Reference yield) — Daily in-plane irradiance expressed as equivalent sun hours: <em>Yr = G_POA_sum / 1000</em> (kWh/kWp). G_POA is plane-of-array irradiance (e.g. GTI) in W/m².
-                          </p>
-                          <p style={{ margin: "0 0 8px 0" }}>
-                            <strong>Ya</strong> (Array yield) — Specific energy delivered by the array: <em>Ya = E_DC / P_STC</em> (kWh/kWp). P_STC is installed nominal DC power at STC (kW).
-                          </p>
-                          <p style={{ margin: "0 0 8px 0" }}>
-                            <strong>PR</strong> (Performance ratio) — Ratio of actual to reference yield: <em>PR = Ya / Yr</em>. Typically 0.75–0.90 (75–90%). Independent of location and size; lower values indicate losses or underperformance.
-                          </p>
-                          <p style={{ margin: "0 0 0 0" }}>
-                            <strong>PR Temperature Corrected</strong> — PR with module temperature effect removed: <em>PR_Tcorr = Ya / [ Yr × (1 + γ × (T_cell − 25)) ]</em>. γ is the module temperature coefficient of power (1/°C); T_cell is a daily representative cell temperature (°C). Allows comparison across seasons and sites with different temperatures.
-                          </p>
-                        </div>
-                      )}
                     </span>
+                    {kpiFormulasHelpOpen &&
+                      (() => {
+                        const kpiHelpLay = kpiFormulasHelpPopoverLayout(kpiFormulasHelpAnchor);
+                        return createPortal(
+                          <div
+                            ref={kpiFormulasHelpRef}
+                            style={{
+                              position: "fixed",
+                              top: kpiHelpLay.top,
+                              left: kpiHelpLay.left,
+                              zIndex: 10002,
+                              width: kpiHelpLay.panelW,
+                              maxHeight: "min(70vh, calc(100vh - 24px))",
+                              overflow: "auto",
+                              background: "#fff",
+                              borderRadius: 12,
+                              border: "1px solid #E2E8F0",
+                              boxShadow: "0 12px 40px rgba(0,0,0,0.15)",
+                              padding: 14,
+                              boxSizing: "border-box",
+                              fontFamily: FONT,
+                              fontSize: 11,
+                              color: "#475569",
+                              lineHeight: 1.55,
+                            }}
+                          >
+                            <div style={{ fontWeight: 700, color: "#0F172A", marginBottom: 8 }}>KPI formulas (IEC 61724)</div>
+                            <p style={{ margin: "0 0 8px 0" }}>
+                              <strong>E_DC</strong> — Daily DC energy (kWh): measured <strong>Power</strong> is in kW. Each row is treated as that average power over the row timestep (hourly after resampling, or your selected step). <em>E_DC = Σ Power × (step_minutes / 60)</em>.
+                            </p>
+                            <p style={{ margin: "0 0 8px 0" }}>
+                              <strong>Yr</strong> (Reference yield) — Daily in-plane irradiance expressed as equivalent sun hours: <em>Yr = G_POA_sum / 1000</em> (kWh/kWp). G_POA is plane-of-array irradiance (e.g. GTI) in W/m².
+                            </p>
+                            <p style={{ margin: "0 0 8px 0" }}>
+                              <strong>Ya</strong> (Array yield) — Specific energy delivered by the array: <em>Ya = E_DC / P_STC</em> (kWh/kWp). P_STC is installed nominal DC power at STC (kW).
+                            </p>
+                            <p style={{ margin: "0 0 8px 0" }}>
+                              <strong>PR</strong> (Performance ratio) — Ratio of actual to reference yield: <em>PR = Ya / Yr</em>. Typically 0.75–0.90 (75–90%). Independent of location and size; lower values indicate losses or underperformance.
+                            </p>
+                            <p style={{ margin: "0 0 0 0" }}>
+                              <strong>PR weather-corrected (NREL)</strong> — DC analogue of NREL/TP-5200-57991: <em>PR_Tcorr = Σ E_DC / Σ E_NDC</em> per day. Temperature factor uses <strong>temp_coef</strong> from System Info (NREL δ, %/°C, negative): <em>E_NDC,i = P_STC × (G_i/1000) × Δt × [1 − (temp_coef/100)×(T_typ − T_cell,i)]</em> for typical datasheet values; if |temp_coef| &lt; 0.1 it is treated as decimal per °C, same as PVWatts. <em>T_cell,i</em> uses the <strong>same PVWatts model</strong> as Data Filtering: ambient + G_POA·e^{"{a+b·wind}"} + <strong>G_POA·delta/1000</strong> (<strong>delta</strong> = conduction in System Info, not temp_coef), from <strong>weather_Air_Temp</strong>, <strong>weather_POA</strong>/<strong>weather_GTI</strong>/<strong>GTI</strong>, <strong>weather_Wind_speed</strong>. <em>T_typ</em> is irradiance-weighted mean of that T_cell (G &gt; 20 W/m²) or <strong>tcell_typ_avg_c</strong>. <strong>ENDC_corr</strong> is Σ E_NDC for the day (kWh). Monthly/yearly PR_Tcorr uses Σ E_DC / Σ ENDC_corr over days.
+                            </p>
+                          </div>,
+                          document.body
+                        );
+                      })()}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                     {["daily", "monthly", "yearly"].map((mode) => {
@@ -4095,7 +4218,7 @@ export default function KpiAnalysisPage() {
                     <div style={{ display: "flex", flexDirection: "column" }}>
                       <span style={{ fontFamily: FONT, fontSize: 13, fontWeight: 800, color: "#0F172A" }}>KPI Analysis summary</span>
                       <span style={{ fontFamily: FONT, fontSize: 11, color: "#94a3b8" }}>
-                        {kpiAggregation === "daily" ? "Daily" : kpiAggregation === "monthly" ? "Monthly" : "Yearly"} view · PR, PR corrected, Ya, Yr averages.
+                        {kpiAggregation === "daily" ? "Daily" : kpiAggregation === "monthly" ? "Monthly" : "Yearly"} view · PR, PR weather-corrected (NREL), Ya, Yr (daily means; E_DC and ENDC_corr summed when aggregated).
                       </span>
                     </div>
                   </div>
@@ -4149,7 +4272,7 @@ export default function KpiAnalysisPage() {
                       border: "1px solid #E2E8F0",
                     }}
                   >
-                    <div style={{ fontFamily: FONT, fontSize: 10, fontWeight: 600, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.4, textAlign: "center" }}>Mean PR corrected</div>
+                    <div style={{ fontFamily: FONT, fontSize: 10, fontWeight: 600, color: "#64748B", textTransform: "uppercase", letterSpacing: 0.4, textAlign: "center" }}>Mean PR (NREL corr.)</div>
                     <div style={{ fontFamily: MONO, fontSize: 14, color: "#166534", marginTop: 4, textAlign: "center" }}>
                       {kpiSummary.meanPrTcorr != null ? `${(kpiSummary.meanPrTcorr * 100).toFixed(2)} %` : "—"}
                     </div>
@@ -4224,8 +4347,7 @@ export default function KpiAnalysisPage() {
                       const url = URL.createObjectURL(blob);
                       const a = document.createElement("a");
                       a.href = url;
-                      const prefix = kpiAggregation === "daily" ? "daily" : kpiAggregation === "monthly" ? "monthly" : "yearly";
-                      a.download = `kpi_${prefix}_data.csv`;
+                      a.download = buildKpiDataDownloadFilename(sysData);
                       document.body.appendChild(a);
                       a.click();
                       document.body.removeChild(a);

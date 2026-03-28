@@ -2881,6 +2881,21 @@ function DataQualityCheckSummaryCard({ mergedTimes, mergedCount, stepMinutes, cl
   );
 }
 
+function buildSyncedDataDownloadFilename(systemInfo) {
+  const cfg = systemInfo && typeof systemInfo === "object" ? (systemInfo.config || systemInfo) : null;
+  const rawName = cfg?.Name ?? cfg?.name;
+  const systemSlug = String(rawName ?? "")
+    .trim()
+    .replace(/[/\\?%*:|"<>.\s]+/g, "_")
+    .replace(/_+/g, "_")
+    .replace(/^_|_$/g, "");
+  const safeSystem = systemSlug || "unknown";
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  const dt = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+  return `pvcopilot_syncedData_${safeSystem}_${dt}.csv`;
+}
+
 function DataSynchronizationCard({
   pvData,
   weatherData,
@@ -2897,6 +2912,7 @@ function DataSynchronizationCard({
   timeSyncRulesActive,
   setTimeSyncRulesActive,
   syncModeAvailable,
+  systemInfo,
 }) {
   if (!pvData || !weatherData) return null;
 
@@ -3450,7 +3466,7 @@ function DataSynchronizationCard({
                       const url = URL.createObjectURL(blob);
                       const a = document.createElement("a");
                       a.href = url;
-                      a.download = "PV & Weather Synced Data PVCopilot.csv";
+                      a.download = buildSyncedDataDownloadFilename(systemInfo);
                       document.body.appendChild(a);
                       a.click();
                       document.body.removeChild(a);
@@ -5037,6 +5053,7 @@ export default function QualityCheckPage() {
               timeSyncRulesActive={timeSyncRulesActive}
               setTimeSyncRulesActive={setTimeSyncRulesActive}
               syncModeAvailable={hasApplicableSyncRules}
+              systemInfo={sysData}
             />
           )}
 
@@ -5555,7 +5572,7 @@ export default function QualityCheckPage() {
                               const url = URL.createObjectURL(blob);
                               const a = document.createElement("a");
                               a.href = url;
-                              a.download = "PV & Weather Synced Data PVCopilot.csv";
+                              a.download = buildSyncedDataDownloadFilename(sysData);
                               document.body.appendChild(a);
                               a.click();
                               document.body.removeChild(a);
