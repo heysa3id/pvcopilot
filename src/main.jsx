@@ -1,5 +1,6 @@
 // Safari/WebKit: polyfill must run before any code that uses Promise.withResolvers (e.g. pdfjs)
 import './utils/promiseWithResolversPolyfill.js'
+import { rewriteGithubPagesSpaUrl } from './utils/rewriteGithubPagesSpaUrl.js'
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom'
@@ -333,6 +334,8 @@ const theme = createTheme({
     caption: { fontWeight: 500 },
   },
 })
+
+rewriteGithubPagesSpaUrl()
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
