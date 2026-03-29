@@ -1278,7 +1278,7 @@ export default function LandingPage() {
                   ))}
                 </div>
                 <a
-                  href="mailto:contact@pvcopilot.com"
+                  href="mailto:saidelhamaoui1@gmail.com"
                   style={{
                     display: "inline-flex", alignItems: "center", justifyContent: "center",
                     padding: "12px 24px", background: G, color: "#0F172A",
@@ -1415,7 +1415,7 @@ export default function LandingPage() {
             >
               Launch LCOE Tool →
             </Link>
-            <a href="mailto:contact@pvcopilot.com" style={{
+            <a href="mailto:saidelhamaoui1@gmail.com" style={{
               padding: "12px 32px", background: "transparent", color: "#CBD5E1",
               textDecoration: "none", borderRadius: 9999, fontWeight: 600, fontSize: 14,
               border: "1.5px solid rgba(255,255,255,.12)",
