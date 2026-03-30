@@ -26,6 +26,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS
 
 from lcoe_pdf import parse_pvsyst_pdf
+from pv_estimator_proxy import register_pv_estimator_routes
 from quality_check_csv import process_quality_check_csv
 import jobs
 import metrics
@@ -121,6 +122,7 @@ def _log(event: str, **kwargs) -> None:
 
 app = Flask(__name__)
 CORS(app)
+register_pv_estimator_routes(app)
 
 MAX_PVSYST_UPLOAD_BYTES = int(os.getenv("MAX_PVSYST_UPLOAD_BYTES", str(50 * 1024 * 1024)))
 MAX_CSV_UPLOAD_BYTES = int(os.getenv("MAX_CSV_UPLOAD_BYTES", str(50 * 1024 * 1024)))

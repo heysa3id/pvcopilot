@@ -789,6 +789,10 @@
     <script src="./pvc-nav.js"></script>
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
     <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+    <!-- Vite build replaces the empty string with VITE_API_BASE (GitHub Actions). Dev keeps "" so /api uses the Vite proxy. -->
+    <script>
+      window.__PV_ESTIMATOR_API_BASE__ = "";
+    </script>
     <script type="module" src="./src/main.js"></script>
   </body>
 </html>

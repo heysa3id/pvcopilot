@@ -1,6 +1,10 @@
+import fs from "node:fs"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import path from "path";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 /** PV estimator weather + CEC lookup APIs (public/pv-estimator-app/server.js). */
 const PV_ESTIMATOR_API = process.env.PV_ESTIMATOR_API_URL || "http://127.0.0.1:4173";
@@ -34,8 +38,31 @@ function pvEstimatorAppCleanUrl() {
   }
 }
 
+/** After build, inject VITE_API_BASE into dist/pv-estimator-app for production API calls. */
+function injectPvEstimatorApiBase() {
+  return {
+    name: "inject-pv-estimator-api-base",
+    closeBundle() {
+      const distHtml = path.resolve(__dirname, "dist/pv-estimator-app/index.html")
+      if (!fs.existsSync(distHtml)) {
+        return
+      }
+      let html = fs.readFileSync(distHtml, "utf8")
+      const injected = JSON.stringify(process.env.VITE_API_BASE || "")
+      const next = html.replace(
+        /window\.__PV_ESTIMATOR_API_BASE__\s*=\s*""\s*;/,
+        `window.__PV_ESTIMATOR_API_BASE__ = ${injected};`
+      )
+      if (next === html) {
+        return
+      }
+      fs.writeFileSync(distHtml, next)
+    },
+  }
+}
+
 export default defineConfig({
-  plugins: [react(), pvEstimatorAppCleanUrl()],
+  plugins: [react(), pvEstimatorAppCleanUrl(), injectPvEstimatorApiBase()],
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "src"),

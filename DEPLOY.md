@@ -90,7 +90,7 @@ The app defaults to **`http://localhost:5001`** when env vars are unset. For any
 
 | Variable | Used by | Value (example) |
 |----------|---------|-------------------|
-| `VITE_API_BASE` | `src/components/ContactFormPopover.tsx`, `src/pages/QualityCheckPage.jsx` | `https://your-api.example.com` (no trailing slash) |
+| `VITE_API_BASE` | Contact form, Quality Check, **PV Layout Estimator** (injected into `dist/pv-estimator-app/index.html` so `/pv-estimator-app/` calls this origin for `/api/weather`, `/api/modules`, `/api/inverters`) | `https://your-api.example.com` (no trailing slash) |
 | `VITE_PARSER_URL` | `src/pages/LcoeTool.jsx` (PVsyst PDF upload) | `https://your-api.example.com/api/parse-pvsyst` |
 
 For a local production check, create `.env.production` in the repo root:
@@ -113,7 +113,9 @@ The workflow passes the same variables into `npm run build`. After your API is d
    - **`VITE_API_BASE`** — HTTPS origin of the Flask app (no trailing slash).
    - **`VITE_PARSER_URL`** (optional but recommended) — full URL to `.../api/parse-pvsyst`.
 
-If these are not set, the CI build still succeeds, but the live site will fall back to `localhost` for API calls (contact form and related features will not work for real users).
+If these are not set, the CI build still succeeds, but the live site will fall back to `localhost` for API calls (contact form, Quality Check, **PV Layout Estimator weather/module/inverter APIs**, and related features will not work for real users).
+
+After changing the backend, **redeploy Flask** so it includes [`backend/pv_estimator_proxy.py`](backend/pv_estimator_proxy.py) (routes: `/api/weather`, `/api/modules`, `/api/modules/manufacturers`, `/api/inverters`, `/api/inverters/manufacturers`).
 
 ### Same-origin proxy (alternative)
 

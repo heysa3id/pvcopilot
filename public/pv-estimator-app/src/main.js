@@ -8,6 +8,25 @@ import {
 import { renderBarChart, renderLineChart, renderGroupedBarChart, renderDualAxisChart, renderPseudo3dLayout, renderLossDiagram, renderMonthlyTable, renderNormalizedProductionChart, renderMonthlyPrChart } from "./charts.js";
 import { buildAndSaveSimulationReport, captureElementAsPng } from "./simulation-report-pdf.js";
 
+/** Set in index.html: empty for local dev (Vite proxies /api), or VITE_API_BASE on production (GitHub Pages). */
+function getPvApiBase() {
+  if (typeof globalThis === "undefined") {
+    return "";
+  }
+  const raw = globalThis.__PV_ESTIMATOR_API_BASE__;
+  if (raw == null || String(raw).trim() === "") {
+    return "";
+  }
+  return String(raw).replace(/\/$/, "");
+}
+
+const PV_API_BASE = getPvApiBase();
+
+function apiUrl(path) {
+  const p = path.startsWith("/") ? path : `/${path}`;
+  return PV_API_BASE ? `${PV_API_BASE}${p}` : p;
+}
+
 const DEFAULT_WEATHER_SUMMARY =
   "Fetch a typical meteorological year directly from PVGIS or historical weather from Open-Meteo ERA5 using the current site coordinates.";
 
@@ -198,8 +217,8 @@ function updateWeatherProviderNote() {
   note.innerHTML = `
     <span>PVGIS TMY</span>
     <p>
-      Recommended no-key source. The app loads it through the local preview server
-      because the official PVGIS API blocks direct browser AJAX requests.
+      Recommended no-key source. Data is loaded through the PVCopilot API (or the local dev proxy)
+      because the official PVGIS API blocks direct browser requests.
     </p>
   `;
 }
@@ -1116,9 +1135,11 @@ async function fetchWeatherFromApi() {
 
   try {
     const response = await fetch(
-      `/api/weather?provider=${encodeURIComponent(config.weatherProvider)}&lat=${encodeURIComponent(
-        config.siteLat
-      )}&lon=${encodeURIComponent(config.siteLng)}`
+      apiUrl(
+        `/api/weather?provider=${encodeURIComponent(config.weatherProvider)}&lat=${encodeURIComponent(
+          config.siteLat
+        )}&lon=${encodeURIComponent(config.siteLng)}`
+      )
     );
 
     const payload = await response.json().catch(() => null);
@@ -1131,12 +1152,16 @@ async function fetchWeatherFromApi() {
     }
     if (!payload || typeof payload !== "object") {
       throw new Error(
-        "Invalid weather response from server. If you use the main Vite dev server, run `npm run dev` so the PV estimator API runs on port 4173, or start it with: node public/pv-estimator-app/server.js"
+        PV_API_BASE
+          ? "Invalid weather response from API. Check that the Flask backend is deployed with PV estimator routes."
+          : "Invalid weather response from server. Run `npm run dev` (starts the PV API on port 4173) or: node public/pv-estimator-app/server.js"
       );
     }
     if (!payload.meta || typeof payload.meta.ready !== "boolean") {
       throw new Error(
-        "Weather API returned an unexpected payload (missing meta). Check that /api requests are proxied to the PV estimator Node server."
+        PV_API_BASE
+          ? "Weather API returned an unexpected payload. Confirm VITE_API_BASE points to the PVCopilot backend."
+          : "Weather API returned an unexpected payload. Check that /api is proxied to the PV estimator Node server (npm run dev)."
       );
     }
     if (!payload.meta.ready) {
@@ -1535,8 +1560,8 @@ function wireEvents() {
     applyBtnId: "moduleFilterApply",
     qInputId: "moduleFilterQ",
     rangeInputIds: [["powerMin", "moduleFilterPowerMin"], ["powerMax", "moduleFilterPowerMax"]],
-    manufacturersUrl: "/api/modules/manufacturers",
-    searchUrl: "/api/modules",
+    manufacturersUrl: apiUrl("/api/modules/manufacturers"),
+    searchUrl: apiUrl("/api/modules"),
     renderItem: (mod) =>
       `<div class="item-name">${mod.name}</div>
        <div class="item-specs">${mod.powerWp} Wp · ${mod.lengthM || "?"}×${mod.widthM || "?"} m · ${mod.technology || ""}${mod.bifacial ? " · Bifacial" : ""}</div>`,
@@ -1559,8 +1584,8 @@ function wireEvents() {
     applyBtnId: "inverterFilterApply",
     qInputId: "inverterFilterQ",
     rangeInputIds: [["capacityMin", "inverterFilterCapacityMin"], ["capacityMax", "inverterFilterCapacityMax"]],
-    manufacturersUrl: "/api/inverters/manufacturers",
-    searchUrl: "/api/inverters",
+    manufacturersUrl: apiUrl("/api/inverters/manufacturers"),
+    searchUrl: apiUrl("/api/inverters"),
     renderItem: (inv) =>
       `<div class="item-name">${inv.name}</div>
        <div class="item-specs">${inv.pacoKw} kW AC · ${inv.efficiencyPct || "?"}% eff · ${inv.vdcmaxV || "?"}V max · MPPT ${inv.mpptLowV || "?"}–${inv.mpptHighV || "?"}V</div>`,
