@@ -1225,7 +1225,7 @@ export default function LandingPage() {
                   fontSize: 12.5, color: "#475569", lineHeight: 1.55, marginBottom: 14,
                   paddingLeft: 20, marginTop: 0,
                 }}>
-                  <li style={{ marginBottom: 4 }}>Served as Project Coordinator for SolarTwin, a digital twin platform for PV O&M at Green Energy Park.</li>
+                  <li style={{ marginBottom: 4 }}>Served as O&amp;M and digitalization Engineer at Green Energy Park</li>
                   <li style={{ marginBottom: 4 }}>ExCo & Task 13 Expert at IEA PVPS.</li>
                   <li style={{ marginBottom: 4 }}>Director of Outreach & Communication at PV Camper (Sandia Labs).</li>
                 </ul>
@@ -1303,14 +1303,85 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* ━━━ OUR PARTNERS — logo marquee (endless loop, no empty space) ━━━ */}
-      <style>{`
-        @keyframes partners-marquee {
-          0% { transform: translateX(0); }
-          100% { transform: translateX(-25%); }
-        }
-        .partners-track:hover { animation-play-state: paused; }
-      `}</style>
+      {/* Our Partners section hidden for now */}
+      {false && (
+        <>
+          {/* ━━━ OUR PARTNERS — logo marquee (endless loop, no empty space) ━━━ */}
+          <style>{`
+            @keyframes partners-marquee {
+              0% { transform: translateX(0); }
+              100% { transform: translateX(-25%); }
+            }
+            .partners-track:hover { animation-play-state: paused; }
+          `}</style>
+          <section id="partners" style={{
+            padding: "clamp(32px, 6vw, 56px) 16px clamp(40px, 8vw, 64px)",
+            background: "#FFFFFF",
+            borderTop: "1px solid #E2E8F0",
+          }}>
+            <div style={{ maxWidth: 1100, margin: "0 auto", textAlign: "center", marginBottom: 32, padding: "0 8px" }}>
+              <h2 style={{
+                fontSize: 22, fontWeight: 800, color: "#0F172A",
+                letterSpacing: "-.02em", marginBottom: 8,
+              }}>
+                Our Partners
+              </h2>
+              <p style={{ fontSize: 14, color: "#64748B", maxWidth: 520, margin: "0 auto" }}>
+                Collaborating with leading institutions in solar research and digital innovation.
+              </p>
+            </div>
+            <div style={{ overflow: "hidden", width: "100%", marginLeft: -16, marginRight: -16 }}>
+              <div
+                className="partners-track"
+                style={{
+                  display: "flex",
+                  width: "max-content",
+                  animation: "partners-marquee 30s linear infinite",
+                  gap: 48,
+                }}
+              >
+                {[...PARTNER_LOGOS, ...PARTNER_LOGOS, ...PARTNER_LOGOS, ...PARTNER_LOGOS].map((partner, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      flexShrink: 0,
+                      width: 140,
+                      height: 72,
+                      borderRadius: 12,
+                      background: partner.bg,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      color: "#fff",
+                      fontSize: 18,
+                      fontWeight: 700,
+                      fontFamily: "Inter, Arial, sans-serif",
+                      boxShadow: "0 4px 14px rgba(0,0,0,.12)",
+                      transition: "transform .2s ease, box-shadow .2s ease",
+                    }}
+                    onMouseEnter={e => {
+                      e.currentTarget.style.transform = "scale(1.05)";
+                      e.currentTarget.style.boxShadow = "0 8px 24px rgba(0,0,0,.18)";
+                    }}
+                    onMouseLeave={e => {
+                      e.currentTarget.style.transform = "scale(1)";
+                      e.currentTarget.style.boxShadow = "0 4px 14px rgba(0,0,0,.12)";
+                    }}
+                    title={partner.name}
+                  >
+                    {partner.logo ? (
+                      <img src={partner.logo} alt={partner.name} style={{ height: 36, width: "auto", objectFit: "contain", maxWidth: 120 }} />
+                    ) : (
+                      partner.short
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        </>
+      )}
+
       <style>{`
         @media (max-width: 640px) {
           .footer-grid { grid-template-columns: 1fr !important; gap: 32px !important; text-align: center !important; }
@@ -1318,71 +1389,6 @@ export default function LandingPage() {
           .footer-grid .footer-brand p { margin-left: auto; margin-right: auto; }
         }
       `}</style>
-      <section id="partners" style={{
-        padding: "clamp(32px, 6vw, 56px) 16px clamp(40px, 8vw, 64px)",
-        background: "#FFFFFF",
-        borderTop: "1px solid #E2E8F0",
-      }}>
-        <div style={{ maxWidth: 1100, margin: "0 auto", textAlign: "center", marginBottom: 32, padding: "0 8px" }}>
-          <h2 style={{
-            fontSize: 22, fontWeight: 800, color: "#0F172A",
-            letterSpacing: "-.02em", marginBottom: 8,
-          }}>
-            Our Partners
-          </h2>
-          <p style={{ fontSize: 14, color: "#64748B", maxWidth: 520, margin: "0 auto" }}>
-            Collaborating with leading institutions in solar research and digital innovation.
-          </p>
-        </div>
-        <div style={{ overflow: "hidden", width: "100%", marginLeft: -16, marginRight: -16 }}>
-          <div
-            className="partners-track"
-            style={{
-              display: "flex",
-              width: "max-content",
-              animation: "partners-marquee 30s linear infinite",
-              gap: 48,
-            }}
-          >
-            {[...PARTNER_LOGOS, ...PARTNER_LOGOS, ...PARTNER_LOGOS, ...PARTNER_LOGOS].map((partner, i) => (
-              <div
-                key={i}
-                style={{
-                  flexShrink: 0,
-                  width: 140,
-                  height: 72,
-                  borderRadius: 12,
-                  background: partner.bg,
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  color: "#fff",
-                  fontSize: 18,
-                  fontWeight: 700,
-                  fontFamily: "Inter, Arial, sans-serif",
-                  boxShadow: "0 4px 14px rgba(0,0,0,.12)",
-                  transition: "transform .2s ease, box-shadow .2s ease",
-                }}
-                onMouseEnter={e => {
-                  e.currentTarget.style.transform = "scale(1.05)";
-                  e.currentTarget.style.boxShadow = "0 8px 24px rgba(0,0,0,.18)";
-                }}
-                onMouseLeave={e => {
-                  e.currentTarget.style.transform = "scale(1)";
-                  e.currentTarget.style.boxShadow = "0 4px 14px rgba(0,0,0,.12)";
-                }}
-                title={partner.name}
-              >
-                {partner.logo ? (
-                  <img src={partner.logo} alt={partner.name} style={{ height: 36, width: "auto", objectFit: "contain", maxWidth: 120 }} />
-                ) : (
-                  partner.short
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
 
       {/* ━━━ FOOTER — particle background only (no sun trajectory) ━━━ */}
       <footer id="contact" style={{
