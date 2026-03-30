@@ -560,7 +560,7 @@ function renderWeatherPreview() {
     labels,
     left: {
       label: "Temp (°C)",
-      color: "#ef4444",
+      color: "#FFBD59",
       unit: "°C",
       values: monthly.map((item) =>
         item.tempCount ? item.tempSum / item.tempCount : 0
@@ -568,7 +568,7 @@ function renderWeatherPreview() {
     },
     right: {
       label: "RH (%)",
-      color: "#3b82f6",
+      color: "#B2B3B3",
       unit: "%",
       values: monthly.map((item) =>
         item.rhCount ? item.rhSum / item.rhCount : 0
@@ -581,7 +581,7 @@ function renderWeatherPreview() {
     series: [
       {
         label: "Wind (m/s)",
-        color: "#3b82f6",
+        color: "#FFBD59",
         values: monthly.map((item) =>
           item.windCount ? item.windSum / item.windCount : 0
         ),
@@ -594,7 +594,7 @@ function renderWeatherPreview() {
     series: [
       {
         label: "Pressure (hPa)",
-        color: "#8b5cf6",
+        color: "#B2B3B3",
         values: monthly.map((item) =>
           item.pressureCount ? item.pressureSum / item.pressureCount : 0
         ),
