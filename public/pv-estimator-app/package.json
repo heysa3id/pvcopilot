@@ -1,0 +1,10 @@
+{
+  "name": "pv-estimator-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "PV Layout Estimator — static UI with local weather proxy server",
+  "scripts": {
+    "start": "node server.js",
+    "build": "node -e \"console.log('No bundler step; static assets are served by npm start.');\""
+  }
+}

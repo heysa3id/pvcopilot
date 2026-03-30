@@ -4,9 +4,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently -c blue,magenta -n vite,pv-api \"vite\" \"node public/pv-estimator-app/server.js\"",
     "build": "vite build",
-    "preview": "vite preview",
+    "preview": "concurrently -c blue,magenta -n preview,pv-api \"vite preview\" \"node public/pv-estimator-app/server.js\"",
     "backend": "cd backend && python3 server.py"
   },
   "dependencies": {
@@ -33,6 +33,7 @@
     "tailwind-merge": "^3.5.0"
   },
   "devDependencies": {
+    "concurrently": "^9.1.2",
     "@types/react": "^19.0.1",
     "@types/react-dom": "^19.0.2",
     "@vitejs/plugin-react": "^4.5.2",

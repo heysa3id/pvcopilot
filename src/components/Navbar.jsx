@@ -6,6 +6,7 @@ import {
   Workflow,
   Boxes,
   FileText,
+  SolarPanel,
   Wand2,
   Mail,
   ChevronDown,
@@ -25,6 +26,9 @@ import {
 import CurrencyExchangeIcon from "@mui/icons-material/CurrencyExchange";
 
 const MOBILE_BREAKPOINT = 768;
+/** Static PV estimator under public/; full navigation so it is not handled by React Router. */
+/** Trailing slash so relative assets in public/pv-estimator-app/ resolve correctly */
+const SIMULATOR_HREF = `${import.meta.env.BASE_URL}pv-estimator-app/`.replace(/([^:]\/)\/+/g, "$1");
 const ACCENT = "#F4BB40";
 const SOFT_ACCENT_BG = "#FEF9ED";
 const BORDER = "#E2E8F0";
@@ -51,6 +55,7 @@ const PAGE_NAV_ITEMS = [
   { key: "workflow", label: "Workflow", to: "/#workflow", hash: "workflow", Icon: Workflow },
   { key: "modules", label: "Modules", to: "/#modules", hash: "modules", Icon: Boxes },
   { key: "documentation", label: "Documentation", to: "/docs", hash: null, Icon: FileText },
+  { key: "simulator", label: "Simulator", to: SIMULATOR_HREF, hash: null, Icon: SolarPanel, native: true },
 ];
 
 function NavTooltip({ children, icon: Icon, label }) {
@@ -72,31 +77,33 @@ function NavTooltip({ children, icon: Icon, label }) {
 }
 
 function NavItem({ item, isSelected, isLanding, activeSectionId, closeMobile }) {
-  const { key, label, to, hash, Icon } = item;
+  const { key, label, to, hash, Icon, native, openInNewTab } = item;
   const selected = isSelected;
 
-  return (
-    <Link
-      to={to}
-      onClick={closeMobile}
-      className="group relative flex items-center rounded-lg px-3 py-2 transition-colors duration-200"
-      style={{
-        background: selected ? SOFT_ACCENT_BG : "transparent",
-        color: selected ? ACCENT : INACTIVE_TEXT,
-      }}
-      onMouseEnter={(e) => {
-        if (!selected) {
-          e.currentTarget.style.background = HOVER_BG;
-          e.currentTarget.style.color = HOVER_TEXT;
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (!selected) {
-          e.currentTarget.style.background = "transparent";
-          e.currentTarget.style.color = INACTIVE_TEXT;
-        }
-      }}
-    >
+  const shellProps = {
+    onClick: closeMobile,
+    className: "group relative flex items-center rounded-lg px-3 py-2 transition-colors duration-200",
+    style: {
+      background: selected ? SOFT_ACCENT_BG : "transparent",
+      color: selected ? ACCENT : INACTIVE_TEXT,
+      textDecoration: "none",
+    },
+    onMouseEnter: (e) => {
+      if (!selected) {
+        e.currentTarget.style.background = HOVER_BG;
+        e.currentTarget.style.color = HOVER_TEXT;
+      }
+    },
+    onMouseLeave: (e) => {
+      if (!selected) {
+        e.currentTarget.style.background = "transparent";
+        e.currentTarget.style.color = INACTIVE_TEXT;
+      }
+    },
+  };
+
+  const inner = (
+    <>
       <Icon className="h-5 w-5 shrink-0" strokeWidth={2} />
       <AnimatePresence initial={false}>
         {selected && (
@@ -114,6 +121,23 @@ function NavItem({ item, isSelected, isLanding, activeSectionId, closeMobile }) 
       {!selected && (
         <NavTooltip icon={Icon} label={label} />
       )}
+    </>
+  );
+
+  if (native) {
+    return (
+      <a
+        href={to}
+        {...(openInNewTab ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+        {...shellProps}
+      >
+        {inner}
+      </a>
+    );
+  }
+  return (
+    <Link to={to} {...shellProps}>
+      {inner}
     </Link>
   );
 }
@@ -486,23 +510,43 @@ export default function Navbar() {
         >
           <div className="flex flex-col gap-1">
             {PAGE_NAV_ITEMS.map((item) => {
-              const isSelected = selectedPageKey === item.key;
               const isActive =
                 item.key === "overview"
                   ? isLanding && (activeSectionId === "hero" || activeSectionId === "foundation")
                   : item.hash
                     ? isLanding && (activeSectionId ? activeSectionId === item.hash : item.hash === "foundation")
-                    : pathname === "/docs";
+                    : item.key === "documentation"
+                      ? pathname === "/docs"
+                      : false;
+              const mobileHref = item.key === "documentation" ? "/docs" : item.to;
+              const mobileClass =
+                "flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-colors no-underline";
+              const mobileStyle = {
+                background: isActive ? SOFT_ACCENT_BG : "transparent",
+                color: isActive ? ACCENT : HOVER_TEXT,
+              };
+              if (item.native) {
+                return (
+                  <a
+                    key={item.key}
+                    href={mobileHref}
+                    {...(item.openInNewTab ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+                    onClick={closeMobileMenu}
+                    className={mobileClass}
+                    style={mobileStyle}
+                  >
+                    <item.Icon className="h-5 w-5 shrink-0" strokeWidth={2} />
+                    {item.label}
+                  </a>
+                );
+              }
               return (
                 <Link
                   key={item.key}
-                  to={item.key === "documentation" ? "/docs" : item.to}
+                  to={mobileHref}
                   onClick={closeMobileMenu}
-                  className="flex items-center gap-3 rounded-lg px-4 py-3 text-sm font-medium transition-colors"
-                  style={{
-                    background: isActive ? SOFT_ACCENT_BG : "transparent",
-                    color: isActive ? ACCENT : HOVER_TEXT,
-                  }}
+                  className={mobileClass}
+                  style={mobileStyle}
                 >
                   <item.Icon className="h-5 w-5 shrink-0" strokeWidth={2} />
                   {item.label}

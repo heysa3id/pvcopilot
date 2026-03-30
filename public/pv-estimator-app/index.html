@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>PV Layout Estimator</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap"
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      crossorigin=""
+    />
+    <link
+      rel="stylesheet"
+      href="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.css"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/apexcharts"></script>
+  </head>
+  <body>
+    <nav class="pvc-app-nav" aria-label="PVCopilot">
+      <div class="pvc-app-nav__inner">
+        <a href="../#hero" class="pvc-app-nav__logo">
+          <img src="../logoBlack.svg" alt="PVCopilot" width="140" height="32" decoding="async" />
+        </a>
+
+        <div class="pvc-app-nav__pill pvc-app-nav__pill--main">
+            <div class="pvc-app-nav__item">
+              <a href="../#hero" class="pvc-app-nav__link pvc-app-nav__trigger">
+                <svg class="pvc-app-nav__svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect width="7" height="9" x="3" y="3" rx="1" />
+                  <rect width="7" height="5" x="14" y="3" rx="1" />
+                  <rect width="7" height="9" x="14" y="12" rx="1" />
+                  <rect width="7" height="5" x="3" y="16" rx="1" />
+                </svg>
+                <span class="pvc-app-nav__tooltip">
+                  <span class="pvc-app-nav__tooltip-box">
+                    <svg class="pvc-app-nav__tooltip-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F4BB40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <rect width="7" height="9" x="3" y="3" rx="1" />
+                      <rect width="7" height="5" x="14" y="3" rx="1" />
+                      <rect width="7" height="9" x="14" y="12" rx="1" />
+                      <rect width="7" height="5" x="3" y="16" rx="1" />
+                    </svg>
+                    Overview
+                  </span>
+                </span>
+              </a>
+            </div>
+            <div class="pvc-app-nav__item">
+              <a href="../#workflow" class="pvc-app-nav__link pvc-app-nav__trigger">
+                <svg class="pvc-app-nav__svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <rect width="8" height="8" x="3" y="3" rx="2" />
+                  <path d="M7 11v4a2 2 0 0 0 2 2h4" />
+                  <rect width="8" height="8" x="13" y="13" rx="2" />
+                </svg>
+                <span class="pvc-app-nav__tooltip">
+                  <span class="pvc-app-nav__tooltip-box">
+                    <svg class="pvc-app-nav__tooltip-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F4BB40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <rect width="8" height="8" x="3" y="3" rx="2" />
+                      <path d="M7 11v4a2 2 0 0 0 2 2h4" />
+                      <rect width="8" height="8" x="13" y="13" rx="2" />
+                    </svg>
+                    Workflow
+                  </span>
+                </span>
+              </a>
+            </div>
+            <div class="pvc-app-nav__item">
+              <a href="../#modules" class="pvc-app-nav__link pvc-app-nav__trigger">
+                <svg class="pvc-app-nav__svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M2.97 12.92A2 2 0 0 0 2 14.63v3.24a2 2 0 0 0 .97 1.71l3 1.8a2 2 0 0 0 2.06 0L12 19v-5.5l-5-3-4.03 2.42Z" />
+                  <path d="m7 16.5-4.74-2.85M7 16.5 5-3M7 16.5v5.17" />
+                  <path d="M12 13.5V19l3.97 2.38a2 2 0 0 0 2.06 0l3-1.8a2 2 0 0 0 .97-1.71v-3.24a2 2 0 0 0-.97-1.71L17 10.5l-5 3Z" />
+                  <path d="m17 16.5-5-3" />
+                  <path d="m17 16.5 4.74-2.85" />
+                  <path d="M17 16.5v5.17" />
+                  <path d="M7.97 4.42A2 2 0 0 0 7 6.13v4.37l5 3 5-3V6.13a2 2 0 0 0-.97-1.71l-3-1.8a2 2 0 0 0-2.06 0l-3 1.8Z" />
+                  <path d="M12 8 7.26 5.15M12 8l4.74-2.85M12 13.5V8" />
+                </svg>
+                <span class="pvc-app-nav__tooltip">
+                  <span class="pvc-app-nav__tooltip-box">
+                    <svg class="pvc-app-nav__tooltip-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F4BB40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M2.97 12.92A2 2 0 0 0 2 14.63v3.24a2 2 0 0 0 .97 1.71l3 1.8a2 2 0 0 0 2.06 0L12 19v-5.5l-5-3-4.03 2.42Z" />
+                      <path d="M12 13.5V19l3.97 2.38a2 2 0 0 0 2.06 0l3-1.8a2 2 0 0 0 .97-1.71v-3.24a2 2 0 0 0-.97-1.71L17 10.5l-5 3Z" />
+                      <path d="M7.97 4.42A2 2 0 0 0 7 6.13v4.37l5 3 5-3V6.13a2 2 0 0 0-.97-1.71l-3-1.8a2 2 0 0 0-2.06 0l-3 1.8Z" />
+                      <path d="M12 8 7.26 5.15M12 8l4.74-2.85M12 13.5V8" />
+                    </svg>
+                    Modules
+                  </span>
+                </span>
+              </a>
+            </div>
+            <div class="pvc-app-nav__item">
+              <a href="../docs" class="pvc-app-nav__link pvc-app-nav__trigger">
+                <svg class="pvc-app-nav__svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" />
+                  <path d="M14 2v5a1 1 0 0 0 1 1h5" />
+                  <path d="M10 9H8M16 13H8M16 17H8" />
+                </svg>
+                <span class="pvc-app-nav__tooltip">
+                  <span class="pvc-app-nav__tooltip-box">
+                    <svg class="pvc-app-nav__tooltip-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F4BB40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" />
+                      <path d="M14 2v5a1 1 0 0 0 1 1h5" />
+                      <path d="M10 9H8M16 13H8M16 17H8" />
+                    </svg>
+                    Documentation
+                  </span>
+                </span>
+              </a>
+            </div>
+            <span class="pvc-app-nav__link pvc-app-nav__link--active pvc-app-nav__simulator" aria-current="page">
+              <svg class="pvc-app-nav__svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M11 2h2" />
+                <path d="m14.28 14-4.56 8" />
+                <path d="m21 22-1.558-4H4.558" />
+                <path d="M3 10v2" />
+                <path d="M6.245 15.04A2 2 0 0 1 8 14h12a1 1 0 0 1 .864 1.505l-3.11 5.457A2 2 0 0 1 16 22H4a1 1 0 0 1-.863-1.506z" />
+                <path d="M7 2a4 4 0 0 1-4 4" />
+                <path d="m8.66 7.66 1.41 1.41" />
+              </svg>
+              <span class="pvc-app-nav__link-label pvc-app-nav__link-label--spring">Simulator</span>
+            </span>
+
+            <div class="pvc-app-nav__tools pvc-app-nav__item" id="pvcNavToolsWrap">
+              <button type="button" id="pvcNavToolsBtn" class="pvc-app-nav__link pvc-app-nav__link--btn pvc-app-nav__trigger pvc-app-nav__tools-btn" aria-expanded="false" aria-haspopup="true">
+                <span class="pvc-app-nav__tools-visual" aria-hidden="true">
+                  <span class="pvc-app-nav__tools-collapsed">
+                    <svg class="pvc-app-nav__svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72" />
+                      <path d="m14 7 3 3" />
+                      <path d="M5 6v4M19 14v4M10 2v2M7 8H3M21 16h-4M11 3H9" />
+                    </svg>
+                  </span>
+                  <span class="pvc-app-nav__tools-expanded">
+                    <svg class="pvc-app-nav__svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72" />
+                      <path d="m14 7 3 3" />
+                      <path d="M5 6v4M19 14v4M10 2v2M7 8H3M21 16h-4M11 3H9" />
+                    </svg>
+                    <span class="pvc-app-nav__tools-expanded-label">Tools</span>
+                    <svg class="pvc-app-nav__svg pvc-app-nav__svg--chev" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                      <path d="m6 9 6 6 6-6" />
+                    </svg>
+                  </span>
+                </span>
+                <span class="pvc-app-nav__tooltip pvc-app-nav__tooltip--tools">
+                  <span class="pvc-app-nav__tooltip-box">
+                    <svg class="pvc-app-nav__tooltip-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F4BB40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72" />
+                      <path d="m14 7 3 3" />
+                      <path d="M5 6v4M19 14v4M10 2v2M7 8H3M21 16h-4M11 3H9" />
+                    </svg>
+                    Tools
+                  </span>
+                </span>
+              </button>
+              <div id="pvcNavToolsMenu" class="pvc-app-nav__dropdown" role="menu" aria-hidden="true">
+                <a role="menuitem" class="pvc-app-nav__dropdown-item" href="../data-ingestion">
+                  <span class="material-symbols-outlined pvc-app-nav__tools-icon" aria-hidden="true">search</span>
+                  <span class="pvc-app-nav__dropdown-text">Data Ingestion &amp; Synchronization</span>
+                </a>
+                <a role="menuitem" class="pvc-app-nav__dropdown-item" href="../data-filtering">
+                  <span class="material-symbols-outlined pvc-app-nav__tools-icon" aria-hidden="true">filter_alt</span>
+                  <span class="pvc-app-nav__dropdown-text">Data Filtering</span>
+                </a>
+                <a role="menuitem" class="pvc-app-nav__dropdown-item" href="../kpi-analysis">
+                  <span class="material-symbols-outlined pvc-app-nav__tools-icon" aria-hidden="true">query_stats</span>
+                  <span class="pvc-app-nav__dropdown-text">KPI Analysis</span>
+                </a>
+                <a role="menuitem" class="pvc-app-nav__dropdown-item" href="../gap-filling">
+                  <span class="material-symbols-outlined pvc-app-nav__tools-icon" aria-hidden="true">auto_fix_high</span>
+                  <span class="pvc-app-nav__dropdown-text">Gap Filling</span>
+                </a>
+                <a role="menuitem" class="pvc-app-nav__dropdown-item" href="../power-prediction">
+                  <span class="material-symbols-outlined pvc-app-nav__tools-icon" aria-hidden="true">bolt</span>
+                  <span class="pvc-app-nav__dropdown-text">Power Prediction</span>
+                </a>
+                <a role="menuitem" class="pvc-app-nav__dropdown-item" href="../lcoe-tool">
+                  <span class="material-symbols-outlined pvc-app-nav__tools-icon" aria-hidden="true">currency_exchange</span>
+                  <span class="pvc-app-nav__dropdown-text">LCOE Tool</span>
+                </a>
+                <a role="menuitem" class="pvc-app-nav__dropdown-item" href="../workflow">
+                  <span class="material-symbols-outlined pvc-app-nav__tools-icon" aria-hidden="true">account_tree</span>
+                  <span class="pvc-app-nav__dropdown-text">Workflow</span>
+                </a>
+              </div>
+            </div>
+        </div>
+
+        <div class="pvc-app-nav__pill pvc-app-nav__pill--actions">
+            <div class="pvc-app-nav__item">
+              <a href="../#contact" class="pvc-app-nav__icon-btn pvc-app-nav__trigger">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                  <path d="m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7" />
+                  <rect x="2" y="4" width="20" height="16" rx="2" />
+                </svg>
+                <span class="pvc-app-nav__tooltip">
+                  <span class="pvc-app-nav__tooltip-box">
+                    <svg class="pvc-app-nav__tooltip-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#F4BB40" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                      <path d="m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7" />
+                      <rect x="2" y="4" width="20" height="16" rx="2" />
+                    </svg>
+                    Contact us
+                  </span>
+                </span>
+              </a>
+            </div>
+            <button type="button" id="pvcNavLcoeBtn" class="pvc-app-nav__lcoe">
+              <span class="pvc-app-nav__lcoe-burst" aria-hidden="true"></span>
+              <span class="pvc-app-nav__lcoe-inner">
+                <span class="pvc-app-nav__lcoe-stack pvc-app-nav__lcoe-idle">
+                  <span class="pvc-app-nav__lcoe-dot" aria-hidden="true"></span>
+                  <span class="pvc-app-nav__lcoe-text">Open LCOE</span>
+                </span>
+                <span class="pvc-app-nav__lcoe-stack pvc-app-nav__lcoe-hoverface" aria-hidden="true">
+                  <svg class="pvc-app-nav__lcoe-calc" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <rect width="16" height="20" x="4" y="2" rx="2" />
+                    <line x1="8" x2="16" y1="6" y2="6" />
+                    <line x1="16" x2="16" y1="14" y2="18" />
+                    <path d="M16 10h.01M12 10h.01M8 10h.01M12 14h.01M8 14h.01M12 18h.01M8 18h.01" />
+                  </svg>
+                  <span>Open LCOE</span>
+                </span>
+                <span class="pvc-app-nav__lcoe-stack pvc-app-nav__lcoe-busy">
+                  <span class="pvc-app-nav__lcoe-text">Opening...</span>
+                </span>
+              </span>
+            </button>
+        </div>
+
+        <div class="pvc-app-nav__mobile-controls">
+          <a href="../#contact" class="pvc-app-nav__icon-btn" title="Contact us">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7" />
+              <rect x="2" y="4" width="20" height="16" rx="2" />
+            </svg>
+          </a>
+          <a href="../lcoe-tool" class="pvc-app-nav__icon-btn" title="Open LCOE">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect width="16" height="20" x="4" y="2" rx="2" />
+              <line x1="8" x2="16" y1="6" y2="6" />
+              <line x1="16" x2="16" y1="14" y2="18" />
+              <path d="M16 10h.01M12 10h.01M8 10h.01M12 14h.01M8 14h.01M12 18h.01M8 18h.01" />
+            </svg>
+          </a>
+          <button type="button" id="pvcNavMobileBtn" class="pvc-app-nav__burger" aria-label="Toggle menu" aria-expanded="false">
+            <svg id="pvcNavIconMenu" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <path d="M4 5h16M4 12h16M4 19h16" />
+            </svg>
+            <svg id="pvcNavIconClose" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden>
+              <path d="M18 6 6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <div id="pvcNavMobilePanel" class="pvc-app-nav__drawer" hidden>
+      <a href="../#hero">
+        <svg class="pvc-app-nav__svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect width="7" height="9" x="3" y="3" rx="1" /><rect width="7" height="5" x="14" y="3" rx="1" /><rect width="7" height="9" x="14" y="12" rx="1" /><rect width="7" height="5" x="3" y="16" rx="1" /></svg>
+        Overview
+      </a>
+      <a href="../#workflow">
+        <svg class="pvc-app-nav__svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect width="8" height="8" x="3" y="3" rx="2" /><path d="M7 11v4a2 2 0 0 0 2 2h4" /><rect width="8" height="8" x="13" y="13" rx="2" /></svg>
+        Workflow
+      </a>
+      <a href="../#modules">
+        <svg class="pvc-app-nav__svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2.97 12.92A2 2 0 0 0 2 14.63v3.24a2 2 0 0 0 .97 1.71l3 1.8a2 2 0 0 0 2.06 0L12 19v-5.5l-5-3-4.03 2.42Z" /><path d="M12 13.5V19l3.97 2.38a2 2 0 0 0 2.06 0l3-1.8a2 2 0 0 0 .97-1.71v-3.24a2 2 0 0 0-.97-1.71L17 10.5l-5 3Z" /><path d="M7.97 4.42A2 2 0 0 0 7 6.13v4.37l5 3 5-3V6.13a2 2 0 0 0-.97-1.71l-3-1.8a2 2 0 0 0-2.06 0l-3 1.8Z" /><path d="M12 8 7.26 5.15M12 8l4.74-2.85M12 13.5V8" /></svg>
+        Modules
+      </a>
+      <a href="../docs">
+        <svg class="pvc-app-nav__svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z" /><path d="M14 2v5a1 1 0 0 0 1 1h5" /><path d="M10 9H8M16 13H8M16 17H8" /></svg>
+        Documentation
+      </a>
+      <div class="pvc-app-nav__drawer-row pvc-app-nav__drawer-row--active" aria-current="page">
+        <svg class="pvc-app-nav__svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M11 2h2" /><path d="m14.28 14-4.56 8" /><path d="m21 22-1.558-4H4.558" /><path d="M3 10v2" /><path d="M6.245 15.04A2 2 0 0 1 8 14h12a1 1 0 0 1 .864 1.505l-3.11 5.457A2 2 0 0 1 16 22H4a1 1 0 0 1-.863-1.506z" /><path d="M7 2a4 4 0 0 1-4 4" /><path d="m8.66 7.66 1.41 1.41" /></svg>
+        Simulator
+      </div>
+
+      <div class="pvc-app-nav__drawer-tools">
+        <div class="pvc-app-nav__drawer-tools-title">Tools</div>
+        <a class="pvc-app-nav__drawer-tools-link" href="../data-ingestion">
+          <span class="material-symbols-outlined pvc-app-nav__tools-icon" aria-hidden="true">search</span>
+          <span>Data Ingestion &amp; Synchronization</span>
+        </a>
+        <a class="pvc-app-nav__drawer-tools-link" href="../data-filtering">
+          <span class="material-symbols-outlined pvc-app-nav__tools-icon" aria-hidden="true">filter_alt</span>
+          <span>Data Filtering</span>
+        </a>
+        <a class="pvc-app-nav__drawer-tools-link" href="../kpi-analysis">
+          <span class="material-symbols-outlined pvc-app-nav__tools-icon" aria-hidden="true">query_stats</span>
+          <span>KPI Analysis</span>
+        </a>
+        <a class="pvc-app-nav__drawer-tools-link" href="../gap-filling">
+          <span class="material-symbols-outlined pvc-app-nav__tools-icon" aria-hidden="true">auto_fix_high</span>
+          <span>Gap Filling</span>
+        </a>
+        <a class="pvc-app-nav__drawer-tools-link" href="../power-prediction">
+          <span class="material-symbols-outlined pvc-app-nav__tools-icon" aria-hidden="true">bolt</span>
+          <span>Power Prediction</span>
+        </a>
+        <a class="pvc-app-nav__drawer-tools-link" href="../lcoe-tool">
+          <span class="material-symbols-outlined pvc-app-nav__tools-icon" aria-hidden="true">currency_exchange</span>
+          <span>LCOE Tool</span>
+        </a>
+        <a class="pvc-app-nav__drawer-tools-link" href="../workflow">
+          <span class="material-symbols-outlined pvc-app-nav__tools-icon" aria-hidden="true">account_tree</span>
+          <span>Workflow</span>
+        </a>
+      </div>
+
+      <div class="pvc-app-nav__drawer-lcoe">
+        <a href="../lcoe-tool">Open LCOE</a>
+      </div>
+    </div>
+
+    <div class="dash">
+      <!-- ───── Collapsible intro banner ───── -->
+      <section class="intro-banner">
+        <div class="intro-header">
+          <div class="intro-brand">
+            <div class="intro-icon-wrap" aria-hidden="true">
+              <span class="material-symbols-outlined intro-header-icon">solar_power</span>
+            </div>
+            <div class="intro-titles">
+              <strong class="intro-product">PV Layout Estimator</strong>
+              <span class="intro-subtitle">Estimate year-1 and 25-year net energy from site, weather, layout, and the full loss chain.</span>
+            </div>
+          </div>
+          <div class="intro-actions">
+            <button type="button" class="intro-read-docs" id="introReadDocs">
+              <span class="material-symbols-outlined intro-read-docs-icon" aria-hidden="true">description</span>
+              Read Docs
+            </button>
+            <button
+              type="button"
+              class="intro-expand"
+              aria-expanded="false"
+              aria-controls="introBody"
+              aria-label="Expand or collapse overview"
+            >
+              <svg class="intro-chevron" width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+                <path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div id="introBody" class="intro-body is-collapsed">
+          <article class="intro-card">
+            <h4>Overview &amp; assumptions</h4>
+            <p>
+              This tool estimates energy production for a utility-scale PV system
+              using hourly weather data, a detailed DC layout model, and a full
+              loss chain to calculate year-1 and 25-year energy output.
+            </p>
+            <p class="intro-detail">
+              Hourly irradiance transposition to plane-of-array. PVsyst-style
+              thermal model with Uc/Uv. Linear or exponential degradation over
+              the project lifetime.
+            </p>
+          </article>
+          <article class="intro-card">
+            <h4>Simulation methodology</h4>
+            <p class="intro-formula">
+              POA = beam + diffuse + ground-reflected<br>
+              T<sub>cell</sub> = T<sub>amb</sub> + POA / (Uc + Uv &times; WS)<br>
+              P<sub>dc</sub> = P<sub>stc</sub> &times; (POA/1000) &times; (1 + &gamma; &times; &Delta;T)
+            </p>
+            <p class="intro-detail">
+              Loss chain: Soiling &rarr; IAM &rarr; Temperature &rarr; Quality &rarr;
+              Mismatch &rarr; DC wiring &rarr; Inverter &rarr; Clipping &rarr;
+              AC wiring &rarr; Availability
+            </p>
+          </article>
+          <article class="intro-card intro-card--metrics">
+            <h4>Key results (current inputs)</h4>
+            <p class="intro-formula">
+              <span id="introYearOneEnergy">Year-1 = waiting</span><br>
+              <span id="introCapacity">Capacity = waiting</span><br>
+              <span id="introSpecificYield">Specific yield = waiting</span><br>
+              <span id="introLifetime">25-year = waiting</span>
+            </p>
+            <p class="intro-detail">
+              Use this card as a quick methodology reference before exploring
+              the SITE, WEATHER, LAYOUT, and MODEL panels.
+            </p>
+          </article>
+        </div>
+      </section>
+
+      <!-- ───── Top bar ───── -->
+      <header class="dash-topbar">
+        <div class="topbar-left">
+          <label class="topbar-site-name">
+            <input
+              id="siteName"
+              type="text"
+              value=""
+              placeholder="Enter project name"
+              autocomplete="off"
+              aria-label="Project name"
+            />
+          </label>
+        </div>
+        <div class="topbar-right">
+          <div class="topbar-status-row">
+            <span id="siteStatus" class="status-pill">Waiting for rectangle</span>
+            <span id="weatherStatus" class="status-pill warn">No weather loaded</span>
+            <span id="simulationStatus" class="status-pill warn">Load weather and run the model</span>
+          </div>
+          <div class="topbar-actions">
+            <button id="downloadReport" type="button" class="btn btn--primary">Download report</button>
+          </div>
+        </div>
+      </header>
+
+      <!-- ───── Hero KPI + strip ───── -->
+      <section class="dash-hero">
+        <article class="hero-kpi">
+          <span class="kpi-label">Year-1 Net Energy</span>
+          <strong id="yearOneEnergyText" class="kpi-value">3,425 MWh</strong>
+          <small id="specificYieldText" class="kpi-sub">1,730 kWh/kWp</small>
+        </article>
+        <div class="kpi-strip">
+          <article class="kpi-card">
+            <span class="kpi-label">Installed DC</span>
+            <strong id="installedDcText">1.98 MWdc</strong>
+            <small id="installedModuleText">3,216 modules</small>
+          </article>
+          <article class="kpi-card">
+            <span class="kpi-label">AC Export</span>
+            <strong id="installedAcText">1.65 MWac</strong>
+            <small id="dcAcRatioText">DC/AC 1.20</small>
+          </article>
+          <article class="kpi-card">
+            <span class="kpi-label">25-Year Cumulative</span>
+            <strong id="lifetimeEnergyText">80.4 GWh</strong>
+            <small id="lastYearText">Year 25: 2,995 MWh</small>
+          </article>
+          <article class="kpi-card">
+            <span class="kpi-label">Site</span>
+            <strong id="siteCoordinateText">32.2222, -7.9283</strong>
+            <small id="weatherModeText">Awaiting API fetch</small>
+          </article>
+          <article class="kpi-card">
+            <span class="kpi-label">Specific yield</span>
+            <strong id="stripSpecificYield">—</strong>
+            <small id="stripSpecificYieldSub">Run simulation</small>
+          </article>
+          <article class="kpi-card">
+            <span class="kpi-label">Avg PR</span>
+            <strong id="stripAvgPr">—</strong>
+            <small id="stripAvgPrSub">Annual (net yield / POA)</small>
+          </article>
+          <article class="kpi-card">
+            <span class="kpi-label">Losses</span>
+            <strong id="stripLosses">—</strong>
+            <small id="stripLossesSub">vs array nominal</small>
+          </article>
+          <article class="kpi-card">
+            <span class="kpi-label">YoY degradation</span>
+            <strong id="stripYoyDegradation">—</strong>
+            <small id="stripYoyDegradationSub">Model inputs</small>
+          </article>
+        </div>
+      </section>
+
+      <!-- ───── Two-column body ───── -->
+      <main class="dash-body">
+        <!-- ── Left rail: input tabs ── -->
+        <aside class="rail">
+          <nav class="rail-tabs" role="tablist" aria-label="Parameter groups">
+            <button type="button" class="rail-tab is-active" data-panel-target="sitePanel">Site</button>
+            <button type="button" class="rail-tab" data-panel-target="weatherPanel">Weather</button>
+            <button type="button" class="rail-tab" data-panel-target="layoutPanel">Layout</button>
+            <button type="button" class="rail-tab" data-panel-target="performancePanel">Model</button>
+          </nav>
+
+          <div class="rail-panels">
+            <!-- Site panel -->
+            <section id="sitePanel" class="control-section is-active">
+              <div class="section-head">
+                <p class="kicker">Site setup</p>
+                <h3>Location &amp; rectangle</h3>
+              </div>
+              <div class="field-grid">
+                <label><span>Latitude</span><input id="siteLat" type="number" step="0.0001" value="32.2222" /></label>
+                <label><span>Longitude</span><input id="siteLng" type="number" step="0.0001" value="-7.9283" /></label>
+                <label><span>UTC offset (hours)</span><input id="timezoneOffset" type="number" step="1" value="0" /></label>
+                <label><span>Ground albedo</span><input id="surfaceAlbedo" type="number" step="0.01" value="0.2" /></label>
+                <label><span>Rectangle width (m)</span><input id="manualWidthM" type="number" step="0.1" value="120" /></label>
+                <label><span>Rectangle depth (m)</span><input id="manualHeightM" type="number" step="0.1" value="80" /></label>
+                <label><span>Edge setback — left / right (m)</span><input id="edgeSetbackM" type="number" step="0.1" value="2" /></label>
+                <label><span>Edge setback — top / bottom (m)</span><input id="edgeSetbackDepthM" type="number" step="0.1" value="2" /></label>
+                <label><span>Azimuth (deg N)</span><input id="azimuthDegSite" type="number" step="0.1" value="180" /></label>
+              </div>
+            </section>
+
+            <!-- Weather panel -->
+            <section id="weatherPanel" class="control-section">
+              <div class="section-head">
+                <p class="kicker">Weather source</p>
+                <h3>Meteorological year</h3>
+              </div>
+              <div class="field-stack">
+                <label><span>Weather provider</span>
+                  <select id="weatherProvider">
+                    <option value="pvgis">PVGIS TMY</option>
+                    <option value="openmeteo">Open-Meteo ERA5</option>
+                  </select>
+                </label>
+                <div class="btn-row">
+                  <button id="fetchWeather" type="button" class="btn btn--secondary">Fetch weather</button>
+                  <button id="resetWeather" type="button" class="btn btn--ghost">Clear</button>
+                </div>
+                <p id="weatherSummary" class="muted-text">
+                  Fetch a typical meteorological year directly from PVGIS or from
+                  Open-Meteo ERA5 using the current site coordinates.
+                </p>
+                <div id="weatherProviderNote" class="info-box"></div>
+                <div id="weatherMeta" class="info-box"></div>
+              </div>
+            </section>
+
+            <!-- Layout panel -->
+            <section id="layoutPanel" class="control-section">
+              <div class="section-head">
+                <div>
+                  <p class="kicker">DC layout</p>
+                  <h3>Module field design</h3>
+                </div>
+                <button id="applyWinterSpacing" type="button" class="btn btn--ghost btn--sm">Winter spacing</button>
+              </div>
+              <div class="db-search" id="moduleDbSearch">
+                <button type="button" class="db-search-trigger" id="moduleSearchTrigger">Search PV module database</button>
+                <div class="db-search-panel" id="moduleSearchPanel">
+                  <div class="db-search-filters">
+                    <select id="moduleFilterManufacturer"><option value="">All manufacturers</option></select>
+                    <div class="db-search-range">
+                      <input id="moduleFilterPowerMin" type="number" placeholder="Min Wp" />
+                      <input id="moduleFilterPowerMax" type="number" placeholder="Max Wp" />
+                    </div>
+                    <input id="moduleFilterQ" type="text" placeholder="Text search (optional)" autocomplete="off" />
+                    <button type="button" id="moduleFilterApply" class="btn btn--sm">Search</button>
+                  </div>
+                  <div id="moduleFilterResults" class="db-search-results"></div>
+                </div>
+              </div>
+              <div class="field-grid two">
+                <label><span>Module manufacturer</span><input id="moduleManufacturer" type="text" value="" placeholder="e.g. Jinko Solar" /></label>
+                <label><span>Module model</span><input id="moduleModel" type="text" value="" placeholder="e.g. Tiger Neo 615" /></label>
+                <label><span>Module power (Wp)</span><input id="modulePowerWp" type="number" step="1" value="615" /></label>
+                <label><span>Module count</span><input id="manualModuleCount" type="number" step="1" value="" placeholder="Auto" /></label>
+                <label><span>Module length (m)</span><input id="moduleLengthM" type="number" step="0.001" value="2.278" /></label>
+                <label><span>Module width (m)</span><input id="moduleWidthM" type="number" step="0.001" value="1.134" /></label>
+                <label><span>Orientation</span>
+                  <select id="moduleOrientation">
+                    <option value="portrait">Portrait</option>
+                    <option value="landscape">Landscape</option>
+                  </select>
+                </label>
+                <label><span>Tilt (deg)</span><input id="tiltDeg" type="number" step="0.1" value="20" /></label>
+                <label><span>Azimuth (deg N)</span><input id="azimuthDeg" type="number" step="0.1" value="180" /></label>
+                <label><span>Front clearance (m)</span><input id="frontClearanceM" type="number" step="0.05" value="0.8" /></label>
+                <label><span>Row spacing (m)</span><input id="rowSpacingM" type="number" step="0.05" value="2.1" /></label>
+                <label><span>Module gap (m)</span><input id="moduleGapM" type="number" step="0.01" value="0.03" /></label>
+                <label><span>Max row width (m)</span><input id="maxRowWidthM" type="number" step="0.5" value="0" /></label>
+                <label><span>Row width gap (m)</span><input id="rowWidthGapM" type="number" step="0.1" value="0" /></label>
+              </div>
+              <div id="layoutSummary" class="info-box"></div>
+            </section>
+
+            <!-- Model panel -->
+            <section id="performancePanel" class="control-section">
+              <div class="section-head">
+                <p class="kicker">Electrical model</p>
+                <h3>Losses &amp; lifetime</h3>
+              </div>
+              <div class="db-search" id="inverterDbSearch">
+                <button type="button" class="db-search-trigger" id="inverterSearchTrigger">Search inverter database</button>
+                <div class="db-search-panel" id="inverterSearchPanel">
+                  <div class="db-search-filters">
+                    <select id="inverterFilterManufacturer"><option value="">All manufacturers</option></select>
+                    <div class="db-search-range">
+                      <input id="inverterFilterCapacityMin" type="number" placeholder="Min kW" />
+                      <input id="inverterFilterCapacityMax" type="number" placeholder="Max kW" />
+                    </div>
+                    <input id="inverterFilterQ" type="text" placeholder="Text search (optional)" autocomplete="off" />
+                    <button type="button" id="inverterFilterApply" class="btn btn--sm">Search</button>
+                  </div>
+                  <div id="inverterFilterResults" class="db-search-results"></div>
+                </div>
+              </div>
+              <div class="field-grid two">
+                <label><span>Inverter manufacturer</span><input id="inverterManufacturer" type="text" value="" placeholder="e.g. Sungrow" /></label>
+                <label><span>Inverter model</span><input id="inverterModel" type="text" value="" placeholder="e.g. SG250HX" /></label>
+                <label><span>Inverter count</span><input id="inverterCount" type="number" step="1" value="" placeholder="Auto" /></label>
+                <label><span>Strings per inverter</span><input id="stringsPerInverter" type="number" step="1" value="" placeholder="e.g. 12" /></label>
+                <label><span>Modules per string</span><input id="modulesPerString" type="number" step="1" value="" placeholder="e.g. 26" /></label>
+                <label><span>Target DC/AC ratio</span><input id="targetDcAcRatio" type="number" step="0.01" value="1.20" /></label>
+                <label><span>Manual AC (kW)</span><input id="manualAcCapacityKw" type="number" step="1" value="" placeholder="Auto" /></label>
+                <label><span>Inverter eff. (%)</span><input id="inverterEfficiencyPct" type="number" step="0.1" value="98.5" /></label>
+                <label><span>Temp coeff (%/C)</span><input id="tempCoeffPctPerC" type="number" step="0.01" value="-0.34" /></label>
+                <label><span>PVsyst Uc</span><input id="ucValue" type="number" step="0.1" value="29" /></label>
+                <label><span>PVsyst Uv</span><input id="uvValue" type="number" step="0.1" value="0" /></label>
+                <label><span>Soiling loss (%)</span><input id="soilingLossPct" type="number" step="0.1" value="3.0" /></label>
+                <label><span>IAM loss (%)</span><input id="iamLossPct" type="number" step="0.1" value="1.8" /></label>
+                <label><span>DC wiring (%)</span><input id="dcWiringLossPct" type="number" step="0.1" value="1.5" /></label>
+                <label><span>Mismatch (%)</span><input id="mismatchLossPct" type="number" step="0.1" value="2.0" /></label>
+                <label><span>Module quality (%)</span><input id="qualityLossPct" type="number" step="0.1" value="-0.8" /></label>
+                <label><span>AC wiring (%)</span><input id="acLossPct" type="number" step="0.1" value="0.5" /></label>
+                <label><span>Availability (%)</span><input id="availabilityPct" type="number" step="0.1" value="99" /></label>
+                <label><span>Year-1 LID (%)</span><input id="firstYearLidPct" type="number" step="0.1" value="1.5" /></label>
+                <label><span>Annual degrad. (%)</span><input id="annualDegradationPct" type="number" step="0.01" value="0.45" /></label>
+                <label><span>Degradation model</span>
+                  <select id="degradationModel">
+                    <option value="linear">Linear</option>
+                    <option value="exponential">Exponential</option>
+                  </select>
+                </label>
+              </div>
+              <div class="btn-row" style="margin-top:12px">
+                <button type="button" class="btn btn--primary" data-run-simulation>Run simulation</button>
+              </div>
+            </section>
+          </div>
+        </aside>
+
+        <!-- ── Main stage: output workspace ── -->
+        <section class="stage">
+          <!-- Site stage -->
+          <section class="stage-view is-active" data-stage-for="sitePanel">
+            <article class="card card--map">
+              <div class="card-head">
+                <div>
+                  <p class="kicker">Map builder</p>
+                  <h2>Installation area</h2>
+                </div>
+                <span class="badge">Draw a rectangle to define the usable block</span>
+              </div>
+              <div class="map-info-strip">
+                <div><span>Site</span><strong id="mapSiteName">Untitled project</strong></div>
+                <div><span>Coordinates</span><strong id="mapCoordinateText">32.2222, -7.9283</strong></div>
+                <div><span>Buildable area</span><strong id="mapBuildableAreaText">8,736 m²</strong></div>
+                <div><span>Layout status</span><strong id="mapLayoutText">Waiting for sizing</strong></div>
+              </div>
+              <div class="map-wrap">
+                <div id="mapCanvas" class="map-canvas"></div>
+                <div class="map-hint">
+                  Draw the plant rectangle, then fetch a TMY and refine layout in the left panel.
+                </div>
+              </div>
+            </article>
+            <div class="area-chips">
+              <div class="area-chip"><span>Gross area</span><strong id="grossAreaText">9,600 m²</strong></div>
+              <div class="area-chip"><span>Net buildable</span><strong id="netAreaText">8,736 m²</strong></div>
+            </div>
+          </section>
+
+          <!-- Weather stage -->
+          <section class="stage-view" data-stage-for="weatherPanel">
+            <div class="stage-grid stage-grid--2col">
+              <article class="card">
+                <div class="card-head">
+                  <div><p class="kicker">Weather preview</p><h2>Irradiance profile</h2></div>
+                  <span class="badge">Monthly kWh/m²</span>
+                </div>
+                <div id="weatherIrradianceChart" class="chart-shell"></div>
+              </article>
+              <article class="card">
+                <div class="card-head">
+                  <div><p class="kicker">Weather preview</p><h2>Climate profile</h2></div>
+                  <span class="badge">Temp &amp; RH</span>
+                </div>
+                <div id="weatherClimateChart" class="chart-shell"></div>
+              </article>
+            </div>
+            <div class="stage-grid stage-grid--2col">
+              <article class="card">
+                <div class="card-head">
+                  <div><p class="kicker">Weather preview</p><h2>Wind profile</h2></div>
+                  <span class="badge">Monthly avg m/s</span>
+                </div>
+                <div id="weatherWindChart" class="chart-shell"></div>
+              </article>
+              <article class="card">
+                <div class="card-head">
+                  <div><p class="kicker">Weather preview</p><h2>Pressure profile</h2></div>
+                  <span class="badge">Monthly avg hPa</span>
+                </div>
+                <div id="weatherPressureChart" class="chart-shell"></div>
+              </article>
+            </div>
+            <article class="card card--wide">
+              <div class="card-head">
+                <div><p class="kicker">Weather source</p><h2>Dataset summary</h2></div>
+                <span class="badge">Fetched TMY</span>
+              </div>
+              <div id="weatherPreviewSummary" class="notes-grid"></div>
+            </article>
+          </section>
+
+          <!-- Layout stage -->
+          <section class="stage-view" data-stage-for="layoutPanel">
+            <article class="card card--wide">
+              <div class="card-head">
+                <div><p class="kicker">Layout metrics</p><h2>Field geometry summary</h2></div>
+                <span class="badge">Sizing snapshot</span>
+              </div>
+              <div id="layoutPerspectiveSummary" class="notes-grid"></div>
+            </article>
+            <article class="card card--wide layout-preview-card">
+              <div class="card-head">
+                <div><p class="kicker">Layout preview</p><h2>2D view of a 3D layout</h2></div>
+                <span class="badge">Pseudo-isometric</span>
+              </div>
+              <div id="layoutPerspectiveView" class="perspective-shell"></div>
+            </article>
+          </section>
+
+          <!-- Performance stage -->
+          <section class="stage-view" data-stage-for="performancePanel">
+            <div class="stage-grid stage-grid--2col">
+              <article class="card">
+                <div class="card-head">
+                  <div><p class="kicker">Year profile</p><h2>Monthly energy</h2></div>
+                  <span class="badge">Representative imported period</span>
+                </div>
+                <div id="monthlyChart" class="chart-shell"></div>
+              </article>
+              <article class="card">
+                <div class="card-head">
+                  <div><p class="kicker">Lifetime profile</p><h2>25-year energy curve</h2></div>
+                  <span id="degradationSummary" class="badge">Waiting for simulation</span>
+                </div>
+                <div id="lifetimeChart" class="chart-shell"></div>
+              </article>
+              <article class="card">
+                <div class="card-head">
+                  <div><p class="kicker">Normalized production</p><h2>Monthly breakdown</h2></div>
+                  <span class="badge">kWh/kWp/day</span>
+                </div>
+                <div id="normalizedProductionChart" class="chart-shell"></div>
+              </article>
+              <article class="card">
+                <div class="card-head">
+                  <div><p class="kicker">Performance ratio</p><h2>Monthly PR</h2></div>
+                  <span class="badge">%</span>
+                </div>
+                <div id="monthlyPrChart" class="chart-shell"></div>
+              </article>
+            </div>
+            <article class="card card--wide">
+              <div class="card-head">
+                <div><p class="kicker">Loss analysis</p><h2>Energy loss diagram</h2></div>
+                <span class="badge">Waterfall</span>
+              </div>
+              <div id="lossDiagram" class="chart-shell"></div>
+            </article>
+            <article class="card card--wide">
+              <div class="card-head">
+                <div><p class="kicker">Monthly balances</p><h2>Results table</h2></div>
+                <span class="badge">Main results</span>
+              </div>
+              <div id="monthlyResultsTable"></div>
+            </article>
+            <article class="card card--wide">
+              <div class="card-head">
+                <div><p class="kicker">Model notes</p><h2>Simulation summary</h2></div>
+                <span class="badge">Representative-year replay</span>
+              </div>
+              <div id="simulationNotes" class="notes-grid"></div>
+            </article>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="./pvc-nav.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <script src="https://unpkg.com/leaflet-draw@1.0.4/dist/leaflet.draw.js"></script>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
