@@ -7,6 +7,7 @@ import {
 } from "./pv-model.js";
 import { renderBarChart, renderLineChart, renderGroupedBarChart, renderDualAxisChart, renderPseudo3dLayout, renderLossDiagram, renderMonthlyTable, renderNormalizedProductionChart, renderMonthlyPrChart } from "./charts.js";
 import { buildAndSaveSimulationReport, captureElementAsPng } from "./simulation-report-pdf.js";
+import { fetchOpenMeteoArchiveWeather } from "./weather-openmeteo-direct.js";
 
 /** Set in index.html: empty for local dev (Vite proxies /api), or VITE_API_BASE on production (GitHub Pages). */
 function getPvApiBase() {
@@ -209,6 +210,7 @@ function updateWeatherProviderNote() {
       <p>
         Free global weather data from ERA5 reanalysis. Returns a historical year
         (not a synthesized TMY). Good alternative when PVGIS does not cover your region.
+        On static hosting (for example GitHub Pages without a backend URL), fetches go directly to Open-Meteo.
       </p>
     `;
     return;
@@ -217,8 +219,9 @@ function updateWeatherProviderNote() {
   note.innerHTML = `
     <span>PVGIS TMY</span>
     <p>
-      Recommended no-key source. Data is loaded through the PVCopilot API (or the local dev proxy)
-      because the official PVGIS API blocks direct browser requests.
+      Recommended no-key source when a PVCopilot API or dev proxy is available.
+      The official PVGIS API blocks direct browser requests, so PVGIS on GitHub Pages requires the
+      <code>VITE_API_BASE</code> secret (see DEPLOY.md). Otherwise use Open-Meteo above.
     </p>
   `;
 }
@@ -1134,20 +1137,28 @@ async function fetchWeatherFromApi() {
   } weather for ${config.siteLat.toFixed(4)}, ${config.siteLng.toFixed(4)}...`;
 
   try {
-    const response = await fetch(
-      apiUrl(
-        `/api/weather?provider=${encodeURIComponent(config.weatherProvider)}&lat=${encodeURIComponent(
-          config.siteLat
-        )}&lon=${encodeURIComponent(config.siteLng)}`
-      )
-    );
+    const weatherPath = `/api/weather?provider=${encodeURIComponent(config.weatherProvider)}&lat=${encodeURIComponent(
+      config.siteLat
+    )}&lon=${encodeURIComponent(config.siteLng)}`;
+    const response = await fetch(apiUrl(weatherPath));
 
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) {
+    let payload;
+    if (response.ok) {
+      payload = await response.json().catch(() => null);
+    } else if (config.weatherProvider === "openmeteo" && response.status === 404) {
+      /** GitHub Pages and other static hosts have no /api unless VITE_API_BASE is set; Open-Meteo allows browser CORS. */
+      payload = await fetchOpenMeteoArchiveWeather(config.siteLat, config.siteLng);
+    } else {
+      payload = await response.json().catch(() => null);
       const msg =
         payload && typeof payload === "object" && payload.error
           ? payload.error
           : `Weather request failed with HTTP ${response.status}`;
+      if (response.status === 404 && config.weatherProvider === "pvgis") {
+        throw new Error(
+          `${msg} PVGIS needs a server-side proxy on static hosting. Switch to Open-Meteo ERA5, or set the GitHub Actions secret VITE_API_BASE to your PVCopilot API origin (see DEPLOY.md).`
+        );
+      }
       throw new Error(msg);
     }
     if (!payload || typeof payload !== "object") {
