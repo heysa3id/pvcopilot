@@ -1155,9 +1155,7 @@ async function fetchWeatherFromApi() {
           ? payload.error
           : `Weather request failed with HTTP ${response.status}`;
       if (response.status === 404 && config.weatherProvider === "pvgis") {
-        throw new Error(
-          `${msg} PVGIS needs a server-side proxy on static hosting. Switch to Open-Meteo ERA5, or set the GitHub Actions secret VITE_API_BASE to your PVCopilot API origin (see DEPLOY.md).`
-        );
+        throw new Error("Failed. Try Open-Meteo.");
       }
       throw new Error(msg);
     }
