@@ -7,6 +7,7 @@ import { BrowserRouter, Routes, Route, Link } from 'react-router-dom'
 import { createTheme, ThemeProvider } from '@mui/material/styles'
 import './index.css'
 import Navbar from './components/Navbar'
+import { GoogleAnalytics } from './components/GoogleAnalytics'
 import LandingPage from './pages/LandingPage'
 import LcoeTool from './pages/LcoeTool'
 import DocsPage from './pages/DocsPage'
@@ -341,6 +342,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <ThemeProvider theme={theme}>
       <BrowserRouter>
+        <GoogleAnalytics />
         <Navbar />
       <div style={{ paddingTop: 56 }}>
         <Routes>
