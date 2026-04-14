@@ -18,6 +18,49 @@ export function rotateFieldRingToRowSpace(ring, grossWidthM, grossDepthM, azimut
   });
 }
 
+/** Horizontal chord of a closed polygon at y (same units as vertices). */
+export function polygonXRangeAtY(vertices, y) {
+  if (!vertices || vertices.length < 3) return null;
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let intersections = 0;
+  for (let i = 0; i < vertices.length; i++) {
+    const [x1, y1] = vertices[i];
+    const [x2, y2] = vertices[(i + 1) % vertices.length];
+    if ((y1 <= y && y2 > y) || (y2 <= y && y1 > y)) {
+      const x = x1 + (y - y1) / (y2 - y1) * (x2 - x1);
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      intersections++;
+    }
+  }
+  if (intersections < 2) return null;
+  return { minX, maxX };
+}
+
+/**
+ * Minimum inside width (m) along horizontal scans from yRowBase to yRowBase + collectorDepthM,
+ * after applying setbackM on each side — matches how a full row footprint intersects the polygon.
+ * (A single slice at row center can be much wider than the top/bottom of the row band.)
+ */
+export function minRowUsableWidthM(vertices, yRowBaseM, collectorDepthM, setbackM, samples = 13) {
+  if (!vertices || vertices.length < 3) return 0;
+  const sw = Math.max(Number(setbackM) || 0, 0);
+  const depth = Math.max(Number(collectorDepthM) || 0, 1e-9);
+  const yLo = yRowBaseM;
+  const yHi = yRowBaseM + depth;
+  const n = Math.max(2, Math.floor(samples));
+  let minAvail = Infinity;
+  for (let k = 0; k < n; k++) {
+    const yy = yLo + (k / (n - 1)) * (yHi - yLo);
+    const range = polygonXRangeAtY(vertices, yy);
+    if (!range) return 0;
+    const avail = Math.max((range.maxX - sw) - (range.minX + sw), 0);
+    minAvail = Math.min(minAvail, avail);
+  }
+  return minAvail === Infinity ? 0 : minAvail;
+}
+
 /** Ray-casting; ring closed (first point may duplicate last or not). */
 export function pointInPolygon(x, y, ring) {
   if (!ring || ring.length < 3) return false;
@@ -85,6 +128,79 @@ export function canvasLogicalToRotatedRowMeters(
   const xr = (wx - ox) / scale;
   const yr = (wy - oy) / scale;
   return { xr, yr };
+}
+
+/**
+ * Physical span (m) of n modules in a row: n·(span+gap) − gap.
+ */
+export function rowModulesPhysicalSpanM(n, moduleStep, moduleGapM) {
+  const nn = Math.max(0, Math.floor(n));
+  if (nn <= 0) return 0;
+  const step = Math.max(moduleStep, 0.001);
+  const gap = Number(moduleGapM) || 0;
+  return nn * step - gap;
+}
+
+/**
+ * Drop trailing partial segment (or an all-partial row) if its physical width < minRowWidthM.
+ * When maxRowWidth splits a row, the last "tail" chunk can be one narrow module.
+ */
+export function trimRowModuleCountForMinSegmentWidthM(
+  rowModuleCount,
+  modulesPerSegment,
+  moduleStep,
+  moduleGapM,
+  minRowWidthM
+) {
+  const minW = Number(minRowWidthM) || 0;
+  const n = Math.max(0, Math.floor(Number(rowModuleCount) || 0));
+  if (n <= 0 || !(minW > 0)) return n;
+  const step = Math.max(Number(moduleStep) || 0.001, 0.001);
+  const gap = Number(moduleGapM) || 0;
+  const mps = Math.max(0, Math.floor(Number(modulesPerSegment) || 0));
+  if (mps <= 0) {
+    const span = rowModulesPhysicalSpanM(n, step, gap);
+    return span < minW - 1e-9 ? 0 : n;
+  }
+  const tail = n % mps;
+  const full = n - tail;
+  if (tail > 0) {
+    const tailSpan = rowModulesPhysicalSpanM(tail, step, gap);
+    if (tailSpan < minW - 1e-9) return full;
+  }
+  if (full === 0 && n > 0) {
+    const span = rowModulesPhysicalSpanM(n, step, gap);
+    if (span < minW - 1e-9) return 0;
+  }
+  return n;
+}
+
+/**
+ * After exclusions, drop contiguous runs of slot centers whose physical span is < minRowWidthM.
+ */
+export function dropShortSlotRuns(slots, moduleSpanInRowM, moduleGapM, minRowWidthM) {
+  const minW = Number(minRowWidthM) || 0;
+  if (!(minW > 0) || !slots || slots.length === 0) return slots || [];
+  const step = Math.max(moduleSpanInRowM + moduleGapM, 0.001);
+  const gap = Number(moduleGapM) || 0;
+  const sorted = [...slots].sort((a, b) => a.x - b.x);
+  const runs = [];
+  let cur = [sorted[0]];
+  for (let i = 1; i < sorted.length; i++) {
+    const dx = sorted[i].x - sorted[i - 1].x;
+    if (Math.abs(dx - step) < Math.max(0.02, step * 1e-4)) cur.push(sorted[i]);
+    else {
+      runs.push(cur);
+      cur = [sorted[i]];
+    }
+  }
+  runs.push(cur);
+  const out = [];
+  for (const run of runs) {
+    const spanM = rowModulesPhysicalSpanM(run.length, step, gap);
+    if (spanM >= minW - 1e-9) out.push(...run);
+  }
+  return out;
 }
 
 export function walkRowSlotCenters(

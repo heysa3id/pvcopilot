@@ -1216,6 +1216,24 @@ label span {
   color: var(--ink);
 }
 
+/* Site map — exclusions panel (toggle like Layout advanced) */
+.site-exclusion-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 12px;
+  max-width: 100%;
+  align-items: flex-start;
+}
+
+.site-exclusion-extras {
+  flex-direction: column;
+  gap: 8px;
+  align-items: stretch;
+  width: 100%;
+  max-width: min(420px, 100%);
+}
+
 .layout-excl-list {
   display: flex;
   flex-direction: column;

@@ -1,3 +1,5 @@
+import { trimRowModuleCountForMinSegmentWidthM } from "./layout-exclusions.js";
+
 export const MAPPING_SPECS = [
   {
     key: "time",
@@ -401,12 +403,15 @@ export function computeLayout(siteConfig, designConfig) {
 
   const maxRowWidthM = Number(designConfig.maxRowWidthM) || 0;
   const rowWidthGapM = Number(designConfig.rowWidthGapM) || 0;
+  const minRowWidthM = Number(designConfig.minRowWidthM) || 0;
 
   const rowPitchM = winterSpacing.collectorProjectionM + rowSpacingM;
   const moduleStep = Math.max(moduleSpanInRowM + moduleGapM, 0.001);
   let modulesPerRow;
+  let modulesPerSegmentForTrim = 0;
   if (maxRowWidthM > 0) {
     const modulesPerSegment = Math.max(Math.floor((maxRowWidthM + moduleGapM) / moduleStep), 1);
+    modulesPerSegmentForTrim = modulesPerSegment;
     const segWidthM = modulesPerSegment * moduleStep - moduleGapM;
     const segStepM = segWidthM + moduleGapM + rowWidthGapM;
     const numFullSegments = siteArea.netWidthM >= segWidthM
@@ -421,7 +426,13 @@ export function computeLayout(siteConfig, designConfig) {
   } else {
     modulesPerRow = Math.max(Math.floor((siteArea.netWidthM + moduleGapM) / moduleStep), 0);
   }
-  const minRowWidthM = Number(designConfig.minRowWidthM) || 0;
+  modulesPerRow = trimRowModuleCountForMinSegmentWidthM(
+    modulesPerRow,
+    modulesPerSegmentForTrim,
+    moduleStep,
+    moduleGapM,
+    minRowWidthM
+  );
   if (minRowWidthM > 0 && siteArea.netWidthM < minRowWidthM) {
     modulesPerRow = 0;
   }

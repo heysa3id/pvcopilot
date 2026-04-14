@@ -1,8 +1,12 @@
 import {
   canvasLogicalToRotatedRowMeters,
+  dropShortSlotRuns,
+  minRowUsableWidthM,
   pointInAnyExclusion,
+  polygonXRangeAtY,
   rotateFieldRingToRowSpace,
   rowSpaceToFieldMeters,
+  trimRowModuleCountForMinSegmentWidthM,
   walkRowSlotCenters,
 } from "./layout-exclusions.js";
 
@@ -398,24 +402,6 @@ export function renderDualAxisChart(container, config) {
   });
 }
 
-function polygonXRangeAtY(vertices, y) {
-  if (!vertices || vertices.length < 3) return null;
-  let minX = Infinity, maxX = -Infinity;
-  let intersections = 0;
-  for (let i = 0; i < vertices.length; i++) {
-    const [x1, y1] = vertices[i];
-    const [x2, y2] = vertices[(i + 1) % vertices.length];
-    if ((y1 <= y && y2 > y) || (y2 <= y && y1 > y)) {
-      const x = x1 + (y - y1) / (y2 - y1) * (x2 - x1);
-      minX = Math.min(minX, x);
-      maxX = Math.max(maxX, x);
-      intersections++;
-    }
-  }
-  if (intersections < 2) return null;
-  return { minX, maxX };
-}
-
 export function renderPseudo3dLayout(container, layout, config, preview = {}, layoutUi = {}) {
   if (!container) {
     return;
@@ -487,27 +473,36 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
       : 0;
     for (let i = 0; i < maxR; i++) {
       const yM = innerMinY + i * rowPitchM;
-      const yCtr = yM + collectorProjectionM / 2;
-      const range = polygonXRangeAtY(rotatedPolyVerts, yCtr);
-      if (!range) continue;
-      const avail = (range.maxX - sw) - (range.minX + sw);
-      if (avail <= 0) continue;
-      if (minRowWidthM > 0 && avail < minRowWidthM) continue;
+      const bandAvail = minRowUsableWidthM(rotatedPolyVerts, yM, collectorProjectionM, sw);
+      if (bandAvail <= 0) continue;
+      if (minRowWidthM > 0 && bandAvail < minRowWidthM) continue;
       let rm;
       if (mPerSeg > 0) {
         const segW = mPerSeg * mStep - moduleGapM;
         const segStep = segW + moduleGapM + rowWidthGapM;
-        const nFullSegs = avail >= segW
-          ? 1 + Math.max(Math.floor((avail - segW) / segStep), 0)
+        const nFullSegs = bandAvail >= segW
+          ? 1 + Math.max(Math.floor((bandAvail - segW) / segStep), 0)
           : 0;
         const usedW = nFullSegs > 0 ? segW + (nFullSegs - 1) * segStep : 0;
-        const remW = avail - usedW;
+        const remW = bandAvail - usedW;
         const tailMods = nFullSegs > 0 && remW >= rowWidthGapM + moduleSpanInRowM
           ? Math.min(Math.floor((remW - rowWidthGapM + moduleGapM) / mStep), mPerSeg)
           : 0;
-        rm = nFullSegs * mPerSeg + tailMods;
+        rm = trimRowModuleCountForMinSegmentWidthM(
+          nFullSegs * mPerSeg + tailMods,
+          mPerSeg,
+          mStep,
+          moduleGapM,
+          minRowWidthM
+        );
       } else {
-        rm = Math.floor((avail + moduleGapM) / mStep);
+        rm = trimRowModuleCountForMinSegmentWidthM(
+          Math.floor((bandAvail + moduleGapM) / mStep),
+          0,
+          mStep,
+          moduleGapM,
+          minRowWidthM
+        );
       }
       if (rm > 0) polyActiveRows++;
     }
@@ -791,7 +786,11 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
         const rowCenterY = yM + collectorProjectionM / 2;
 
         let rowStartX, rowEndX;
+        let bandAvailEx = Infinity;
         if (rotatedPolyVerts) {
+          bandAvailEx = minRowUsableWidthM(rotatedPolyVerts, yM, collectorProjectionM, sw);
+          if (bandAvailEx <= 0) continue;
+          if (minRowWidthM > 0 && bandAvailEx < minRowWidthM) continue;
           const range = polygonXRangeAtY(rotatedPolyVerts, rowCenterY);
           if (!range) continue;
           rowStartX = range.minX + sw;
@@ -802,7 +801,15 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
         }
 
         if (rowEndX <= rowStartX) continue;
-        if (minRowWidthM > 0 && rowEndX - rowStartX < minRowWidthM) continue;
+        if (!rotatedPolyVerts && minRowWidthM > 0 && rowEndX - rowStartX < minRowWidthM) continue;
+        if (rotatedPolyVerts) {
+          const cw = rowEndX - rowStartX;
+          if (cw > bandAvailEx + 1e-6) {
+            const mid = (rowStartX + rowEndX) / 2;
+            rowStartX = mid - bandAvailEx / 2;
+            rowEndX = mid + bandAvailEx / 2;
+          }
+        }
 
         const slots = walkRowSlotCenters(
           rowStartX,
@@ -813,8 +820,9 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
           maxRowWidthM,
           rowWidthGapM
         );
-        for (const p of slots) {
-          if (pointInAnyExclusion(p.x, p.y, exRings)) continue;
+        const keptSlots = slots.filter((p) => !pointInAnyExclusion(p.x, p.y, exRings));
+        const placedSlots = dropShortSlotRuns(keptSlots, moduleSpanInRowM, moduleGapM, minRowWidthM);
+        for (const p of placedSlots) {
           if (modulesRemaining <= 0) break rows;
           const xLeft = p.x - moduleSpanInRowM / 2;
           ctx.fillStyle = moduleColor;
@@ -834,19 +842,32 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
         const rowCenterY = yM + collectorProjectionM / 2;
 
         let rowStartX, rowEndX;
+        let packWidthM;
         if (rotatedPolyVerts) {
+          const bandAvail = minRowUsableWidthM(rotatedPolyVerts, yM, collectorProjectionM, sw);
+          if (bandAvail <= 0) continue;
+          if (minRowWidthM > 0 && bandAvail < minRowWidthM) continue;
           const range = polygonXRangeAtY(rotatedPolyVerts, rowCenterY);
           if (!range) continue;
           rowStartX = range.minX + sw;
           rowEndX = range.maxX - sw;
+          packWidthM = bandAvail;
         } else {
           rowStartX = sw;
           rowEndX = sw + netWidthM;
+          packWidthM = rowEndX - rowStartX;
         }
 
         if (rowEndX <= rowStartX) continue;
-        const availableWidth = rowEndX - rowStartX;
-        if (minRowWidthM > 0 && availableWidth < minRowWidthM) continue;
+        if (!rotatedPolyVerts && minRowWidthM > 0 && packWidthM < minRowWidthM) continue;
+        if (rotatedPolyVerts) {
+          const cw = rowEndX - rowStartX;
+          if (cw > packWidthM + 1e-6) {
+            const mid = (rowStartX + rowEndX) / 2;
+            rowStartX = mid - packWidthM / 2;
+            rowEndX = mid + packWidthM / 2;
+          }
+        }
         const moduleStep = Math.max(moduleSpanInRowM + moduleGapM, 0.001);
 
         const modulesPerSegment = maxRowWidthM > 0
@@ -857,17 +878,29 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
         if (modulesPerSegment > 0) {
           const segWidthM = modulesPerSegment * moduleStep - moduleGapM;
           const segStepM = segWidthM + moduleGapM + rowWidthGapM;
-          const numFullSegs = availableWidth >= segWidthM
-            ? 1 + Math.max(Math.floor((availableWidth - segWidthM) / segStepM), 0)
+          const numFullSegs = packWidthM >= segWidthM
+            ? 1 + Math.max(Math.floor((packWidthM - segWidthM) / segStepM), 0)
             : 0;
           const usedW = numFullSegs > 0 ? segWidthM + (numFullSegs - 1) * segStepM : 0;
-          const remW = availableWidth - usedW;
+          const remW = packWidthM - usedW;
           const tailMods = numFullSegs > 0 && remW >= rowWidthGapM + moduleSpanInRowM
             ? Math.min(Math.floor((remW - rowWidthGapM + moduleGapM) / moduleStep), modulesPerSegment)
             : 0;
-          rowModules = numFullSegs * modulesPerSegment + tailMods;
+          rowModules = trimRowModuleCountForMinSegmentWidthM(
+            numFullSegs * modulesPerSegment + tailMods,
+            modulesPerSegment,
+            moduleStep,
+            moduleGapM,
+            minRowWidthM
+          );
         } else {
-          rowModules = Math.max(Math.floor((availableWidth + moduleGapM) / moduleStep), 0);
+          rowModules = trimRowModuleCountForMinSegmentWidthM(
+            Math.max(Math.floor((packWidthM + moduleGapM) / moduleStep), 0),
+            0,
+            moduleStep,
+            moduleGapM,
+            minRowWidthM
+          );
         }
         if (rowModules <= 0) continue;
 

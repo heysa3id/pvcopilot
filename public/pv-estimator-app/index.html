@@ -655,15 +655,18 @@
                 <div><span>Buildable area</span><strong id="mapBuildableAreaText">8,736 m²</strong></div>
                 <div><span>Layout status</span><strong id="mapLayoutText">Waiting for sizing</strong></div>
               </div>
-              <div class="site-exclusion-panel info-box" style="margin: 0 0 12px;">
-                <p class="kicker" style="margin: 0 0 6px;">Module exclusions (same as Layout advanced)</p>
-                <p class="muted-text" style="margin: 0 0 10px; font-size: 12px;">
-                  Draw roads, MV corridors, or substation pads on the satellite map. Requires a drawn site area first; exclusions share the Layout preview and module count.
-                </p>
-                <div class="btn-row" style="flex-wrap: wrap; gap: 8px;">
-                  <button type="button" class="btn btn--secondary btn--sm" id="siteMapExclusionPolygon" disabled>Polygon on map</button>
-                  <button type="button" class="btn btn--secondary btn--sm" id="siteMapExclusionRectangle" disabled>Rectangle on map</button>
-                  <button type="button" class="btn btn--ghost btn--sm" id="siteMapExclusionClear" disabled>Clear exclusions</button>
+              <div class="site-exclusion-toolbar">
+                <button type="button" class="layout-adv-btn" id="siteExclusionToggleAdvanced" aria-expanded="false">Advanced</button>
+                <div id="siteExclusionExtras" class="site-exclusion-extras info-box" style="display: none; margin: 0;">
+                  <p class="kicker" style="margin: 0 0 6px;">Module exclusions (same as Layout advanced)</p>
+                  <p class="layout-adv-hint muted-text" style="margin: 0 0 10px; font-size: 11px;">
+                    Draw roads, MV corridors, or substation pads on the satellite map. Requires a drawn site area first; exclusions share the Layout preview and module count.
+                  </p>
+                  <div class="layout-exclusion-type-btns">
+                    <button type="button" class="layout-adv-btn" id="siteMapExclusionPolygon" disabled>Polygon on map</button>
+                    <button type="button" class="layout-adv-btn" id="siteMapExclusionRectangle" disabled>Rectangle on map</button>
+                    <button type="button" class="layout-adv-btn" id="siteMapExclusionClear" disabled>Clear exclusions</button>
+                  </div>
                 </div>
               </div>
               <div class="map-wrap">

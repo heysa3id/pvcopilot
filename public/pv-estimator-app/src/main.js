@@ -9,8 +9,12 @@ import { renderBarChart, renderLineChart, renderGroupedBarChart, renderDualAxisC
 import { buildAndSaveSimulationReport, captureElementAsPng } from "./simulation-report-pdf.js";
 import { fetchOpenMeteoArchiveWeather } from "./weather-openmeteo-direct.js";
 import {
+  dropShortSlotRuns,
+  minRowUsableWidthM,
   pointInAnyExclusion,
+  polygonXRangeAtY,
   rotateFieldRingToRowSpace,
+  trimRowModuleCountForMinSegmentWidthM,
   walkRowSlotCenters,
 } from "./layout-exclusions.js";
 
@@ -1051,15 +1055,20 @@ function refreshLayout() {
     for (let i = 0; i < maxRows; i++) {
       const yM = innerMinY + i * rowPitchM;
       const yCtr = yM + collectorProjectionM / 2;
-      const range = polyXRangeAtY(rotVerts, yCtr);
+      const bandAvail = minRowUsableWidthM(rotVerts, yM, collectorProjectionM, sw);
+      if (bandAvail <= 0) continue;
+      if (minRowWidthM > 0 && bandAvail < minRowWidthM) continue;
+      const range = polygonXRangeAtY(rotVerts, yCtr);
       if (!range) continue;
-      const avail = Math.max((range.maxX - sw) - (range.minX + sw), 0);
-      if (avail <= 0) continue;
-      if (minRowWidthM > 0 && avail < minRowWidthM) continue;
+      let rowStartX = range.minX + sw;
+      let rowEndX = range.maxX - sw;
+      if (rowEndX - rowStartX > bandAvail + 1e-6) {
+        const mid = (rowStartX + rowEndX) / 2;
+        rowStartX = mid - bandAvail / 2;
+        rowEndX = mid + bandAvail / 2;
+      }
       let rm;
       if (rotatedExclusionRings.length > 0) {
-        const rowStartX = range.minX + sw;
-        const rowEndX = range.maxX - sw;
         const slots = walkRowSlotCenters(
           rowStartX,
           rowEndX,
@@ -1069,21 +1078,34 @@ function refreshLayout() {
           maxRowWidthM,
           rowWidthGapM
         );
-        rm = 0;
-        for (const p of slots) {
-          if (!pointInAnyExclusion(p.x, p.y, rotatedExclusionRings)) rm++;
-        }
+        const kept = slots.filter(
+          (p) => !pointInAnyExclusion(p.x, p.y, rotatedExclusionRings)
+        );
+        const placed = dropShortSlotRuns(kept, moduleSpanInRowM, moduleGapM, minRowWidthM);
+        rm = placed.length;
       } else if (mPerSeg > 0) {
         const segW = mPerSeg * moduleStep - moduleGapM;
         const segStep = segW + moduleGapM + rowWidthGapM;
-        const nFull = avail >= segW ? 1 + Math.max(Math.floor((avail - segW) / segStep), 0) : 0;
+        const nFull = bandAvail >= segW ? 1 + Math.max(Math.floor((bandAvail - segW) / segStep), 0) : 0;
         const usedW = nFull > 0 ? segW + (nFull - 1) * segStep : 0;
-        const remW = avail - usedW;
+        const remW = bandAvail - usedW;
         const tail = nFull > 0 && remW >= rowWidthGapM + moduleSpanInRowM
           ? Math.min(Math.floor((remW - rowWidthGapM + moduleGapM) / moduleStep), mPerSeg) : 0;
-        rm = nFull * mPerSeg + tail;
+        rm = trimRowModuleCountForMinSegmentWidthM(
+          nFull * mPerSeg + tail,
+          mPerSeg,
+          moduleStep,
+          moduleGapM,
+          minRowWidthM
+        );
       } else {
-        rm = Math.max(Math.floor((avail + moduleGapM) / moduleStep), 0);
+        rm = trimRowModuleCountForMinSegmentWidthM(
+          Math.max(Math.floor((bandAvail + moduleGapM) / moduleStep), 0),
+          0,
+          moduleStep,
+          moduleGapM,
+          minRowWidthM
+        );
       }
       autoCount += rm;
     }
@@ -1114,21 +1136,6 @@ function refreshLayout() {
   renderModuleRowsOnMap();
   syncModuleExclusionMapLayers();
   updateSiteExclusionToolsUi();
-}
-
-function polyXRangeAtY(vertices, y) {
-  let minX = Infinity, maxX = -Infinity, hits = 0;
-  for (let i = 0; i < vertices.length; i++) {
-    const [x1, y1] = vertices[i];
-    const [x2, y2] = vertices[(i + 1) % vertices.length];
-    if ((y1 <= y && y2 > y) || (y2 <= y && y1 > y)) {
-      const x = x1 + (y - y1) / (y2 - y1) * (x2 - x1);
-      minX = Math.min(minX, x);
-      maxX = Math.max(maxX, x);
-      hits++;
-    }
-  }
-  return hits >= 2 ? { minX, maxX } : null;
 }
 
 function renderModuleRowsOnMap() {
@@ -1229,17 +1236,25 @@ function renderModuleRowsOnMap() {
 
       let rowStartX, rowEndX;
       if (polyVerts) {
-        const range = polyXRangeAtY(polyVerts, rowCenterY);
+        const bandAvail = minRowUsableWidthM(polyVerts, yM, collectorProjectionM, sw);
+        if (bandAvail <= 0) continue;
+        if (minRowWidthM > 0 && bandAvail < minRowWidthM) continue;
+        const range = polygonXRangeAtY(polyVerts, rowCenterY);
         if (!range) continue;
         rowStartX = range.minX + sw;
         rowEndX = range.maxX - sw;
+        if (rowEndX - rowStartX > bandAvail + 1e-6) {
+          const mid = (rowStartX + rowEndX) / 2;
+          rowStartX = mid - bandAvail / 2;
+          rowEndX = mid + bandAvail / 2;
+        }
       } else {
         rowStartX = sw;
         rowEndX = sw + layout.netWidthM;
       }
 
       if (rowEndX <= rowStartX) continue;
-      if (minRowWidthM > 0 && rowEndX - rowStartX < minRowWidthM) continue;
+      if (!polyVerts && minRowWidthM > 0 && rowEndX - rowStartX < minRowWidthM) continue;
 
       const slots = walkRowSlotCenters(
         rowStartX,
@@ -1250,17 +1265,11 @@ function renderModuleRowsOnMap() {
         maxRowWidthM,
         rowWidthGapM
       );
+      const keptSlots = slots.filter((p) => !pointInAnyExclusion(p.x, p.y, exRings));
+      const placedSlots = dropShortSlotRuns(keptSlots, moduleSpanInRowM, moduleGapM, minRowWidthM);
       let segStart = null;
       let prevKeptLeft = null;
-      for (const p of slots) {
-        if (pointInAnyExclusion(p.x, p.y, exRings)) {
-          if (segStart != null && prevKeptLeft != null) {
-            addRowSegment(segStart, prevKeptLeft + moduleSpanInRowM, yM);
-            segStart = null;
-            prevKeptLeft = null;
-          }
-          continue;
-        }
+      for (const p of placedSlots) {
         if (modulesRemaining <= 0) break;
         const xL = p.x - moduleSpanInRowM / 2;
         if (segStart === null) {
@@ -1284,10 +1293,18 @@ function renderModuleRowsOnMap() {
 
       let rowStartX, rowEndX;
       if (polyVerts) {
-        const range = polyXRangeAtY(polyVerts, rowCenterY);
+        const bandAvail = minRowUsableWidthM(polyVerts, yM, collectorProjectionM, sw);
+        if (bandAvail <= 0) continue;
+        if (minRowWidthM > 0 && bandAvail < minRowWidthM) continue;
+        const range = polygonXRangeAtY(polyVerts, rowCenterY);
         if (!range) continue;
         rowStartX = range.minX + sw;
         rowEndX = range.maxX - sw;
+        if (rowEndX - rowStartX > bandAvail + 1e-6) {
+          const mid = (rowStartX + rowEndX) / 2;
+          rowStartX = mid - bandAvail / 2;
+          rowEndX = mid + bandAvail / 2;
+        }
       } else {
         rowStartX = sw;
         rowEndX = sw + layout.netWidthM;
@@ -1295,7 +1312,7 @@ function renderModuleRowsOnMap() {
 
       if (rowEndX <= rowStartX) continue;
       const availableWidth = rowEndX - rowStartX;
-      if (minRowWidthM > 0 && availableWidth < minRowWidthM) continue;
+      if (!polyVerts && minRowWidthM > 0 && availableWidth < minRowWidthM) continue;
       const moduleStep = Math.max(moduleSpanInRowM + moduleGapM, 0.001);
 
       const modulesPerSegment = maxRowWidthM > 0
@@ -1314,9 +1331,21 @@ function renderModuleRowsOnMap() {
         const tailMods = numFullSegs > 0 && remW >= rowWidthGapM + moduleSpanInRowM
           ? Math.min(Math.floor((remW - rowWidthGapM + moduleGapM) / moduleStep), modulesPerSegment)
           : 0;
-        rowModules = numFullSegs * modulesPerSegment + tailMods;
+        rowModules = trimRowModuleCountForMinSegmentWidthM(
+          numFullSegs * modulesPerSegment + tailMods,
+          modulesPerSegment,
+          moduleStep,
+          moduleGapM,
+          minRowWidthM
+        );
       } else {
-        rowModules = Math.max(Math.floor((availableWidth + moduleGapM) / moduleStep), 0);
+        rowModules = trimRowModuleCountForMinSegmentWidthM(
+          Math.max(Math.floor((availableWidth + moduleGapM) / moduleStep), 0),
+          0,
+          moduleStep,
+          moduleGapM,
+          minRowWidthM
+        );
       }
       if (rowModules <= 0) continue;
 
@@ -1867,6 +1896,18 @@ function wireEvents() {
   byId("fetchWeather").addEventListener("click", () => {
     fetchWeatherFromApi();
   });
+
+  const siteExclusionToggle = byId("siteExclusionToggleAdvanced");
+  const siteExclusionExtras = byId("siteExclusionExtras");
+  if (siteExclusionToggle && siteExclusionExtras) {
+    siteExclusionToggle.addEventListener("click", () => {
+      const open =
+        siteExclusionExtras.style.display === "none" || siteExclusionExtras.style.display === "";
+      siteExclusionExtras.style.display = open ? "flex" : "none";
+      siteExclusionToggle.textContent = open ? "Exit advanced" : "Advanced";
+      siteExclusionToggle.setAttribute("aria-expanded", open ? "true" : "false");
+    });
+  }
 
   const siteMapExclPoly = byId("siteMapExclusionPolygon");
   if (siteMapExclPoly) {
