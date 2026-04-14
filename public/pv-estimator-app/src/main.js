@@ -186,6 +186,7 @@ function getConfig() {
     rowSpacingM: readNumber("rowSpacingM"),
     moduleGapM: readNumber("moduleGapM"),
     maxRowWidthM: readNumber("maxRowWidthM"),
+    minRowWidthM: readNumber("minRowWidthM"),
     rowWidthGapM: readNumber("rowWidthGapM"),
     targetDcAcRatio: readNumber("targetDcAcRatio"),
     manualAcCapacityKw: readOptionalNumber("manualAcCapacityKw"),
@@ -1026,6 +1027,7 @@ function refreshLayout() {
     const moduleSpanInRowM = state.layout.moduleSpanInRowM || 1;
     const moduleGapM = Number(config.moduleGapM) || 0.03;
     const maxRowWidthM = Number(config.maxRowWidthM) || 0;
+    const minRowWidthM = Number(config.minRowWidthM) || 0;
     const rowWidthGapM = Number(config.rowWidthGapM) || 0;
     const moduleStep = Math.max(moduleSpanInRowM + moduleGapM, 0.001);
     const mPerSeg = maxRowWidthM > 0
@@ -1053,6 +1055,7 @@ function refreshLayout() {
       if (!range) continue;
       const avail = Math.max((range.maxX - sw) - (range.minX + sw), 0);
       if (avail <= 0) continue;
+      if (minRowWidthM > 0 && avail < minRowWidthM) continue;
       let rm;
       if (rotatedExclusionRings.length > 0) {
         const rowStartX = range.minX + sw;
@@ -1156,6 +1159,7 @@ function renderModuleRowsOnMap() {
   const moduleSpanInRowM = layout.moduleSpanInRowM || 1;
   const moduleGapM = Number(config.moduleGapM) || 0.03;
   const maxRowWidthM = Number(config.maxRowWidthM) || 0;
+  const minRowWidthM = Number(config.minRowWidthM) || 0;
   const rowWidthGapM = Number(config.rowWidthGapM) || 0;
   const polyVerts = layout.rotatedPolygonVerticesM || null;
   const rotatedBounds = layout.rotatedBoundsM || null;
@@ -1235,6 +1239,7 @@ function renderModuleRowsOnMap() {
       }
 
       if (rowEndX <= rowStartX) continue;
+      if (minRowWidthM > 0 && rowEndX - rowStartX < minRowWidthM) continue;
 
       const slots = walkRowSlotCenters(
         rowStartX,
@@ -1290,6 +1295,7 @@ function renderModuleRowsOnMap() {
 
       if (rowEndX <= rowStartX) continue;
       const availableWidth = rowEndX - rowStartX;
+      if (minRowWidthM > 0 && availableWidth < minRowWidthM) continue;
       const moduleStep = Math.max(moduleSpanInRowM + moduleGapM, 0.001);
 
       const modulesPerSegment = maxRowWidthM > 0

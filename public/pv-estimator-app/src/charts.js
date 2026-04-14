@@ -462,6 +462,7 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
   const moduleSpanInRowM = layout.moduleSpanInRowM || 1;
   const moduleGapM = Number(config.moduleGapM) || 0.03;
   const maxRowWidthM = Number(config.maxRowWidthM) || 0;
+  const minRowWidthM = Number(config.minRowWidthM) || 0;
   const rowWidthGapM = Number(config.rowWidthGapM) || 0;
   const baseLabel = preview.imageUrl ? "Map crop loaded" : "Generated ground plane";
 
@@ -491,6 +492,7 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
       if (!range) continue;
       const avail = (range.maxX - sw) - (range.minX + sw);
       if (avail <= 0) continue;
+      if (minRowWidthM > 0 && avail < minRowWidthM) continue;
       let rm;
       if (mPerSeg > 0) {
         const segW = mPerSeg * mStep - moduleGapM;
@@ -564,7 +566,7 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
             <div class="layout-excl-list">${exclusionRowsHtml}</div>
           </div>
         </div>
-        <div class="layout-stage-caption">Top-down layout</div>
+        <div class="layout-stage-caption">Top-down layout — right-drag to rotate</div>
       </div>
       <p class="muted">${note}</p>
     </div>
@@ -587,10 +589,14 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
   const drawH = logicalH - margin.top - margin.bottom;
   const baseScale = Math.min(drawW / grossWidthM, drawH / grossDepthM);
 
-  // zoom/pan state
+  // zoom/pan / 2D preview rotation (preview only; not persisted)
   let zoom = 1;
   let panX = 0;
   let panY = 0;
+  /** Radians — right-mouse drag on canvas */
+  let previewRotationRad = 0;
+  let previewRotating = false;
+  let lastRotClientX = 0;
   let cachedBgImage = null;
   /** Field meters [x,y] — second corner preview while drawing a rectangle */
   let rectHoverFieldM = null;
@@ -604,6 +610,24 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
       toX: (m) => ox + m * s,
       toY: (m) => oy + m * s,
     };
+  }
+
+  /** Undo 2D preview-only rotation so pointer hits match unrotated field geometry. */
+  function undoPreviewLogicalRotation(lx, ly) {
+    const previewRotRad = previewRotationRad;
+    if (Math.abs(previewRotRad) < 1e-9) return { lx, ly };
+    const { scale, toX, toY } = getTransform();
+    const gxi = toX(0);
+    const gyi = toY(0);
+    const gwi = grossWidthM * scale;
+    const ghi = grossDepthM * scale;
+    const vcx = gxi + gwi / 2;
+    const vcy = gyi + ghi / 2;
+    const dx = lx - vcx;
+    const dy = ly - vcy;
+    const c = Math.cos(-previewRotRad);
+    const s = Math.sin(-previewRotRad);
+    return { lx: vcx + dx * c - dy * s, ly: vcy + dx * s + dy * c };
   }
 
   function draw(ctx, bgImage) {
@@ -629,6 +653,14 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
     const gy = toY(0);
     const gw = grossWidthM * scale;
     const gh = grossDepthM * scale;
+
+    const previewRotRad = previewRotationRad;
+    const viewCx = gx + gw / 2;
+    const viewCy = gy + gh / 2;
+    ctx.save();
+    ctx.translate(viewCx, viewCy);
+    ctx.rotate(previewRotRad);
+    ctx.translate(-viewCx, -viewCy);
 
     function tracePolyPath(ctx, verts) {
       ctx.beginPath();
@@ -770,6 +802,7 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
         }
 
         if (rowEndX <= rowStartX) continue;
+        if (minRowWidthM > 0 && rowEndX - rowStartX < minRowWidthM) continue;
 
         const slots = walkRowSlotCenters(
           rowStartX,
@@ -813,6 +846,7 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
 
         if (rowEndX <= rowStartX) continue;
         const availableWidth = rowEndX - rowStartX;
+        if (minRowWidthM > 0 && availableWidth < minRowWidthM) continue;
         const moduleStep = Math.max(moduleSpanInRowM + moduleGapM, 0.001);
 
         const modulesPerSegment = maxRowWidthM > 0
@@ -954,6 +988,8 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
       ctx.stroke();
     }
 
+    ctx.restore(); // end 2D preview-only rotation (labels / legend stay upright)
+
     // -- dimension annotations
     ctx.font = "600 11px Inter, sans-serif";
     ctx.textAlign = "center";
@@ -1018,9 +1054,11 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
     }
 
     // -- legend items (horizontal row below ground plane)
+    const previewRotDeg = (previewRotationRad * 180) / Math.PI;
     const legendItems = [
       `Tilt ${Number(config.tiltDeg).toFixed(1)}°`,
       `Az ${Number(config.azimuthDeg).toFixed(0)}°`,
+      ...(Math.abs(previewRotDeg) > 0.05 ? [`2D view ${previewRotDeg.toFixed(0)}°`] : []),
       `Pitch ${Number(rowPitchM).toFixed(2)} m`,
       `GCR ${((layout.groundCoverageRatio || 0) * 100).toFixed(1)}%`,
     ];
@@ -1085,6 +1123,10 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
   }
   draw(ctx, null);
 
+  canvas.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+  });
+
   // -- wheel zoom (pointer-anchored; same clamp as +/- buttons)
   canvas.addEventListener(
     "wheel",
@@ -1124,8 +1166,9 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
       return;
     }
     const r = canvas.getBoundingClientRect();
-    const lx = e.clientX - r.left;
-    const ly = e.clientY - r.top;
+    let lx = e.clientX - r.left;
+    let ly = e.clientY - r.top;
+    ({ lx, ly } = undoPreviewLogicalRotation(lx, ly));
     const { scale, toX, toY } = getTransform();
     const ox0 = toX(0);
     const oy0 = toY(0);
@@ -1153,11 +1196,19 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
   });
 
   canvas.addEventListener("mousedown", (e) => {
+    if (e.button === 2) {
+      e.preventDefault();
+      previewRotating = true;
+      lastRotClientX = e.clientX;
+      canvas.style.cursor = "grabbing";
+      return;
+    }
     if (e.button !== 0) return;
     if (drawObstacleMode && (li.onAddDraftPoint || li.onRectangleFieldClick)) {
       const rect = canvas.getBoundingClientRect();
-      const lx = e.clientX - rect.left;
-      const ly = e.clientY - rect.top;
+      let lx = e.clientX - rect.left;
+      let ly = e.clientY - rect.top;
+      ({ lx, ly } = undoPreviewLogicalRotation(lx, ly));
       const { scale, toX, toY } = getTransform();
       const ox0 = toX(0);
       const oy0 = toY(0);
@@ -1203,6 +1254,12 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
   });
 
   window.addEventListener("mousemove", (e) => {
+    if (previewRotating) {
+      previewRotationRad += (e.clientX - lastRotClientX) * 0.008;
+      lastRotClientX = e.clientX;
+      draw(ctx, null);
+      return;
+    }
     if (!dragging) return;
     panX += e.clientX - lastX;
     panY += e.clientY - lastY;
@@ -1212,6 +1269,11 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
   });
 
   window.addEventListener("mouseup", () => {
+    if (previewRotating) {
+      previewRotating = false;
+      canvas.style.cursor = drawObstacleMode ? "crosshair" : "grab";
+      return;
+    }
     if (!dragging) return;
     dragging = false;
     canvas.style.cursor = drawObstacleMode ? "crosshair" : "grab";
@@ -1227,6 +1289,7 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
     zoom = 1;
     panX = 0;
     panY = 0;
+    previewRotationRad = 0;
     draw(ctx, null);
   });
 
@@ -1240,6 +1303,7 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
         zoom = 1;
         panX = 0;
         panY = 0;
+        previewRotationRad = 0;
       } else {
         const prevZoom = zoom;
         const delta = action === "in" ? 1.4 : 0.7;

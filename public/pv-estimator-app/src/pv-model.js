@@ -421,6 +421,10 @@ export function computeLayout(siteConfig, designConfig) {
   } else {
     modulesPerRow = Math.max(Math.floor((siteArea.netWidthM + moduleGapM) / moduleStep), 0);
   }
+  const minRowWidthM = Number(designConfig.minRowWidthM) || 0;
+  if (minRowWidthM > 0 && siteArea.netWidthM < minRowWidthM) {
+    modulesPerRow = 0;
+  }
   const rowCount = Math.max(
     Math.floor((siteArea.netDepthM + rowSpacingM) / Math.max(rowPitchM, 0.001)),
     0
