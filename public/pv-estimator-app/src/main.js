@@ -8,6 +8,11 @@ import {
 import { renderBarChart, renderLineChart, renderGroupedBarChart, renderDualAxisChart, renderPseudo3dLayout, renderLossDiagram, renderMonthlyTable, renderNormalizedProductionChart, renderMonthlyPrChart } from "./charts.js";
 import { buildAndSaveSimulationReport, captureElementAsPng } from "./simulation-report-pdf.js";
 import { fetchOpenMeteoArchiveWeather } from "./weather-openmeteo-direct.js";
+import {
+  pointInAnyExclusion,
+  rotateFieldRingToRowSpace,
+  walkRowSlotCenters,
+} from "./layout-exclusions.js";
 
 /** Set in index.html: empty for local dev (Vite proxies /api), or VITE_API_BASE on production (GitHub Pages). */
 function getPvApiBase() {
@@ -43,6 +48,23 @@ const state = {
   marker: null,
   moduleRowsGroup: null,
   polygonAreaM2: null,
+  /** @type {number[][][]} rings in field meters (same frame as polygonVerticesM) */
+  moduleExclusionPolygonsM: [],
+  layoutAdvancedMode: false,
+  layoutDrawObstacleMode: false,
+  /** @type {'polygon'|'rectangle'} */
+  layoutObstacleDrawKind: "polygon",
+  /** @type {number[] | null} first corner [x,y] field m when drawing a rectangle exclusion */
+  layoutRectFirstCornerM: null,
+  /** @type {number[][]} partial polygon in field meters while drawing */
+  layoutObstacleDraftM: [],
+  /** Leaflet group for exclusion overlays on the Site map */
+  moduleExclusionMapGroup: null,
+  /** While set, the next L.Draw CREATED is an exclusion (polygon|rectangle), not the site boundary */
+  pendingExclusionDrawKind: null,
+  /** Main Site L.Control.Draw instance (hidden while drawing an exclusion on the map) */
+  siteMapDrawControl: null,
+  siteMapDrawControlRemovedForExclusion: false,
 };
 
 const monthFormatter = new Intl.DateTimeFormat(undefined, { month: "short" });
@@ -630,7 +652,111 @@ function renderLayoutPreview(config) {
   const view = byId("layoutPerspectiveView");
   const summary = byId("layoutPerspectiveSummary");
 
-  renderPseudo3dLayout(view, state.layout, config, state.layoutPreview);
+  const layoutUi = {
+    exclusionPolygonsM: state.moduleExclusionPolygonsM,
+    draftRingM: state.layoutObstacleDraftM,
+    advancedMode: state.layoutAdvancedMode,
+    drawObstacleMode: state.layoutDrawObstacleMode,
+    obstacleDrawKind: state.layoutObstacleDrawKind,
+    rectFirstCornerM: state.layoutRectFirstCornerM,
+    onToggleAdvanced() {
+      state.layoutAdvancedMode = !state.layoutAdvancedMode;
+      if (!state.layoutAdvancedMode) {
+        state.layoutDrawObstacleMode = false;
+        state.layoutObstacleDraftM = [];
+        state.layoutRectFirstCornerM = null;
+        state.layoutObstacleDrawKind = "polygon";
+      }
+      refreshLayout();
+    },
+    onStartDrawPolygon() {
+      state.layoutDrawObstacleMode = true;
+      state.layoutObstacleDrawKind = "polygon";
+      state.layoutObstacleDraftM = [];
+      state.layoutRectFirstCornerM = null;
+      renderLayoutPreview(getConfig());
+    },
+    onStartDrawRectangle() {
+      state.layoutDrawObstacleMode = true;
+      state.layoutObstacleDrawKind = "rectangle";
+      state.layoutObstacleDraftM = [];
+      state.layoutRectFirstCornerM = null;
+      renderLayoutPreview(getConfig());
+    },
+    onCancelDraw() {
+      state.layoutDrawObstacleMode = false;
+      state.layoutObstacleDraftM = [];
+      state.layoutRectFirstCornerM = null;
+      state.layoutObstacleDrawKind = "polygon";
+      renderLayoutPreview(getConfig());
+    },
+    onAddDraftPoint(xy) {
+      state.layoutObstacleDraftM.push(xy);
+      renderLayoutPreview(getConfig());
+    },
+    onUndoDraftPoint() {
+      if (state.layoutObstacleDrawKind === "rectangle" && state.layoutRectFirstCornerM) {
+        state.layoutRectFirstCornerM = null;
+        renderLayoutPreview(getConfig());
+        return;
+      }
+      state.layoutObstacleDraftM.pop();
+      renderLayoutPreview(getConfig());
+    },
+    onRectangleFieldClick(xy) {
+      const xf = Number(xy[0]);
+      const yf = Number(xy[1]);
+      if (!Number.isFinite(xf) || !Number.isFinite(yf)) return;
+      if (state.layoutRectFirstCornerM == null) {
+        state.layoutRectFirstCornerM = [xf, yf];
+        renderLayoutPreview(getConfig());
+        return;
+      }
+      const [x0, y0] = state.layoutRectFirstCornerM;
+      const minX = Math.min(x0, xf);
+      const maxX = Math.max(x0, xf);
+      const minY = Math.min(y0, yf);
+      const maxY = Math.max(y0, yf);
+      const minSizeM = 0.05;
+      if (maxX - minX < minSizeM || maxY - minY < minSizeM) {
+        state.layoutRectFirstCornerM = null;
+        renderLayoutPreview(getConfig());
+        return;
+      }
+      const ring = [
+        [minX, minY],
+        [maxX, minY],
+        [maxX, maxY],
+        [minX, maxY],
+      ];
+      state.moduleExclusionPolygonsM.push(ring);
+      state.layoutRectFirstCornerM = null;
+      state.layoutDrawObstacleMode = false;
+      state.layoutObstacleDrawKind = "polygon";
+      refreshLayout();
+    },
+    onCommitDraftRing() {
+      const draft = state.layoutObstacleDraftM;
+      if (!draft || draft.length < 3) return;
+      state.moduleExclusionPolygonsM.push(draft.map(([a, b]) => [Number(a), Number(b)]));
+      state.layoutObstacleDraftM = [];
+      state.layoutDrawObstacleMode = false;
+      state.layoutObstacleDrawKind = "polygon";
+      refreshLayout();
+    },
+    onClearPolygons() {
+      state.moduleExclusionPolygonsM = [];
+      state.layoutObstacleDraftM = [];
+      state.layoutRectFirstCornerM = null;
+      refreshLayout();
+    },
+    onDeletePolygon(index) {
+      state.moduleExclusionPolygonsM.splice(index, 1);
+      refreshLayout();
+    },
+  };
+
+  renderPseudo3dLayout(view, state.layout, config, state.layoutPreview, layoutUi);
 
   if (!state.layout || state.layout.moduleCount <= 0) {
     summary.innerHTML = `
@@ -834,6 +960,15 @@ function updateSimulationOutputs(layout, simulation, lifetime, config) {
   `;
 }
 
+function rotatedExclusionRingsFromState(config) {
+  const grossW = Number(config.manualWidthM) || 1;
+  const grossD = Number(config.manualHeightM) || 1;
+  const az = Number(config.azimuthDeg) || 180;
+  return (state.moduleExclusionPolygonsM || [])
+    .filter((r) => r && r.length >= 3)
+    .map((ring) => rotateFieldRingToRowSpace(ring, grossW, grossD, az));
+}
+
 function refreshLayout() {
   const config = getConfig();
   state.layout = computeLayout(config, config);
@@ -908,6 +1043,8 @@ function refreshLayout() {
             0
           );
 
+    const rotatedExclusionRings = rotatedExclusionRingsFromState(config);
+
     let autoCount = 0;
     for (let i = 0; i < maxRows; i++) {
       const yM = innerMinY + i * rowPitchM;
@@ -917,7 +1054,23 @@ function refreshLayout() {
       const avail = Math.max((range.maxX - sw) - (range.minX + sw), 0);
       if (avail <= 0) continue;
       let rm;
-      if (mPerSeg > 0) {
+      if (rotatedExclusionRings.length > 0) {
+        const rowStartX = range.minX + sw;
+        const rowEndX = range.maxX - sw;
+        const slots = walkRowSlotCenters(
+          rowStartX,
+          rowEndX,
+          yCtr,
+          moduleSpanInRowM,
+          moduleGapM,
+          maxRowWidthM,
+          rowWidthGapM
+        );
+        rm = 0;
+        for (const p of slots) {
+          if (!pointInAnyExclusion(p.x, p.y, rotatedExclusionRings)) rm++;
+        }
+      } else if (mPerSeg > 0) {
         const segW = mPerSeg * moduleStep - moduleGapM;
         const segStep = segW + moduleGapM + rowWidthGapM;
         const nFull = avail >= segW ? 1 + Math.max(Math.floor((avail - segW) / segStep), 0) : 0;
@@ -944,6 +1097,11 @@ function refreshLayout() {
       ? manualAcKw : state.layout.dcCapacityKw / targetRatio;
     state.layout.dcAcRatio = state.layout.acCapacityKw > 0
       ? state.layout.dcCapacityKw / state.layout.acCapacityKw : 0;
+
+    if (rotatedExclusionRings.length > 0 && state.layout.netAreaM2 > 0) {
+      state.layout.groundCoverageRatio =
+        (moduleCount * collectorProjectionM * moduleSpanInRowM) / state.layout.netAreaM2;
+    }
   }
 
   updateSiteSummary(config, state.layout);
@@ -951,6 +1109,8 @@ function refreshLayout() {
   updateLayoutMetrics(state.layout);
   renderLayoutPreview(config);
   renderModuleRowsOnMap();
+  syncModuleExclusionMapLayers();
+  updateSiteExclusionToolsUi();
 }
 
 function polyXRangeAtY(vertices, y) {
@@ -1037,71 +1197,147 @@ function renderModuleRowsOnMap() {
     fillOpacity: 0.55,
   };
 
+  const exRings = rotatedExclusionRingsFromState(config);
+  const useExclusionOnMap = exRings.length > 0;
+  const moduleStepBase = Math.max(moduleSpanInRowM + moduleGapM, 0.001);
+
   let modulesRemaining = layout.moduleCount;
 
-  for (let i = 0; i < maxRows; i++) {
-    const yM = rowMinY + i * rowPitchM;
-    const rowCenterY = yM + collectorProjectionM / 2;
+  function addRowSegment(x0, x1, rowYM) {
+    const width = x1 - x0;
+    if (width <= 0) return;
+    const segRect = L.polygon(
+      [
+        rotLatLng(x0, rowYM),
+        rotLatLng(x1, rowYM),
+        rotLatLng(x1, rowYM + collectorProjectionM),
+        rotLatLng(x0, rowYM + collectorProjectionM),
+      ],
+      rowStyle
+    );
+    state.moduleRowsGroup.addLayer(segRect);
+  }
 
-    let rowStartX, rowEndX;
-    if (polyVerts) {
-      const range = polyXRangeAtY(polyVerts, rowCenterY);
-      if (!range) continue;
-      rowStartX = range.minX + sw;
-      rowEndX = range.maxX - sw;
-    } else {
-      rowStartX = sw;
-      rowEndX = sw + layout.netWidthM;
+  if (useExclusionOnMap) {
+    for (let i = 0; i < maxRows; i++) {
+      const yM = rowMinY + i * rowPitchM;
+      const rowCenterY = yM + collectorProjectionM / 2;
+
+      let rowStartX, rowEndX;
+      if (polyVerts) {
+        const range = polyXRangeAtY(polyVerts, rowCenterY);
+        if (!range) continue;
+        rowStartX = range.minX + sw;
+        rowEndX = range.maxX - sw;
+      } else {
+        rowStartX = sw;
+        rowEndX = sw + layout.netWidthM;
+      }
+
+      if (rowEndX <= rowStartX) continue;
+
+      const slots = walkRowSlotCenters(
+        rowStartX,
+        rowEndX,
+        rowCenterY,
+        moduleSpanInRowM,
+        moduleGapM,
+        maxRowWidthM,
+        rowWidthGapM
+      );
+      let segStart = null;
+      let prevKeptLeft = null;
+      for (const p of slots) {
+        if (pointInAnyExclusion(p.x, p.y, exRings)) {
+          if (segStart != null && prevKeptLeft != null) {
+            addRowSegment(segStart, prevKeptLeft + moduleSpanInRowM, yM);
+            segStart = null;
+            prevKeptLeft = null;
+          }
+          continue;
+        }
+        if (modulesRemaining <= 0) break;
+        const xL = p.x - moduleSpanInRowM / 2;
+        if (segStart === null) {
+          segStart = xL;
+        } else if (Math.abs(xL - (prevKeptLeft + moduleStepBase)) > 1e-3) {
+          addRowSegment(segStart, prevKeptLeft + moduleSpanInRowM, yM);
+          segStart = xL;
+        }
+        prevKeptLeft = xL;
+        modulesRemaining--;
+      }
+      if (segStart != null && prevKeptLeft != null) {
+        addRowSegment(segStart, prevKeptLeft + moduleSpanInRowM, yM);
+      }
+      if (modulesRemaining <= 0) break;
     }
+  } else {
+    for (let i = 0; i < maxRows; i++) {
+      const yM = rowMinY + i * rowPitchM;
+      const rowCenterY = yM + collectorProjectionM / 2;
 
-    if (rowEndX <= rowStartX) continue;
-    const availableWidth = rowEndX - rowStartX;
-    const moduleStep = Math.max(moduleSpanInRowM + moduleGapM, 0.001);
+      let rowStartX, rowEndX;
+      if (polyVerts) {
+        const range = polyXRangeAtY(polyVerts, rowCenterY);
+        if (!range) continue;
+        rowStartX = range.minX + sw;
+        rowEndX = range.maxX - sw;
+      } else {
+        rowStartX = sw;
+        rowEndX = sw + layout.netWidthM;
+      }
 
-    // Compute modules per segment and total modules fitting in available width
-    const modulesPerSegment = maxRowWidthM > 0
-      ? Math.max(Math.floor((maxRowWidthM + moduleGapM) / moduleStep), 1)
-      : 0;
+      if (rowEndX <= rowStartX) continue;
+      const availableWidth = rowEndX - rowStartX;
+      const moduleStep = Math.max(moduleSpanInRowM + moduleGapM, 0.001);
 
-    let rowModules;
-    if (modulesPerSegment > 0) {
-      const segWidthM = modulesPerSegment * moduleStep - moduleGapM;
-      const segStepM = segWidthM + moduleGapM + rowWidthGapM;
-      const numFullSegs = availableWidth >= segWidthM
-        ? 1 + Math.max(Math.floor((availableWidth - segWidthM) / segStepM), 0)
+      const modulesPerSegment = maxRowWidthM > 0
+        ? Math.max(Math.floor((maxRowWidthM + moduleGapM) / moduleStep), 1)
         : 0;
-      const usedW = numFullSegs > 0 ? segWidthM + (numFullSegs - 1) * segStepM : 0;
-      const remW = availableWidth - usedW;
-      const tailMods = numFullSegs > 0 && remW >= rowWidthGapM + moduleSpanInRowM
-        ? Math.min(Math.floor((remW - rowWidthGapM + moduleGapM) / moduleStep), modulesPerSegment)
-        : 0;
-      rowModules = numFullSegs * modulesPerSegment + tailMods;
-    } else {
-      rowModules = Math.max(Math.floor((availableWidth + moduleGapM) / moduleStep), 0);
-    }
-    if (rowModules <= 0) continue;
 
-    const drawRow = Math.min(rowModules, modulesRemaining);
-    if (drawRow <= 0) break;
+      let rowModules;
+      if (modulesPerSegment > 0) {
+        const segWidthM = modulesPerSegment * moduleStep - moduleGapM;
+        const segStepM = segWidthM + moduleGapM + rowWidthGapM;
+        const numFullSegs = availableWidth >= segWidthM
+          ? 1 + Math.max(Math.floor((availableWidth - segWidthM) / segStepM), 0)
+          : 0;
+        const usedW = numFullSegs > 0 ? segWidthM + (numFullSegs - 1) * segStepM : 0;
+        const remW = availableWidth - usedW;
+        const tailMods = numFullSegs > 0 && remW >= rowWidthGapM + moduleSpanInRowM
+          ? Math.min(Math.floor((remW - rowWidthGapM + moduleGapM) / moduleStep), modulesPerSegment)
+          : 0;
+        rowModules = numFullSegs * modulesPerSegment + tailMods;
+      } else {
+        rowModules = Math.max(Math.floor((availableWidth + moduleGapM) / moduleStep), 0);
+      }
+      if (rowModules <= 0) continue;
 
-    // Draw segments (capped to manual / effective module budget)
-    let remaining = drawRow;
-    let segX = rowStartX;
-    while (remaining > 0) {
-      const segModules = modulesPerSegment > 0 ? Math.min(remaining, modulesPerSegment) : remaining;
-      const segWidthM = segModules * moduleStep - moduleGapM;
-      const segRect = L.polygon([
-        rotLatLng(segX,             yM),
-        rotLatLng(segX + segWidthM, yM),
-        rotLatLng(segX + segWidthM, yM + collectorProjectionM),
-        rotLatLng(segX,             yM + collectorProjectionM),
-      ], rowStyle);
-      state.moduleRowsGroup.addLayer(segRect);
-      remaining -= segModules;
-      segX += segWidthM + moduleGapM + rowWidthGapM;
+      const drawRow = Math.min(rowModules, modulesRemaining);
+      if (drawRow <= 0) break;
+
+      let remaining = drawRow;
+      let segX = rowStartX;
+      while (remaining > 0) {
+        const segModules = modulesPerSegment > 0 ? Math.min(remaining, modulesPerSegment) : remaining;
+        const segWidthM = segModules * moduleStep - moduleGapM;
+        const segRect = L.polygon(
+          [
+            rotLatLng(segX, yM),
+            rotLatLng(segX + segWidthM, yM),
+            rotLatLng(segX + segWidthM, yM + collectorProjectionM),
+            rotLatLng(segX, yM + collectorProjectionM),
+          ],
+          rowStyle
+        );
+        state.moduleRowsGroup.addLayer(segRect);
+        remaining -= segModules;
+        segX += segWidthM + moduleGapM + rowWidthGapM;
+      }
+      modulesRemaining -= drawRow;
+      if (modulesRemaining <= 0) break;
     }
-    modulesRemaining -= drawRow;
-    if (modulesRemaining <= 0) break;
   }
 }
 
@@ -1196,6 +1432,145 @@ async function fetchWeatherFromApi() {
   } finally {
     button.disabled = false;
   }
+}
+
+/** Site map ring (LatLng[]) → field-meter ring, same convention as layout.polygonVerticesM */
+function latLngRingToFieldMetersRing(ringLatLng, bounds, grossWidthM, grossDepthM) {
+  const sw = bounds.getSouthWest();
+  const bboxW = haversineDistanceMeters(
+    { lat: sw.lat, lng: bounds.getWest() },
+    { lat: sw.lat, lng: bounds.getEast() }
+  );
+  const bboxD = haversineDistanceMeters(
+    { lat: bounds.getSouth(), lng: sw.lng },
+    { lat: bounds.getNorth(), lng: sw.lng }
+  );
+  return ringLatLng.map((ll) => {
+    const lat = typeof ll.lat === "number" ? ll.lat : ll[0];
+    const lng = typeof ll.lng === "number" ? ll.lng : ll[1];
+    const xFrac = bboxW > 0 ? haversineDistanceMeters({ lat: sw.lat, lng: sw.lng }, { lat: sw.lat, lng }) / bboxW : 0;
+    const yFrac = bboxD > 0 ? haversineDistanceMeters({ lat: sw.lat, lng: sw.lng }, { lat, lng: sw.lng }) / bboxD : 0;
+    return [xFrac * grossWidthM, (1 - yFrac) * grossDepthM];
+  });
+}
+
+/** Field-meter ring → LatLng ring for map overlay (linear bbox inverse, matches small-site usage) */
+function fieldMeterRingToLatLngRing(ringFieldM, bounds, grossWidthM, grossDepthM) {
+  const south = bounds.getSouth();
+  const north = bounds.getNorth();
+  const west = bounds.getWest();
+  const east = bounds.getEast();
+  return ringFieldM.map(([xf, yf]) => {
+    const xFrac = Math.min(1, Math.max(0, Number(xf) / grossWidthM));
+    const yFrac = 1 - Math.min(1, Math.max(0, Number(yf) / grossDepthM));
+    const lat = south + yFrac * (north - south);
+    const lng = west + xFrac * (east - west);
+    return L.latLng(lat, lng);
+  });
+}
+
+function layerToLatLngRing(layer) {
+  if (!layer) return [];
+  if (typeof layer.getLatLngs === "function") {
+    const raw = layer.getLatLngs();
+    const ring = Array.isArray(raw[0]) ? raw[0] : raw;
+    return (ring || []).map((ll) =>
+      typeof ll.lat === "number" && typeof ll.lng === "number" ? L.latLng(ll.lat, ll.lng) : ll
+    );
+  }
+  if (typeof layer.getBounds === "function") {
+    const b = layer.getBounds();
+    return [
+      L.latLng(b.getSouth(), b.getWest()),
+      L.latLng(b.getSouth(), b.getEast()),
+      L.latLng(b.getNorth(), b.getEast()),
+      L.latLng(b.getNorth(), b.getWest()),
+    ];
+  }
+  return [];
+}
+
+function syncModuleExclusionMapLayers() {
+  if (!state.map || !state.moduleExclusionMapGroup) return;
+  state.moduleExclusionMapGroup.clearLayers();
+  if (!state.drawnLayer || !state.moduleExclusionPolygonsM.length) return;
+  const config = getConfig();
+  const grossW = Number(config.manualWidthM) || 1;
+  const grossD = Number(config.manualHeightM) || 1;
+  const bounds = state.drawnLayer.getBounds();
+  const style = {
+    color: "#dc2626",
+    weight: 2,
+    fillColor: "#ef4444",
+    fillOpacity: 0.22,
+    dashArray: "6 4",
+  };
+  for (const ring of state.moduleExclusionPolygonsM) {
+    if (!ring || ring.length < 3) continue;
+    const latLngs = fieldMeterRingToLatLngRing(ring, bounds, grossW, grossD);
+    state.moduleExclusionMapGroup.addLayer(L.polygon(latLngs, style));
+  }
+}
+
+function updateSiteExclusionToolsUi() {
+  const hasSite = Boolean(state.drawnLayer);
+  const polyBtn = byId("siteMapExclusionPolygon");
+  const rectBtn = byId("siteMapExclusionRectangle");
+  const clearBtn = byId("siteMapExclusionClear");
+  if (polyBtn) polyBtn.disabled = !hasSite || Boolean(state.pendingExclusionDrawKind);
+  if (rectBtn) rectBtn.disabled = !hasSite || Boolean(state.pendingExclusionDrawKind);
+  if (clearBtn) clearBtn.disabled = !state.moduleExclusionPolygonsM.length;
+}
+
+function restoreSiteMapDrawControl() {
+  if (!state.map || !state.siteMapDrawControl || !state.siteMapDrawControlRemovedForExclusion) return;
+  state.map.addControl(state.siteMapDrawControl);
+  state.siteMapDrawControlRemovedForExclusion = false;
+}
+
+function beginSiteMapExclusionDraw(kind) {
+  if (!state.map || !state.drawnLayer || !window.L || !L.Draw) return;
+  if (state.siteMapDrawControl) {
+    try {
+      state.map.removeControl(state.siteMapDrawControl);
+      state.siteMapDrawControlRemovedForExclusion = true;
+    } catch (_) {
+      state.siteMapDrawControlRemovedForExclusion = false;
+    }
+  }
+  state.pendingExclusionDrawKind = kind;
+  updateSiteExclusionToolsUi();
+  const shape = {
+    color: "#dc2626",
+    weight: 2,
+    fillOpacity: 0.15,
+  };
+  if (kind === "polygon") {
+    new L.Draw.Polygon(state.map, {
+      allowIntersection: false,
+      shapeOptions: shape,
+    }).enable();
+  } else if (kind === "rectangle") {
+    new L.Draw.Rectangle(state.map, {
+      shapeOptions: shape,
+    }).enable();
+  }
+}
+
+function handleExclusionDrawCreated(layer) {
+  const ringLatLng = layerToLatLngRing(layer);
+  if (ringLatLng.length < 3) {
+    if (state.map.hasLayer(layer)) state.map.removeLayer(layer);
+    return;
+  }
+  const config = getConfig();
+  const grossW = Number(config.manualWidthM) || 1;
+  const grossD = Number(config.manualHeightM) || 1;
+  const bounds = state.drawnLayer.getBounds();
+  const fieldRing = latLngRingToFieldMetersRing(ringLatLng, bounds, grossW, grossD);
+  state.moduleExclusionPolygonsM.push(fieldRing);
+  if (state.map.hasLayer(layer)) state.map.removeLayer(layer);
+  refreshLayout();
 }
 
 function haversineDistanceMeters(pointA, pointB) {
@@ -1342,6 +1717,8 @@ function initMap() {
   drawnItems.addTo(state.map);
   state.drawnItems = drawnItems;
 
+  state.moduleExclusionMapGroup = L.featureGroup().addTo(state.map);
+
   state.marker = L.marker([initialLat, initialLng]).addTo(state.map);
 
   const drawControl = new L.Control.Draw({
@@ -1366,9 +1743,18 @@ function initMap() {
       },
     },
   });
+  state.siteMapDrawControl = drawControl;
   state.map.addControl(drawControl);
 
   state.map.on(L.Draw.Event.CREATED, (event) => {
+    if (state.pendingExclusionDrawKind) {
+      state.pendingExclusionDrawKind = null;
+      updateSiteExclusionToolsUi();
+      handleExclusionDrawCreated(event.layer);
+      return;
+    }
+    state.moduleExclusionPolygonsM = [];
+    syncModuleExclusionMapLayers();
     drawnItems.clearLayers();
     state.drawnLayer = event.layer;
     drawnItems.addLayer(event.layer);
@@ -1376,9 +1762,17 @@ function initMap() {
     window.setTimeout(() => captureLayoutSnapshot(true), 80);
   });
 
+  state.map.on(L.Draw.Event.DRAWSTOP, () => {
+    state.pendingExclusionDrawKind = null;
+    updateSiteExclusionToolsUi();
+    restoreSiteMapDrawControl();
+  });
+
   state.map.on(L.Draw.Event.DELETED, () => {
     state.drawnLayer = null;
     state.polygonAreaM2 = null;
+    state.moduleExclusionPolygonsM = [];
+    if (state.moduleExclusionMapGroup) state.moduleExclusionMapGroup.clearLayers();
     clearLayoutSnapshot();
     refreshAll();
   });
@@ -1402,6 +1796,9 @@ function initMap() {
       captureLayoutSnapshot(true);
     }
   });
+
+  syncModuleExclusionMapLayers();
+  updateSiteExclusionToolsUi();
 }
 
 function runSimulation() {
@@ -1464,6 +1861,23 @@ function wireEvents() {
   byId("fetchWeather").addEventListener("click", () => {
     fetchWeatherFromApi();
   });
+
+  const siteMapExclPoly = byId("siteMapExclusionPolygon");
+  if (siteMapExclPoly) {
+    siteMapExclPoly.addEventListener("click", () => beginSiteMapExclusionDraw("polygon"));
+  }
+  const siteMapExclRect = byId("siteMapExclusionRectangle");
+  if (siteMapExclRect) {
+    siteMapExclRect.addEventListener("click", () => beginSiteMapExclusionDraw("rectangle"));
+  }
+  const siteMapExclClear = byId("siteMapExclusionClear");
+  if (siteMapExclClear) {
+    siteMapExclClear.addEventListener("click", () => {
+      state.moduleExclusionPolygonsM = [];
+      syncModuleExclusionMapLayers();
+      refreshLayout();
+    });
+  }
 
   byId("resetWeather").addEventListener("click", () => {
     state.weather = emptyWeatherState();

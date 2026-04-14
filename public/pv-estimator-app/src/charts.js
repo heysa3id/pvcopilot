@@ -1,3 +1,11 @@
+import {
+  canvasLogicalToRotatedRowMeters,
+  pointInAnyExclusion,
+  rotateFieldRingToRowSpace,
+  rowSpaceToFieldMeters,
+  walkRowSlotCenters,
+} from "./layout-exclusions.js";
+
 function formatCompactValue(value, unit) {
   if (!Number.isFinite(value)) {
     return `0 ${unit}`;
@@ -408,7 +416,7 @@ function polygonXRangeAtY(vertices, y) {
   return { minX, maxX };
 }
 
-export function renderPseudo3dLayout(container, layout, config, preview = {}) {
+export function renderPseudo3dLayout(container, layout, config, preview = {}, layoutUi = {}) {
   if (!container) {
     return;
   }
@@ -417,6 +425,23 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}) {
     container.innerHTML = `<p class="muted">Define the field geometry to preview the layout.</p>`;
     return;
   }
+
+  const li = layoutUi || {};
+  const advancedMode = Boolean(li.advancedMode);
+  const drawObstacleMode = Boolean(li.drawObstacleMode);
+  const obstacleDrawKind = li.obstacleDrawKind === "rectangle" ? "rectangle" : "polygon";
+  const rectFirstCornerM = Array.isArray(li.rectFirstCornerM) && li.rectFirstCornerM.length >= 2
+    ? li.rectFirstCornerM
+    : null;
+  const hasRectCorner = rectFirstCornerM != null;
+  const exclusionPolygonsM = li.exclusionPolygonsM || [];
+  const draftRingM = li.draftRingM || [];
+  const exclusionRowsHtml = exclusionPolygonsM
+    .map(
+      (_, i) =>
+        `<div class="layout-excl-row"><span>Exclusion ${i + 1}</span><button type="button" class="layout-adv-btn layout-adv-btn--icon" data-layout-action="deleteExclusion" data-exclusion-index="${i}" title="Remove">×</button></div>`
+    )
+    .join("");
 
   const grossWidthM = Math.max(Number(config.manualWidthM) || layout.netWidthM || 1, 1);
   const grossDepthM = Math.max(Number(config.manualHeightM) || layout.netDepthM || 1, 1);
@@ -518,6 +543,27 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}) {
           <button type="button" class="layout-zoom-btn" data-zoom="out" title="Zoom out">&minus;</button>
           <button type="button" class="layout-zoom-btn" data-zoom="reset" title="Reset view (double-click)">&#8634;</button>
         </div>
+        <div class="layout-advanced-toolbar">
+          <button type="button" class="layout-adv-btn" data-layout-action="toggleAdvanced">${advancedMode ? "Exit advanced" : "Advanced"}</button>
+          <div class="layout-adv-extras" style="display: ${advancedMode ? "flex" : "none"}">
+            <div class="layout-exclusion-type-btns" style="display: ${drawObstacleMode ? "none" : "flex"}">
+              <button type="button" class="layout-adv-btn" data-layout-action="drawPolygon">Polygon exclusion</button>
+              <button type="button" class="layout-adv-btn" data-layout-action="drawRectangle">Rectangle exclusion</button>
+            </div>
+            <div class="layout-draw-toolbar" style="display: ${drawObstacleMode && obstacleDrawKind === "polygon" ? "flex" : "none"}">
+              <button type="button" class="layout-adv-btn layout-adv-btn--primary" data-layout-action="finishDraw" title="Apply exclusion and recalculate modules" ${draftRingM.length < 3 ? "disabled" : ""}>Finish</button>
+              <button type="button" class="layout-adv-btn" data-layout-action="deleteLastPoint" ${draftRingM.length < 1 ? "disabled" : ""}>Delete last point</button>
+              <button type="button" class="layout-adv-btn" data-layout-action="cancelDraw">Cancel</button>
+            </div>
+            <div class="layout-draw-toolbar" style="display: ${drawObstacleMode && obstacleDrawKind === "rectangle" ? "flex" : "none"}">
+              <button type="button" class="layout-adv-btn" data-layout-action="deleteLastPoint" ${!hasRectCorner ? "disabled" : ""}>Delete last point</button>
+              <button type="button" class="layout-adv-btn" data-layout-action="cancelDraw">Cancel</button>
+            </div>
+            <button type="button" class="layout-adv-btn" data-layout-action="clearExclusions" ${exclusionPolygonsM.length ? "" : "disabled"}>Clear all exclusions</button>
+            <p class="layout-adv-hint muted">${drawObstacleMode && obstacleDrawKind === "polygon" ? "Polygon: add corners on the field, then <strong>Finish</strong> or click the <strong>first point</strong> (blue). Double-click also applies." : drawObstacleMode && obstacleDrawKind === "rectangle" ? "Rectangle: click one corner, then the opposite corner (axis-aligned in field meters). The exclusion applies after the second click." : "Choose <strong>Polygon</strong> or <strong>Rectangle</strong> to carve out roads, MV zones, or pads."}</p>
+            <div class="layout-excl-list">${exclusionRowsHtml}</div>
+          </div>
+        </div>
         <div class="layout-stage-caption">Top-down layout</div>
       </div>
       <p class="muted">${note}</p>
@@ -534,7 +580,7 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}) {
   canvas.height = Math.round(logicalH * dpr);
   canvas.style.width = logicalW + "px";
   canvas.style.height = logicalH + "px";
-  canvas.style.cursor = "grab";
+  canvas.style.cursor = drawObstacleMode ? "crosshair" : "grab";
 
   const margin = { top: 44, right: 56, bottom: 44, left: 56 };
   const drawW = logicalW - margin.left - margin.right;
@@ -546,6 +592,8 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}) {
   let panX = 0;
   let panY = 0;
   let cachedBgImage = null;
+  /** Field meters [x,y] — second corner preview while drawing a rectangle */
+  let rectHoverFieldM = null;
 
   function getTransform() {
     const s = baseScale * zoom;
@@ -562,6 +610,11 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}) {
     if (bgImage) cachedBgImage = bgImage;
     const bg = bgImage || cachedBgImage;
     const { scale, toX, toY } = getTransform();
+    const azDegDraw = Number(config.azimuthDeg) || 180;
+    const exRings = (li.exclusionPolygonsM || [])
+      .filter((r) => r && r.length >= 3)
+      .map((r) => rotateFieldRingToRowSpace(r, grossWidthM, grossDepthM, azDegDraw));
+    const useExclusionSlots = exRings.length > 0;
 
     ctx.save();
     ctx.scale(dpr, dpr);
@@ -700,88 +753,206 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}) {
 
     let modulesRemaining = visibleModuleCount;
 
-    for (let i = 0; i < maxRows; i++) {
-      const yM = rowMinY + i * rowPitchM;
-      const rowCenterY = yM + collectorProjectionM / 2;
+    if (useExclusionSlots) {
+      rows: for (let i = 0; i < maxRows; i++) {
+        const yM = rowMinY + i * rowPitchM;
+        const rowCenterY = yM + collectorProjectionM / 2;
 
-      // Determine available X range using rotated polygon
-      let rowStartX, rowEndX;
-      if (rotatedPolyVerts) {
-        const range = polygonXRangeAtY(rotatedPolyVerts, rowCenterY);
-        if (!range) continue;
-        rowStartX = range.minX + sw;
-        rowEndX = range.maxX - sw;
-      } else {
-        rowStartX = sw;
-        rowEndX = sw + netWidthM;
-      }
-
-      if (rowEndX <= rowStartX) continue;
-      const availableWidth = rowEndX - rowStartX;
-      const moduleStep = Math.max(moduleSpanInRowM + moduleGapM, 0.001);
-
-      // Compute modules per segment and total modules fitting in available width
-      const modulesPerSegment = maxRowWidthM > 0
-        ? Math.max(Math.floor((maxRowWidthM + moduleGapM) / moduleStep), 1)
-        : 0;
-
-      let rowModules;
-      if (modulesPerSegment > 0) {
-        const segWidthM = modulesPerSegment * moduleStep - moduleGapM;
-        const segStepM = segWidthM + moduleGapM + rowWidthGapM;
-        const numFullSegs = availableWidth >= segWidthM
-          ? 1 + Math.max(Math.floor((availableWidth - segWidthM) / segStepM), 0)
-          : 0;
-        const usedW = numFullSegs > 0 ? segWidthM + (numFullSegs - 1) * segStepM : 0;
-        const remW = availableWidth - usedW;
-        const tailMods = numFullSegs > 0 && remW >= rowWidthGapM + moduleSpanInRowM
-          ? Math.min(Math.floor((remW - rowWidthGapM + moduleGapM) / moduleStep), modulesPerSegment)
-          : 0;
-        rowModules = numFullSegs * modulesPerSegment + tailMods;
-      } else {
-        rowModules = Math.max(Math.floor((availableWidth + moduleGapM) / moduleStep), 0);
-      }
-      if (rowModules <= 0) continue;
-
-      const drawRow = Math.min(rowModules, modulesRemaining);
-      if (drawRow <= 0) break;
-
-      // Draw segments (capped to layout.moduleCount budget)
-      let remaining = drawRow;
-      let segX = rowStartX;
-      while (remaining > 0) {
-        const segModules = modulesPerSegment > 0 ? Math.min(remaining, modulesPerSegment) : remaining;
-        const segWidthM = segModules * moduleStep - moduleGapM;
-        const showIndividual = modulePixelW >= 3 && segModules <= 200;
-
-        if (showIndividual) {
-          ctx.fillStyle = moduleColor;
-          for (let j = 0; j < segModules; j++) {
-            const xM = segX + j * moduleStep;
-            ctx.fillRect(
-              toX(xM),
-              toY(yM),
-              Math.max(modulePixelW - 0.5, 1),
-              Math.max(rowPixelH - 0.5, 1)
-            );
-          }
+        let rowStartX, rowEndX;
+        if (rotatedPolyVerts) {
+          const range = polygonXRangeAtY(rotatedPolyVerts, rowCenterY);
+          if (!range) continue;
+          rowStartX = range.minX + sw;
+          rowEndX = range.maxX - sw;
         } else {
+          rowStartX = sw;
+          rowEndX = sw + netWidthM;
+        }
+
+        if (rowEndX <= rowStartX) continue;
+
+        const slots = walkRowSlotCenters(
+          rowStartX,
+          rowEndX,
+          rowCenterY,
+          moduleSpanInRowM,
+          moduleGapM,
+          maxRowWidthM,
+          rowWidthGapM
+        );
+        for (const p of slots) {
+          if (pointInAnyExclusion(p.x, p.y, exRings)) continue;
+          if (modulesRemaining <= 0) break rows;
+          const xLeft = p.x - moduleSpanInRowM / 2;
           ctx.fillStyle = moduleColor;
           ctx.fillRect(
-            toX(segX),
+            toX(xLeft),
             toY(yM),
-            segWidthM * scale,
-            Math.max(rowPixelH, 1)
+            Math.max(modulePixelW - 0.5, 1),
+            Math.max(rowPixelH - 0.5, 1)
           );
+          totalPlacedModules++;
+          modulesRemaining--;
         }
-        remaining -= segModules;
-        segX += segWidthM + moduleGapM + rowWidthGapM;
       }
-      totalPlacedModules += drawRow;
-      modulesRemaining -= drawRow;
-      if (modulesRemaining <= 0) break;
+    } else {
+      for (let i = 0; i < maxRows; i++) {
+        const yM = rowMinY + i * rowPitchM;
+        const rowCenterY = yM + collectorProjectionM / 2;
+
+        let rowStartX, rowEndX;
+        if (rotatedPolyVerts) {
+          const range = polygonXRangeAtY(rotatedPolyVerts, rowCenterY);
+          if (!range) continue;
+          rowStartX = range.minX + sw;
+          rowEndX = range.maxX - sw;
+        } else {
+          rowStartX = sw;
+          rowEndX = sw + netWidthM;
+        }
+
+        if (rowEndX <= rowStartX) continue;
+        const availableWidth = rowEndX - rowStartX;
+        const moduleStep = Math.max(moduleSpanInRowM + moduleGapM, 0.001);
+
+        const modulesPerSegment = maxRowWidthM > 0
+          ? Math.max(Math.floor((maxRowWidthM + moduleGapM) / moduleStep), 1)
+          : 0;
+
+        let rowModules;
+        if (modulesPerSegment > 0) {
+          const segWidthM = modulesPerSegment * moduleStep - moduleGapM;
+          const segStepM = segWidthM + moduleGapM + rowWidthGapM;
+          const numFullSegs = availableWidth >= segWidthM
+            ? 1 + Math.max(Math.floor((availableWidth - segWidthM) / segStepM), 0)
+            : 0;
+          const usedW = numFullSegs > 0 ? segWidthM + (numFullSegs - 1) * segStepM : 0;
+          const remW = availableWidth - usedW;
+          const tailMods = numFullSegs > 0 && remW >= rowWidthGapM + moduleSpanInRowM
+            ? Math.min(Math.floor((remW - rowWidthGapM + moduleGapM) / moduleStep), modulesPerSegment)
+            : 0;
+          rowModules = numFullSegs * modulesPerSegment + tailMods;
+        } else {
+          rowModules = Math.max(Math.floor((availableWidth + moduleGapM) / moduleStep), 0);
+        }
+        if (rowModules <= 0) continue;
+
+        const drawRow = Math.min(rowModules, modulesRemaining);
+        if (drawRow <= 0) break;
+
+        let remaining = drawRow;
+        let segX = rowStartX;
+        while (remaining > 0) {
+          const segModules = modulesPerSegment > 0 ? Math.min(remaining, modulesPerSegment) : remaining;
+          const segWidthM = segModules * moduleStep - moduleGapM;
+          const showIndividual = modulePixelW >= 3 && segModules <= 200;
+
+          if (showIndividual) {
+            ctx.fillStyle = moduleColor;
+            for (let j = 0; j < segModules; j++) {
+              const xM = segX + j * moduleStep;
+              ctx.fillRect(
+                toX(xM),
+                toY(yM),
+                Math.max(modulePixelW - 0.5, 1),
+                Math.max(rowPixelH - 0.5, 1)
+              );
+            }
+          } else {
+            ctx.fillStyle = moduleColor;
+            ctx.fillRect(
+              toX(segX),
+              toY(yM),
+              segWidthM * scale,
+              Math.max(rowPixelH, 1)
+            );
+          }
+          remaining -= segModules;
+          segX += segWidthM + moduleGapM + rowWidthGapM;
+        }
+        totalPlacedModules += drawRow;
+        modulesRemaining -= drawRow;
+        if (modulesRemaining <= 0) break;
+      }
     }
     ctx.restore(); // remove azimuth rotation and clip
+
+    // -- exclusion overlays (field meters, on top of modules)
+    for (const ring of li.exclusionPolygonsM || []) {
+      if (!ring || ring.length < 3) continue;
+      ctx.fillStyle = "rgba(239, 68, 68, 0.2)";
+      tracePolyPath(ctx, ring);
+      ctx.fill();
+      ctx.strokeStyle = "rgba(185, 28, 28, 0.88)";
+      ctx.lineWidth = 1.5;
+      tracePolyPath(ctx, ring);
+      ctx.stroke();
+    }
+    if (obstacleDrawKind === "polygon" && draftRingM.length >= 1) {
+      ctx.beginPath();
+      ctx.moveTo(toX(draftRingM[0][0]), toY(draftRingM[0][1]));
+      for (let di = 1; di < draftRingM.length; di++) {
+        ctx.lineTo(toX(draftRingM[di][0]), toY(draftRingM[di][1]));
+      }
+      if (draftRingM.length >= 3) {
+        ctx.closePath();
+        ctx.fillStyle = "rgba(59, 130, 246, 0.18)";
+        ctx.fill();
+        ctx.beginPath();
+        ctx.moveTo(toX(draftRingM[0][0]), toY(draftRingM[0][1]));
+        for (let di = 1; di < draftRingM.length; di++) {
+          ctx.lineTo(toX(draftRingM[di][0]), toY(draftRingM[di][1]));
+        }
+      }
+      ctx.strokeStyle = "rgba(37, 99, 235, 0.95)";
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 4]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      for (let di = 0; di < draftRingM.length; di++) {
+        const pt = draftRingM[di];
+        const isFirst = di === 0;
+        ctx.beginPath();
+        ctx.arc(toX(pt[0]), toY(pt[1]), isFirst ? 6.5 : 4, 0, Math.PI * 2);
+        ctx.fillStyle = isFirst ? "rgba(37, 99, 235, 0.95)" : "rgba(255, 255, 255, 0.95)";
+        ctx.fill();
+        ctx.strokeStyle = isFirst ? "#1d4ed8" : "rgba(37, 99, 235, 0.85)";
+        ctx.lineWidth = isFirst ? 2 : 1.25;
+        ctx.stroke();
+      }
+    }
+    if (obstacleDrawKind === "rectangle" && rectFirstCornerM) {
+      const x0 = rectFirstCornerM[0];
+      const y0 = rectFirstCornerM[1];
+      if (rectHoverFieldM && rectHoverFieldM.length >= 2) {
+        const xh = rectHoverFieldM[0];
+        const yh = rectHoverFieldM[1];
+        const minX = Math.min(x0, xh);
+        const maxX = Math.max(x0, xh);
+        const minY = Math.min(y0, yh);
+        const maxY = Math.max(y0, yh);
+        ctx.beginPath();
+        ctx.moveTo(toX(minX), toY(minY));
+        ctx.lineTo(toX(maxX), toY(minY));
+        ctx.lineTo(toX(maxX), toY(maxY));
+        ctx.lineTo(toX(minX), toY(maxY));
+        ctx.closePath();
+        ctx.fillStyle = "rgba(59, 130, 246, 0.12)";
+        ctx.fill();
+        ctx.strokeStyle = "rgba(37, 99, 235, 0.9)";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 4]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      ctx.beginPath();
+      ctx.arc(toX(x0), toY(y0), 6.5, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(37, 99, 235, 0.95)";
+      ctx.fill();
+      ctx.strokeStyle = "#1d4ed8";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    }
 
     // -- dimension annotations
     ctx.font = "600 11px Inter, sans-serif";
@@ -914,18 +1085,117 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}) {
   }
   draw(ctx, null);
 
-  // -- disable scroll zoom on layout canvas (use + / - buttons instead)
-  canvas.addEventListener("wheel", (e) => {
-    e.preventDefault();
-  }, { passive: false });
+  // -- wheel zoom (pointer-anchored; same clamp as +/- buttons)
+  canvas.addEventListener(
+    "wheel",
+    (e) => {
+      e.preventDefault();
+      let dy = e.deltaY;
+      if (e.deltaMode === 1) dy *= 16;
+      else if (e.deltaMode === 2) dy *= logicalH;
+      if (dy === 0) return;
+      const rect = canvas.getBoundingClientRect();
+      const fx = e.clientX - rect.left;
+      const fy = e.clientY - rect.top;
+      const prevZoom = zoom;
+      const zoomSensitivity = 0.0015;
+      zoom = clamp(zoom * Math.exp(-dy * zoomSensitivity), 0.5, 20);
+      if (zoom === prevZoom) return;
+      const ratio = zoom / prevZoom;
+      panX = fx - ratio * (fx - panX);
+      panY = fy - ratio * (fy - panY);
+      draw(ctx, null);
+    },
+    { passive: false }
+  );
 
   // -- pan with mouse drag
   let dragging = false;
   let lastX = 0;
   let lastY = 0;
 
+  canvas.addEventListener("mousemove", (e) => {
+    if (!drawObstacleMode || dragging) return;
+    if (obstacleDrawKind !== "rectangle" || !rectFirstCornerM) {
+      if (rectHoverFieldM !== null) {
+        rectHoverFieldM = null;
+        draw(ctx, null);
+      }
+      return;
+    }
+    const r = canvas.getBoundingClientRect();
+    const lx = e.clientX - r.left;
+    const ly = e.clientY - r.top;
+    const { scale, toX, toY } = getTransform();
+    const ox0 = toX(0);
+    const oy0 = toY(0);
+    const { xr, yr } = canvasLogicalToRotatedRowMeters(
+      lx,
+      ly,
+      ox0,
+      oy0,
+      scale,
+      grossWidthM,
+      grossDepthM,
+      azRotRad
+    );
+    const azDegMv = Number(config.azimuthDeg) || 180;
+    const [xf, yf] = rowSpaceToFieldMeters(xr, yr, grossWidthM, grossDepthM, azDegMv);
+    rectHoverFieldM = [xf, yf];
+    draw(ctx, null);
+  });
+
+  canvas.addEventListener("mouseleave", () => {
+    if (rectHoverFieldM !== null) {
+      rectHoverFieldM = null;
+      draw(ctx, null);
+    }
+  });
+
   canvas.addEventListener("mousedown", (e) => {
     if (e.button !== 0) return;
+    if (drawObstacleMode && (li.onAddDraftPoint || li.onRectangleFieldClick)) {
+      const rect = canvas.getBoundingClientRect();
+      const lx = e.clientX - rect.left;
+      const ly = e.clientY - rect.top;
+      const { scale, toX, toY } = getTransform();
+      const ox0 = toX(0);
+      const oy0 = toY(0);
+      const { xr, yr } = canvasLogicalToRotatedRowMeters(
+        lx,
+        ly,
+        ox0,
+        oy0,
+        scale,
+        grossWidthM,
+        grossDepthM,
+        azRotRad
+      );
+      const azDeg = Number(config.azimuthDeg) || 180;
+      const [xf, yf] = rowSpaceToFieldMeters(xr, yr, grossWidthM, grossDepthM, azDeg);
+
+      if (obstacleDrawKind === "rectangle" && li.onRectangleFieldClick) {
+        rectHoverFieldM = null;
+        li.onRectangleFieldClick([xf, yf]);
+        e.preventDefault();
+        return;
+      }
+      if (obstacleDrawKind === "polygon" && li.onAddDraftPoint) {
+        const draft = li.draftRingM || [];
+        if (draft.length >= 3 && li.onCommitDraftRing) {
+          const px0 = toX(draft[0][0]);
+          const py0 = toY(draft[0][1]);
+          if (Math.hypot(lx - px0, ly - py0) < 18) {
+            li.onCommitDraftRing();
+            e.preventDefault();
+            return;
+          }
+        }
+        li.onAddDraftPoint([xf, yf]);
+        e.preventDefault();
+        return;
+      }
+    }
     dragging = true;
     lastX = e.clientX;
     lastY = e.clientY;
@@ -944,11 +1214,16 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}) {
   window.addEventListener("mouseup", () => {
     if (!dragging) return;
     dragging = false;
-    canvas.style.cursor = "grab";
+    canvas.style.cursor = drawObstacleMode ? "crosshair" : "grab";
   });
 
-  // -- double-click to reset zoom
-  canvas.addEventListener("dblclick", () => {
+  // -- double-click: finish exclusion polygon (same as Site map double-close) or reset zoom
+  canvas.addEventListener("dblclick", (e) => {
+    if (drawObstacleMode && obstacleDrawKind === "polygon") {
+      e.preventDefault();
+      if ((li.draftRingM || []).length >= 3) li.onCommitDraftRing?.();
+      return;
+    }
     zoom = 1;
     panX = 0;
     panY = 0;
@@ -974,6 +1249,24 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}) {
         panY = cy - ratio * (cy - panY);
       }
       draw(ctx, null);
+    });
+  });
+
+  container.querySelectorAll("[data-layout-action]").forEach((btn) => {
+    btn.addEventListener("click", (ev) => {
+      ev.preventDefault();
+      const act = btn.dataset.layoutAction;
+      if (act === "toggleAdvanced") li.onToggleAdvanced?.();
+      else if (act === "drawPolygon") li.onStartDrawPolygon?.();
+      else if (act === "drawRectangle") li.onStartDrawRectangle?.();
+      else if (act === "cancelDraw") li.onCancelDraw?.();
+      else if (act === "finishDraw") li.onCommitDraftRing?.();
+      else if (act === "deleteLastPoint") li.onUndoDraftPoint?.();
+      else if (act === "clearExclusions") li.onClearPolygons?.();
+      else if (act === "deleteExclusion") {
+        const idx = Number(ev.currentTarget.dataset.exclusionIndex);
+        if (Number.isFinite(idx)) li.onDeletePolygon?.(idx);
+      }
     });
   });
 }
