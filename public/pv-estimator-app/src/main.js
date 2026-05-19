@@ -1671,15 +1671,16 @@ function initMap() {
 
   const initialLat = readNumber("siteLat");
   const initialLng = readNumber("siteLng");
-  state.map = L.map(mapCanvas, { zoomControl: true }).setView([initialLat, initialLng], 17);
+  state.map = L.map(mapCanvas, { zoomControl: true, maxZoom: 18 }).setView([initialLat, initialLng], 17);
   const baseLayer = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
-    maxZoom: 19,
+    maxNativeZoom: 17,
+    maxZoom: 18,
     attribution: "Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar Geographics",
     crossOrigin: "anonymous",
   }).addTo(state.map);
 
   L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}", {
-    maxZoom: 19,
+    maxZoom: 18,
     pane: "overlayPane",
   }).addTo(state.map);
 

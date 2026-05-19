@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   LayoutDashboard,
@@ -21,7 +21,6 @@ import {
   ElectricBolt,
   FilterAltOutlined,
   AccountTree,
-  Calculate,
 } from "@mui/icons-material";
 import CurrencyExchangeIcon from "@mui/icons-material/CurrencyExchange";
 
@@ -255,19 +254,18 @@ function ContactTooltipButton({ closeMobile }) {
   );
 }
 
-function InteractiveLcoeButton({ closeMobile, fullWidth }) {
-  const navigate = useNavigate();
-  const location = useLocation();
+function OpenSimulatorButton({ closeMobile, fullWidth }) {
   const [loading, setLoading] = useState(false);
   const [ready, setReady] = useState(false);
   const [hover, setHover] = useState(false);
 
   const handleClick = () => {
-    if (location.pathname === "/lcoe-tool") return;
+    const onSimulator = window.location.pathname.replace(/\/$/, "").endsWith("/pv-estimator-app");
+    if (onSimulator) return;
     setLoading(true);
     closeMobile?.();
     const t = setTimeout(() => {
-      navigate("/lcoe-tool");
+      window.location.assign(SIMULATOR_HREF);
       setLoading(false);
       setReady(true);
       const t2 = setTimeout(() => setReady(false), 1500);
@@ -277,7 +275,7 @@ function InteractiveLcoeButton({ closeMobile, fullWidth }) {
   };
 
   const showHoverContent = hover && !loading && !ready;
-  const stateText = loading ? "Opening..." : ready ? "Ready" : "Open LCOE";
+  const stateText = loading ? "Opening..." : ready ? "Ready" : "Open Simulator";
 
   return (
     <button
@@ -285,7 +283,7 @@ function InteractiveLcoeButton({ closeMobile, fullWidth }) {
       onClick={handleClick}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      className={`group/lcoe relative flex items-center overflow-hidden rounded-lg border px-3 py-2 text-sm font-semibold transition-all duration-300 ${fullWidth ? "w-full justify-center" : ""}`}
+      className={`group/simulator relative flex items-center overflow-hidden rounded-lg border px-3 py-2 text-sm font-semibold transition-all duration-300 ${fullWidth ? "w-full justify-center" : ""}`}
       style={{
         background: "#FFFFFF",
         borderColor: BORDER,
@@ -294,14 +292,14 @@ function InteractiveLcoeButton({ closeMobile, fullWidth }) {
     >
       {/* Expanding accent circle behind content */}
       <span
-        className="absolute left-3 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full transition-transform duration-300 group-hover/lcoe:scale-[20]"
+        className="absolute left-3 top-1/2 h-2 w-2 -translate-y-1/2 rounded-full transition-transform duration-300 group-hover/simulator:scale-[20]"
         style={{ background: ACCENT }}
       />
       <span className="relative z-10 flex items-center gap-2">
         {showHoverContent ? (
           <span className="flex items-center gap-1.5 transition-opacity duration-200">
-            <Calculate sx={{ fontSize: 18 }} />
-            Open LCOE
+            <SolarPanel className="h-[18px] w-[18px]" strokeWidth={2} />
+            Open Simulator
           </span>
         ) : (
           <>
@@ -482,13 +480,13 @@ export default function Navbar() {
 
               <div className="flex items-center gap-2 rounded-2xl border py-1 pl-2 pr-2" style={{ borderColor: BORDER, boxShadow: `0 2px 12px ${DROPDOWN_SHADOW}` }}>
                 <ContactTooltipButton />
-                <InteractiveLcoeButton />
+                <OpenSimulatorButton />
               </div>
             </>
           ) : (
             <div className="flex items-center gap-2">
               <ContactTooltipButton closeMobile={closeMobileMenu} />
-              <InteractiveLcoeButton closeMobile={closeMobileMenu} />
+              <OpenSimulatorButton closeMobile={closeMobileMenu} />
               <button
                 type="button"
                 aria-label="Toggle menu"
@@ -580,7 +578,7 @@ export default function Navbar() {
               })}
             </div>
             <div className="border-t pt-4" style={{ borderColor: BORDER, marginTop: 16 }}>
-              <InteractiveLcoeButton closeMobile={closeMobileMenu} fullWidth />
+              <OpenSimulatorButton closeMobile={closeMobileMenu} fullWidth />
             </div>
           </div>
         </div>
