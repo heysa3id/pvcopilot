@@ -14,9 +14,23 @@ import {
   pointInAnyExclusion,
   polygonXRangeAtY,
   rotateFieldRingToRowSpace,
+  rowSpaceToFieldMeters,
   trimRowModuleCountForMinSegmentWidthM,
   walkRowSlotCenters,
 } from "./layout-exclusions.js";
+import {
+  areaBlockSlotsRowM,
+  blockAnyRingRowM,
+  blockFootprintM,
+  buildLayoutCtx,
+  equipmentFootprintM,
+  equipmentRingRowM,
+  EQUIPMENT_TYPES,
+  footprintRingRowM,
+  isPlacementValid,
+  snapBlockOriginRowM,
+  validateBlockSpec,
+} from "./layout-blocks.js";
 
 /** Set in index.html: empty for local dev (Vite proxies /api), or VITE_API_BASE on production (GitHub Pages). */
 function getPvApiBase() {
@@ -62,6 +76,12 @@ const state = {
   layoutRectFirstCornerM: null,
   /** @type {number[][]} partial polygon in field meters while drawing */
   layoutObstacleDraftM: [],
+  /** What the current draft becomes on commit: an exclusion or an auto-filled block */
+  layoutDrawTarget: "exclusion",
+  /** Index into moduleExclusionPolygonsM of the exclusion selected for editing, or -1 */
+  layoutSelectedExclusionIndex: -1,
+  /** Collapsible sections of the advanced panel */
+  layoutPanelSections: { exclusions: true, design: true },
   /** Leaflet group for exclusion overlays on the Site map */
   moduleExclusionMapGroup: null,
   /** While set, the next L.Draw CREATED is an exclusion (polygon|rectangle), not the site boundary */
@@ -69,6 +89,15 @@ const state = {
   /** Main Site L.Control.Draw instance (hidden while drawing an exclusion on the map) */
   siteMapDrawControl: null,
   siteMapDrawControlRemovedForExclusion: false,
+  /** @type {{ id: string, name: string, modulesPerString: number, strings: number, moduleCount: number, originRowM: number[] }[]} */
+  layoutBlocks: [],
+  /** @type {{ id: string, type: string, label: string, widthM: number, depthM: number, originRowM: number[] }[]} */
+  layoutEquipment: [],
+  /** @type {{ kind: 'block'|'equipment', spec: object } | null} */
+  layoutPlacing: null,
+  /** @type {{ kind: 'block'|'equipment', draft: object } | null} */
+  layoutBlockModal: null,
+  layoutGhostRowM: null,
 };
 
 const monthFormatter = new Intl.DateTimeFormat(undefined, { month: "short" });
@@ -657,6 +686,8 @@ function renderLayoutPreview(config) {
   const view = byId("layoutPerspectiveView");
   const summary = byId("layoutPerspectiveSummary");
 
+  const layoutCtx = state.layout ? buildLayoutCtx(state.layout, config, state.layoutBlocks) : null;
+
   const layoutUi = {
     exclusionPolygonsM: state.moduleExclusionPolygonsM,
     draftRingM: state.layoutObstacleDraftM,
@@ -664,6 +695,21 @@ function renderLayoutPreview(config) {
     drawObstacleMode: state.layoutDrawObstacleMode,
     obstacleDrawKind: state.layoutObstacleDrawKind,
     rectFirstCornerM: state.layoutRectFirstCornerM,
+    drawTarget: state.layoutDrawTarget,
+    blocks: state.layoutBlocks,
+    equipment: state.layoutEquipment,
+    placing: state.layoutPlacing,
+    blockModal: state.layoutBlockModal,
+    layoutCtx,
+    modulePowerWp: Number(config.modulePowerWp) || 0,
+    modulesPerStringDefault: Number(config.modulesPerString) || 20,
+    selectedExclusionIndex: state.layoutSelectedExclusionIndex,
+    panelSections: state.layoutPanelSections,
+    onToggleSection(name) {
+      if (!(name in state.layoutPanelSections)) return;
+      state.layoutPanelSections[name] = !state.layoutPanelSections[name];
+      renderLayoutPreview(getConfig());
+    },
     onToggleAdvanced() {
       state.layoutAdvancedMode = !state.layoutAdvancedMode;
       if (!state.layoutAdvancedMode) {
@@ -671,21 +717,52 @@ function renderLayoutPreview(config) {
         state.layoutObstacleDraftM = [];
         state.layoutRectFirstCornerM = null;
         state.layoutObstacleDrawKind = "polygon";
+        state.layoutDrawTarget = "exclusion";
+        state.layoutPlacing = null;
+        state.layoutBlockModal = null;
+        state.layoutGhostRowM = null;
+        state.layoutSelectedExclusionIndex = -1;
       }
       refreshLayout();
     },
     onStartDrawPolygon() {
       state.layoutDrawObstacleMode = true;
       state.layoutObstacleDrawKind = "polygon";
+      state.layoutDrawTarget = "exclusion";
       state.layoutObstacleDraftM = [];
       state.layoutRectFirstCornerM = null;
+      state.layoutSelectedExclusionIndex = -1;
       renderLayoutPreview(getConfig());
     },
     onStartDrawRectangle() {
       state.layoutDrawObstacleMode = true;
       state.layoutObstacleDrawKind = "rectangle";
+      state.layoutDrawTarget = "exclusion";
       state.layoutObstacleDraftM = [];
       state.layoutRectFirstCornerM = null;
+      state.layoutSelectedExclusionIndex = -1;
+      renderLayoutPreview(getConfig());
+    },
+    onStartDrawBlockPolygon() {
+      state.layoutDrawObstacleMode = true;
+      state.layoutObstacleDrawKind = "polygon";
+      state.layoutDrawTarget = "block";
+      state.layoutObstacleDraftM = [];
+      state.layoutRectFirstCornerM = null;
+      state.layoutSelectedExclusionIndex = -1;
+      state.layoutPlacing = null;
+      state.layoutBlockModal = null;
+      renderLayoutPreview(getConfig());
+    },
+    onStartDrawBlockRectangle() {
+      state.layoutDrawObstacleMode = true;
+      state.layoutObstacleDrawKind = "rectangle";
+      state.layoutDrawTarget = "block";
+      state.layoutObstacleDraftM = [];
+      state.layoutRectFirstCornerM = null;
+      state.layoutSelectedExclusionIndex = -1;
+      state.layoutPlacing = null;
+      state.layoutBlockModal = null;
       renderLayoutPreview(getConfig());
     },
     onCancelDraw() {
@@ -693,6 +770,7 @@ function renderLayoutPreview(config) {
       state.layoutObstacleDraftM = [];
       state.layoutRectFirstCornerM = null;
       state.layoutObstacleDrawKind = "polygon";
+      state.layoutDrawTarget = "exclusion";
       renderLayoutPreview(getConfig());
     },
     onAddDraftPoint(xy) {
@@ -734,31 +812,169 @@ function renderLayoutPreview(config) {
         [maxX, maxY],
         [minX, maxY],
       ];
-      state.moduleExclusionPolygonsM.push(ring);
+      if (state.layoutDrawTarget === "block") {
+        commitAutoBlockRing(ring, config);
+      } else {
+        state.moduleExclusionPolygonsM.push(ring);
+      }
       state.layoutRectFirstCornerM = null;
       state.layoutDrawObstacleMode = false;
       state.layoutObstacleDrawKind = "polygon";
+      state.layoutDrawTarget = "exclusion";
       refreshLayout();
     },
     onCommitDraftRing() {
       const draft = state.layoutObstacleDraftM;
       if (!draft || draft.length < 3) return;
-      state.moduleExclusionPolygonsM.push(draft.map(([a, b]) => [Number(a), Number(b)]));
+      const ring = draft.map(([a, b]) => [Number(a), Number(b)]);
+      if (state.layoutDrawTarget === "block") {
+        commitAutoBlockRing(ring, config);
+      } else {
+        state.moduleExclusionPolygonsM.push(ring);
+      }
       state.layoutObstacleDraftM = [];
       state.layoutDrawObstacleMode = false;
       state.layoutObstacleDrawKind = "polygon";
+      state.layoutDrawTarget = "exclusion";
       refreshLayout();
     },
     onClearPolygons() {
       state.moduleExclusionPolygonsM = [];
       state.layoutObstacleDraftM = [];
       state.layoutRectFirstCornerM = null;
+      state.layoutSelectedExclusionIndex = -1;
       refreshLayout();
     },
     onDeletePolygon(index) {
       state.moduleExclusionPolygonsM.splice(index, 1);
+      if (state.layoutSelectedExclusionIndex === index) {
+        state.layoutSelectedExclusionIndex = -1;
+      } else if (state.layoutSelectedExclusionIndex > index) {
+        state.layoutSelectedExclusionIndex--;
+      }
       refreshLayout();
     },
+    onSelectExclusion(index) {
+      // No re-render: the canvas closure tracks selection locally for smooth editing.
+      state.layoutSelectedExclusionIndex = Number.isFinite(index) ? index : -1;
+    },
+    onUpdateExclusion(index, ring) {
+      if (!Array.isArray(ring) || ring.length < 3) return;
+      if (index < 0 || index >= state.moduleExclusionPolygonsM.length) return;
+      state.moduleExclusionPolygonsM[index] = ring.map(([a, b]) => [Number(a), Number(b)]);
+      refreshLayout();
+    },
+    onOpenBlockModal() {
+      const n = state.layoutBlocks.length + 1;
+      state.layoutBlockModal = {
+        kind: "block",
+        draft: {
+          name: `Block ${n}`,
+          modulesPerString: Number(config.modulesPerString) || 20,
+          strings: 1,
+        },
+      };
+      state.layoutPlacing = null;
+      state.layoutGhostRowM = null;
+      renderLayoutPreview(getConfig());
+    },
+    onOpenEquipmentModal() {
+      const typeDef = EQUIPMENT_TYPES.combiner;
+      state.layoutBlockModal = {
+        kind: "equipment",
+        draft: {
+          type: "combiner",
+          label: typeDef.label,
+          widthM: typeDef.widthM,
+          depthM: typeDef.depthM,
+        },
+      };
+      state.layoutPlacing = null;
+      state.layoutGhostRowM = null;
+      renderLayoutPreview(getConfig());
+    },
+    onCloseModal() {
+      state.layoutBlockModal = null;
+      renderLayoutPreview(getConfig());
+    },
+    onModalDraftChange(draft) {
+      if (!state.layoutBlockModal) return;
+      state.layoutBlockModal = { ...state.layoutBlockModal, draft: { ...draft } };
+      renderLayoutPreview(getConfig());
+    },
+    onCreateAndPlace(spec) {
+      if (spec.kind === "block" && layoutCtx) {
+        const v = validateBlockSpec(spec.spec, layoutCtx);
+        if (!v.valid) return;
+      }
+      state.layoutBlockModal = null;
+      state.layoutPlacing = spec;
+      state.layoutGhostRowM = null;
+      renderLayoutPreview(getConfig());
+    },
+    onPlaceAt(xy) {
+      if (!state.layoutPlacing) return;
+      const placing = state.layoutPlacing;
+      const pctx = placementValidationCtx(config);
+      if (placing.kind === "block") {
+        const v = validateBlockSpec(placing.spec, pctx.layoutCtx);
+        if (!v.valid) return;
+        const { widthM, depthM, moduleCount } = blockFootprintM(placing.spec, pctx.layoutCtx);
+        const snapped = snapBlockOriginRowM(xy, widthM, depthM, pctx.layoutCtx);
+        const ring = footprintRingRowM(snapped, widthM, depthM);
+        if (!isPlacementValid(ring, pctx)) return;
+        state.layoutBlocks.push({
+          id: newLayoutItemId(),
+          name: placing.spec.name || `Block ${state.layoutBlocks.length + 1}`,
+          modulesPerString: placing.spec.modulesPerString,
+          strings: placing.spec.strings,
+          moduleCount,
+          originRowM: [snapped[0], snapped[1]],
+        });
+      } else if (placing.kind === "equipment") {
+        const { widthM, depthM } = equipmentFootprintM(placing.spec);
+        const ring = footprintRingRowM(xy, widthM, depthM);
+        if (!isPlacementValid(ring, pctx)) return;
+        const typeDef = EQUIPMENT_TYPES[placing.spec.type] || EQUIPMENT_TYPES.combiner;
+        state.layoutEquipment.push({
+          id: newLayoutItemId(),
+          type: placing.spec.type || "combiner",
+          label: placing.spec.label || typeDef.label,
+          widthM,
+          depthM,
+          originRowM: [Number(xy[0]), Number(xy[1])],
+        });
+      }
+      state.layoutPlacing = null;
+      state.layoutGhostRowM = null;
+      refreshLayout();
+    },
+    onCancelPlacement() {
+      state.layoutPlacing = null;
+      state.layoutGhostRowM = null;
+      renderLayoutPreview(getConfig());
+    },
+    onDeleteBlock(index) {
+      state.layoutBlocks.splice(index, 1);
+      refreshLayout();
+    },
+    onDeleteEquipment(index) {
+      state.layoutEquipment.splice(index, 1);
+      refreshLayout();
+    },
+    onClearDesign() {
+      state.layoutBlocks = [];
+      state.layoutEquipment = [];
+      state.layoutPlacing = null;
+      state.layoutBlockModal = null;
+      state.layoutGhostRowM = null;
+      refreshLayout();
+    },
+    onGhostMove(xy) {
+      state.layoutGhostRowM = xy;
+    },
+    validateBlockSpec: (spec) =>
+      layoutCtx ? validateBlockSpec(spec, layoutCtx) : { valid: false, reasons: ["Layout not ready"] },
   };
 
   renderPseudo3dLayout(view, state.layout, config, state.layoutPreview, layoutUi);
@@ -808,14 +1024,24 @@ function renderLayoutPreview(config) {
     </article>
     <article>
       <h3>Field geometry</h3>
-      <p>${filledRows.toLocaleString()} active rows with up to ${state.layout.modulesPerRow.toLocaleString()} modules per row. Ground coverage ratio ${(state.layout.groundCoverageRatio * 100).toFixed(1)}% and row pitch ${state.layout.rowPitchM.toFixed(2)} m.</p>
+      <p>${
+        state.layout.usesBlockDesign
+          ? `Manual block design: ${state.layout.blockCount} block(s), ${(state.layout.stringCount || 0).toLocaleString()} strings.`
+          : `${filledRows.toLocaleString()} active rows with up to ${state.layout.modulesPerRow.toLocaleString()} modules per row.`
+      } Ground coverage ratio ${(state.layout.groundCoverageRatio * 100).toFixed(1)}% and row pitch ${state.layout.rowPitchM.toFixed(2)} m.</p>
     </article>
     <article>
       <h3>Installed capacity</h3>
       <p>${state.layout.moduleCount.toLocaleString()} modules for ${formatPower(
         state.layout.dcCapacityKw,
         "dc"
-      )} and ${formatPower(state.layout.acCapacityKw, "ac")}.${overflowModules > 0 ? ` Manual module count exceeds the auto-fit by ${overflowModules.toLocaleString()} modules.` : ""}</p>
+      )} and ${formatPower(state.layout.acCapacityKw, "ac")}.${
+        state.layout.usesBlockDesign
+          ? ` Equipment: ${state.layoutEquipment.length} item(s).`
+          : overflowModules > 0
+            ? ` Manual module count exceeds the auto-fit by ${overflowModules.toLocaleString()} modules.`
+            : ""
+      }</p>
     </article>
   `;
 }
@@ -965,13 +1191,82 @@ function updateSimulationOutputs(layout, simulation, lifetime, config) {
   `;
 }
 
+function newLayoutItemId() {
+  return `layout-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function rotatedExclusionRingsFromState(config) {
   const grossW = Number(config.manualWidthM) || 1;
   const grossD = Number(config.manualHeightM) || 1;
   const az = Number(config.azimuthDeg) || 180;
-  return (state.moduleExclusionPolygonsM || [])
+  const manualRings = (state.moduleExclusionPolygonsM || [])
     .filter((r) => r && r.length >= 3)
     .map((ring) => rotateFieldRingToRowSpace(ring, grossW, grossD, az));
+  const equipmentRings = (state.layoutEquipment || [])
+    .filter((item) => item.originRowM && item.originRowM.length >= 2)
+    .map((item) => equipmentRingRowM(item))
+    .filter((r) => r && r.length >= 3);
+  return [...manualRings, ...equipmentRings];
+}
+
+/** Rings (row space) of all placed blocks except the one at skipIndex. */
+function otherBlockRingsRowM(layoutCtx, skipIndex = -1) {
+  return state.layoutBlocks
+    .map((b, i) => (i === skipIndex ? null : blockAnyRingRowM(b, layoutCtx)))
+    .filter((r) => r && r.length >= 3);
+}
+
+/**
+ * Convert a drawn field-meter ring into an auto-filled area block.
+ * Fill follows the global row grid / orientation rules and is capped at the
+ * remaining module budget. Returns false if no modules fit.
+ */
+function commitAutoBlockRing(ringFieldM, config) {
+  if (!state.layout || !ringFieldM || ringFieldM.length < 3) return false;
+  const grossW = Number(config.manualWidthM) || 1;
+  const grossD = Number(config.manualHeightM) || 1;
+  const az = Number(config.azimuthDeg) || 180;
+  const ringRowM = rotateFieldRingToRowSpace(ringFieldM, grossW, grossD, az);
+  const layoutCtx = buildLayoutCtx(state.layout, config, state.layoutBlocks);
+  const exRings = rotatedExclusionRingsFromState(config);
+  const usedModules = state.layoutBlocks.reduce((s, b) => s + (b.moduleCount || 0), 0);
+  const budget = Math.max(0, (state.layout.autoModuleCount || 0) - usedModules);
+  const { slots, truncated } = areaBlockSlotsRowM(
+    ringRowM,
+    layoutCtx,
+    exRings,
+    otherBlockRingsRowM(layoutCtx),
+    budget
+  );
+  if (slots.length === 0) return false;
+  const n = state.layoutBlocks.filter((b) => b.kind === "area").length + 1;
+  state.layoutBlocks.push({
+    id: newLayoutItemId(),
+    kind: "area",
+    name: `Area ${n}`,
+    ringRowM: ringRowM.map(([a, b]) => [Number(a), Number(b)]),
+    moduleCount: slots.length,
+    truncated,
+  });
+  return true;
+}
+
+function placementValidationCtx(config) {
+  const layoutCtx = buildLayoutCtx(state.layout, config, state.layoutBlocks);
+  const grossW = Number(config.manualWidthM) || 1;
+  const grossD = Number(config.manualHeightM) || 1;
+  return {
+    rotatedPolyVerts: layoutCtx.rotatedPolyVerts,
+    rotatedBoundsM: layoutCtx.rotatedBoundsM,
+    setbackM: layoutCtx.setbackM,
+    setbackDepthM: layoutCtx.setbackDepthM,
+    netWidthM: layoutCtx.netWidthM,
+    netDepthM: layoutCtx.netDepthM,
+    exclusionRingsRow: rotatedExclusionRingsFromState(config),
+    placedBlocks: state.layoutBlocks,
+    placedEquipment: state.layoutEquipment,
+    layoutCtx,
+  };
 }
 
 function refreshLayout() {
@@ -1022,6 +1317,17 @@ function refreshLayout() {
       minX: Math.min(...xs), maxX: Math.max(...xs),
       minY: Math.min(...ys), maxY: Math.max(...ys),
     };
+
+    // Re-snap placed blocks to the current row grid so they keep following
+    // tilt (pitch), module orientation, and azimuth rules when inputs change.
+    if (state.layoutBlocks.length > 0) {
+      const snapCtx = buildLayoutCtx(state.layout, config, state.layoutBlocks);
+      for (const block of state.layoutBlocks) {
+        if (!block.originRowM || block.originRowM.length < 2) continue;
+        const { widthM, depthM } = blockFootprintM(block, snapCtx);
+        block.originRowM = snapBlockOriginRowM(block.originRowM, widthM, depthM, snapCtx);
+      }
+    }
 
     // Recompute module count from rotated polygon so modules never exceed site boundary
     const sw = Number(config.edgeSetbackM) || 0;
@@ -1111,9 +1417,49 @@ function refreshLayout() {
     }
 
     const manualCount = Number(config.manualModuleCount);
-    const moduleCount = Number.isFinite(manualCount) && manualCount > 0
+    let moduleCount = Number.isFinite(manualCount) && manualCount > 0
       ? Math.min(Math.floor(manualCount), autoCount) : autoCount;
     state.layout.autoModuleCount = autoCount;
+
+    if (state.layoutBlocks.length > 0) {
+      // Recompute area block fills: pitch/tilt/orientation/exclusions may have
+      // changed. Manual string blocks keep their fixed counts and consume the
+      // budget first; area blocks fill from the remainder.
+      const fillCtx = buildLayoutCtx(state.layout, config, state.layoutBlocks);
+      fillCtx.autoModuleCount = autoCount;
+      let budgetLeft =
+        autoCount -
+        state.layoutBlocks.reduce(
+          (sum, b) => sum + (b.kind === "area" ? 0 : b.moduleCount || 0),
+          0
+        );
+      state.layoutBlocks.forEach((block, bi) => {
+        if (block.kind !== "area") return;
+        const { slots, truncated } = areaBlockSlotsRowM(
+          block.ringRowM,
+          fillCtx,
+          rotatedExclusionRings,
+          otherBlockRingsRowM(fillCtx, bi),
+          Math.max(0, budgetLeft)
+        );
+        block.moduleCount = slots.length;
+        block.truncated = truncated;
+        budgetLeft -= slots.length;
+      });
+
+      moduleCount = state.layoutBlocks.reduce((sum, b) => sum + (b.moduleCount || 0), 0);
+      state.layout.usesBlockDesign = true;
+      state.layout.blockCount = state.layoutBlocks.length;
+      state.layout.stringCount = state.layoutBlocks.reduce(
+        (sum, b) => sum + (b.strings || 0),
+        0
+      );
+    } else {
+      state.layout.usesBlockDesign = false;
+      state.layout.blockCount = 0;
+      state.layout.stringCount = 0;
+    }
+
     state.layout.moduleCount = moduleCount;
     state.layout.dcCapacityKw = (moduleCount * Number(config.modulePowerWp)) / 1000;
     const targetRatio = Math.max(Number(config.targetDcAcRatio) || 1.2, 0.1);
@@ -1123,7 +1469,7 @@ function refreshLayout() {
     state.layout.dcAcRatio = state.layout.acCapacityKw > 0
       ? state.layout.dcCapacityKw / state.layout.acCapacityKw : 0;
 
-    if (rotatedExclusionRings.length > 0 && state.layout.netAreaM2 > 0) {
+    if (state.layout.netAreaM2 > 0) {
       state.layout.groundCoverageRatio =
         (moduleCount * collectorProjectionM * moduleSpanInRowM) / state.layout.netAreaM2;
     }
@@ -1211,7 +1557,60 @@ function renderModuleRowsOnMap() {
   const exRings = rotatedExclusionRingsFromState(config);
   const useExclusionOnMap = exRings.length > 0;
   const moduleStepBase = Math.max(moduleSpanInRowM + moduleGapM, 0.001);
+  const azimuthDeg = Number(config.azimuthDeg) || 180;
 
+  function rowPointToLatLng(xr, yr) {
+    const [xf, yf] = rowSpaceToFieldMeters(xr, yr, grossWidthM, grossDepthM, azimuthDeg);
+    return rotLatLng(xf, yf);
+  }
+
+  if (state.layoutBlocks.length > 0) {
+    const blockLayoutCtx = buildLayoutCtx(layout, config, state.layoutBlocks);
+    const moduleStep = Math.max(moduleSpanInRowM + moduleGapM, 0.001);
+    state.layoutBlocks.forEach((block, bi) => {
+      if (block.kind === "area") {
+        if (!block.ringRowM || block.ringRowM.length < 3) return;
+        const { slots } = areaBlockSlotsRowM(
+          block.ringRowM,
+          blockLayoutCtx,
+          exRings,
+          otherBlockRingsRowM(blockLayoutCtx, bi),
+          block.moduleCount ?? Infinity
+        );
+        for (const p of slots) {
+          const x0 = p.x - moduleSpanInRowM / 2;
+          const x1 = p.x + moduleSpanInRowM / 2;
+          const yM = p.y - collectorProjectionM / 2;
+          const corners = [
+            rowPointToLatLng(x0, yM),
+            rowPointToLatLng(x1, yM),
+            rowPointToLatLng(x1, yM + collectorProjectionM),
+            rowPointToLatLng(x0, yM + collectorProjectionM),
+          ];
+          state.moduleRowsGroup.addLayer(L.polygon(corners, rowStyle));
+        }
+        return;
+      }
+      if (!block.originRowM || block.originRowM.length < 2) return;
+      const { widthM, depthM } = blockFootprintM(block, blockLayoutCtx);
+      const topLeftX = block.originRowM[0] - widthM / 2;
+      const topLeftY = block.originRowM[1] - depthM / 2;
+      for (let s = 0; s < block.strings; s++) {
+        const yM = topLeftY + s * rowPitchM;
+        for (let m = 0; m < block.modulesPerString; m++) {
+          const x0 = topLeftX + m * moduleStep;
+          const x1 = x0 + moduleSpanInRowM;
+          const corners = [
+            rowPointToLatLng(x0, yM),
+            rowPointToLatLng(x1, yM),
+            rowPointToLatLng(x1, yM + collectorProjectionM),
+            rowPointToLatLng(x0, yM + collectorProjectionM),
+          ];
+          state.moduleRowsGroup.addLayer(L.polygon(corners, rowStyle));
+        }
+      }
+    });
+  } else {
   let modulesRemaining = layout.moduleCount;
 
   function addRowSegment(x0, x1, rowYM) {
@@ -1373,6 +1772,21 @@ function renderModuleRowsOnMap() {
       modulesRemaining -= drawRow;
       if (modulesRemaining <= 0) break;
     }
+  }
+  }
+
+  for (const eq of state.layoutEquipment) {
+    if (!eq.originRowM || eq.originRowM.length < 2) continue;
+    const typeDef = EQUIPMENT_TYPES[eq.type] || EQUIPMENT_TYPES.combiner;
+    const corners = equipmentRingRowM(eq).map(([xr, yr]) => rowPointToLatLng(xr, yr));
+    const poly = L.polygon(corners, {
+      color: typeDef.color,
+      weight: 1.5,
+      fillColor: typeDef.color,
+      fillOpacity: 0.4,
+    });
+    poly.bindTooltip(eq.label || typeDef.label);
+    state.moduleRowsGroup.addLayer(poly);
   }
 }
 
