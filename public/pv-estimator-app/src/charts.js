@@ -415,16 +415,24 @@ export function renderDualAxisChart(container, config) {
   });
 }
 
-function buildLayoutModalHtml(blockModal, layoutCtx, modulePowerWp, modulesPerStringDefault) {
+export function buildLayoutModalHtml(blockModal, layoutCtx, modulePowerWp, modulesPerStringDefault) {
   if (!blockModal) return "";
+  const isEdit = Number.isFinite(blockModal.editIndex);
 
   if (blockModal.kind === "block") {
     const draft = blockModal.draft || {};
     const name = draft.name || "Block 1";
     const mps = Math.max(1, Math.floor(Number(draft.modulesPerString) || modulesPerStringDefault || 20));
     const strings = Math.max(1, Math.floor(Number(draft.strings) || 1));
-    const validation = layoutCtx
-      ? validateBlockSpec({ modulesPerString: mps, strings }, layoutCtx)
+    const validationCtx =
+      isEdit && layoutCtx
+        ? {
+            ...layoutCtx,
+            placedBlocks: (layoutCtx.placedBlocks || []).filter((_, i) => i !== blockModal.editIndex),
+          }
+        : layoutCtx;
+    const validation = validationCtx
+      ? validateBlockSpec({ modulesPerString: mps, strings }, validationCtx)
       : { valid: false, reasons: ["Layout not ready"], footprint: { widthM: 0, depthM: 0 }, moduleCount: 0, maxFit: {} };
     const { footprint, moduleCount, maxFit, reasons, valid } = validation;
     const dcKw = (moduleCount * modulePowerWp) / 1000;
@@ -436,8 +444,8 @@ function buildLayoutModalHtml(blockModal, layoutCtx, modulePowerWp, modulesPerSt
       : "";
     return `
       <div class="layout-modal-backdrop" data-layout-action="closeModal">
-        <div class="layout-modal" role="dialog" aria-label="Create block" onclick="event.stopPropagation()">
-          <h3 class="layout-modal-title">Create block</h3>
+        <div class="layout-modal" role="dialog" aria-label="${isEdit ? "Edit block" : "Create block"}" onclick="event.stopPropagation()">
+          <h3 class="layout-modal-title">${isEdit ? "Edit block" : "Create block"}</h3>
           <label class="layout-modal-field">Name<input type="text" data-modal-field="name" value="${escapeHtml(name)}" /></label>
           <label class="layout-modal-field">Modules per string<input type="number" min="1" data-modal-field="modulesPerString" value="${mps}" /></label>
           <label class="layout-modal-field">Number of strings<input type="number" min="1" data-modal-field="strings" value="${strings}" /></label>
@@ -449,7 +457,7 @@ function buildLayoutModalHtml(blockModal, layoutCtx, modulePowerWp, modulesPerSt
           ${errorHtml}
           <div class="layout-modal-actions">
             <button type="button" class="layout-adv-btn" data-layout-action="closeModal">Cancel</button>
-            <button type="button" class="layout-adv-btn layout-adv-btn--primary" data-layout-action="confirmBlock" ${valid ? "" : "disabled"}>Create and place</button>
+            <button type="button" class="layout-adv-btn layout-adv-btn--primary" data-layout-action="${isEdit ? "saveBlockEdit" : "confirmBlock"}" ${valid ? "" : "disabled"}>${isEdit ? "Save changes" : "Create and place"}</button>
           </div>
         </div>
       </div>`;
@@ -470,8 +478,8 @@ function buildLayoutModalHtml(blockModal, layoutCtx, modulePowerWp, modulesPerSt
       .join("");
     return `
       <div class="layout-modal-backdrop" data-layout-action="closeModal">
-        <div class="layout-modal" role="dialog" aria-label="Add equipment" onclick="event.stopPropagation()">
-          <h3 class="layout-modal-title">Add equipment</h3>
+        <div class="layout-modal" role="dialog" aria-label="${isEdit ? "Edit equipment" : "Add equipment"}" onclick="event.stopPropagation()">
+          <h3 class="layout-modal-title">${isEdit ? "Edit equipment" : "Add equipment"}</h3>
           <label class="layout-modal-field">Type<select data-modal-field="type">${typeOptions}</select></label>
           <label class="layout-modal-field">Label<input type="text" data-modal-field="label" value="${escapeHtml(label)}" /></label>
           <label class="layout-modal-field">Width (m)<input type="number" min="0.5" step="0.1" data-modal-field="widthM" value="${widthM}" /></label>
@@ -481,13 +489,287 @@ function buildLayoutModalHtml(blockModal, layoutCtx, modulePowerWp, modulesPerSt
           </div>
           <div class="layout-modal-actions">
             <button type="button" class="layout-adv-btn" data-layout-action="closeModal">Cancel</button>
-            <button type="button" class="layout-adv-btn layout-adv-btn--primary" data-layout-action="confirmEquipment">Create and place</button>
+            <button type="button" class="layout-adv-btn layout-adv-btn--primary" data-layout-action="${isEdit ? "saveEquipmentEdit" : "confirmEquipment"}">${isEdit ? "Save changes" : "Create and place"}</button>
           </div>
         </div>
       </div>`;
   }
 
   return "";
+}
+
+let layoutPlacementKeyHandler = null;
+
+export function buildLayoutAdvancedToolbarHtml(li, layout, config) {
+  const layoutOrStub = layout || { moduleCount: 0, autoModuleCount: 0 };
+  const advancedMode = Boolean(li.advancedMode);
+  const drawObstacleMode = Boolean(li.drawObstacleMode);
+  const obstacleDrawKind = li.obstacleDrawKind === "rectangle" ? "rectangle" : "polygon";
+  const rectFirstCornerM = Array.isArray(li.rectFirstCornerM) && li.rectFirstCornerM.length >= 2
+    ? li.rectFirstCornerM
+    : null;
+  const hasRectCorner = rectFirstCornerM != null;
+  const exclusionPolygonsM = li.exclusionPolygonsM || [];
+  const draftRingM = li.draftRingM || [];
+  const selectedExclusionIndex = Number.isFinite(li.selectedExclusionIndex)
+    ? li.selectedExclusionIndex
+    : -1;
+  const selectedBlockIndex = Number.isFinite(li.selectedBlockIndex) ? li.selectedBlockIndex : -1;
+  const selectedEquipmentIndex = Number.isFinite(li.selectedEquipmentIndex)
+    ? li.selectedEquipmentIndex
+    : -1;
+  const siteMapMode = Boolean(li.siteMapMode);
+  const hasDrawnSite = li.hasDrawnSite !== false;
+  const pendingSiteDraw = li.pendingSiteExclusionDraw === "rectangle" ? "rectangle"
+    : li.pendingSiteExclusionDraw === "polygon" ? "polygon" : null;
+  const siteMapDrawing = siteMapMode && pendingSiteDraw != null;
+
+  const exclusionRowsHtml = exclusionPolygonsM
+    .map(
+      (_, i) =>
+        `<div class="layout-excl-row${i === selectedExclusionIndex ? " layout-excl-row--selected" : ""}"><span>Exclusion ${i + 1}${i === selectedExclusionIndex ? " — selected" : ""}</span><button type="button" class="layout-adv-btn layout-adv-btn--icon" data-layout-action="deleteExclusion" data-exclusion-index="${i}" title="Remove">×</button></div>`
+    )
+    .join("");
+
+  const blocks = li.blocks || [];
+  const equipment = li.equipment || [];
+  const placing = li.placing || null;
+  const drawTarget = li.drawTarget === "block" ? "block" : "exclusion";
+  const drawingBlock = drawObstacleMode && drawTarget === "block";
+  const drawingExclusion = drawObstacleMode && drawTarget === "exclusion";
+  const panelSections = li.panelSections || { exclusions: true, design: true };
+  const sectionExclusionsOpen = panelSections.exclusions !== false;
+  const sectionDesignOpen = panelSections.design !== false;
+  const usedBlockModules = blocks.reduce((s, b) => s + (b.moduleCount || 0), 0);
+  const remainingBudget = Math.max(
+    0,
+    (layoutOrStub.autoModuleCount || layoutOrStub.moduleCount || 0) - usedBlockModules
+  );
+
+  const blockRowsHtml = blocks
+    .map((b, i) => {
+      const selected = i === selectedBlockIndex;
+      const canEdit = b.kind !== "area";
+      return `<div class="layout-excl-row layout-design-row${selected ? " layout-excl-row--selected" : ""}"><button type="button" class="layout-design-row-select" data-layout-action="selectBlock" data-block-index="${i}"><span class="layout-design-dot${b.kind === "area" ? "" : " layout-design-dot--block"}"${b.kind === "area" ? ' style="background:#16a34a"' : ""}></span><span>${escapeHtml(b.name)} — ${b.moduleCount} mod${b.truncated ? " (capped)" : ""}${selected ? " — selected" : ""}</span></button><span class="layout-design-row-actions">${canEdit ? `<button type="button" class="layout-adv-btn layout-adv-btn--icon" data-layout-action="editBlock" data-block-index="${i}" title="Edit">✎</button>` : ""}<button type="button" class="layout-adv-btn layout-adv-btn--icon" data-layout-action="deleteBlock" data-block-index="${i}" title="Remove">×</button></span></div>`;
+    })
+    .join("");
+  const equipmentRowsHtml = equipment
+    .map((eq, i) => {
+      const typeDef = EQUIPMENT_TYPES[eq.type] || EQUIPMENT_TYPES.combiner;
+      const selected = i === selectedEquipmentIndex;
+      return `<div class="layout-excl-row layout-design-row${selected ? " layout-excl-row--selected" : ""}"><button type="button" class="layout-design-row-select" data-layout-action="selectEquipment" data-equipment-index="${i}"><span class="layout-design-dot" style="background:${typeDef.color}"></span><span>${escapeHtml(eq.label || typeDef.label)}${selected ? " — selected" : ""}</span></button><span class="layout-design-row-actions"><button type="button" class="layout-adv-btn layout-adv-btn--icon" data-layout-action="editEquipment" data-equipment-index="${i}" title="Edit">✎</button><button type="button" class="layout-adv-btn layout-adv-btn--icon" data-layout-action="deleteEquipment" data-equipment-index="${i}" title="Remove">×</button></span></div>`;
+    })
+    .join("");
+
+  const designHint = drawingBlock
+    ? `Auto block: draw the area to fill with modules (${remainingBudget.toLocaleString()} modules remaining). ${obstacleDrawKind === "polygon" ? "Add corners, then <strong>Finish</strong> or click the <strong>first point</strong>." : "Click one corner, then the opposite corner."}`
+    : placing
+      ? `Click on the field to place <strong>${placing.kind === "block" ? escapeHtml(placing.spec?.name || "block") : escapeHtml(placing.spec?.label || "equipment")}</strong>. Red outline = invalid position.`
+      : "Add blocks or equipment, then <strong>click to select</strong>, <strong>drag to move</strong>, or use <strong>✎ Edit</strong> to change properties. Area blocks: drag corners or click an <strong>edge +</strong> to add a point.";
+
+  let exclusionHint;
+  if (siteMapDrawing && pendingSiteDraw === "polygon") {
+    exclusionHint = "Drawing on the satellite map: click corners, then double-click or press Enter to finish the exclusion polygon.";
+  } else if (siteMapDrawing && pendingSiteDraw === "rectangle") {
+    exclusionHint = "Drawing on the satellite map: click and drag a rectangle for the exclusion area.";
+  } else if (drawingExclusion && obstacleDrawKind === "polygon") {
+    exclusionHint = "Polygon: add corners on the field, then <strong>Finish</strong> or click the <strong>first point</strong> (blue). Double-click also applies.";
+  } else if (drawingExclusion && obstacleDrawKind === "rectangle") {
+    exclusionHint = "Rectangle: click one corner, then the opposite corner (axis-aligned in field meters). The exclusion applies after the second click.";
+  } else if (siteMapMode) {
+    exclusionHint = hasDrawnSite
+      ? "Use <strong>Polygon</strong> or <strong>Rectangle</strong> to draw exclusions on the satellite map. Select and edit exclusions in the Layout preview."
+      : "Draw the site boundary first, then add exclusions on the map.";
+  } else if (exclusionPolygonsM.length) {
+    exclusionHint = "Click an exclusion to select it: <strong>drag</strong> to move, drag a <strong>corner</strong> to reshape, click an <strong>edge +</strong> to add a point, drag the <strong>round handle</strong> to rotate.";
+  } else {
+    exclusionHint = "Choose <strong>Polygon</strong> or <strong>Rectangle</strong> to carve out roads, MV zones, or pads.";
+  }
+
+  const showExclusionTypeRow = !drawObstacleMode && !siteMapDrawing;
+  const showPolygonDrawRow = drawObstacleMode && obstacleDrawKind === "polygon" && !siteMapDrawing;
+  const showRectDrawRow = drawObstacleMode && obstacleDrawKind === "rectangle" && !siteMapDrawing;
+  const siteDrawDisabled = siteMapMode && !hasDrawnSite ? " disabled" : "";
+
+  return `
+        <div class="layout-advanced-toolbar">
+          ${advancedMode ? `
+          <div class="layout-adv-panel">
+            <div class="layout-adv-panel-header">
+              <span class="layout-adv-panel-title">Advanced design</span>
+              <button type="button" class="layout-adv-panel-close" data-layout-action="toggleAdvanced" title="Exit advanced">&times;</button>
+            </div>
+            <div class="layout-adv-section">
+              <button type="button" class="layout-adv-section-head" data-layout-action="toggleSection" data-section="exclusions">
+                <span class="layout-adv-chevron${sectionExclusionsOpen ? " is-open" : ""}">&rsaquo;</span>
+                Exclusions
+                ${exclusionPolygonsM.length ? `<span class="layout-adv-badge">${exclusionPolygonsM.length}</span>` : ""}
+              </button>
+              <div class="layout-adv-section-body" style="display: ${sectionExclusionsOpen ? "grid" : "none"}">
+                <div class="layout-adv-btn-row" style="display: ${showExclusionTypeRow ? "flex" : "none"}">
+                  <button type="button" class="layout-adv-btn" data-layout-action="drawPolygon"${siteDrawDisabled}>Polygon</button>
+                  <button type="button" class="layout-adv-btn" data-layout-action="drawRectangle"${siteDrawDisabled}>Rectangle</button>
+                  <button type="button" class="layout-adv-btn layout-adv-btn--ghost" data-layout-action="clearExclusions" ${exclusionPolygonsM.length ? "" : "disabled"}>Clear</button>
+                </div>
+                <div class="layout-adv-btn-row" style="display: ${showPolygonDrawRow ? "flex" : "none"}">
+                  <button type="button" class="layout-adv-btn layout-adv-btn--primary" data-layout-action="finishDraw" title="${drawTarget === "block" ? "Fill the drawn area with modules" : "Apply exclusion and recalculate modules"}" ${draftRingM.length < 3 ? "disabled" : ""}>Finish</button>
+                  <button type="button" class="layout-adv-btn" data-layout-action="deleteLastPoint" ${draftRingM.length < 1 ? "disabled" : ""}>Undo point</button>
+                  <button type="button" class="layout-adv-btn layout-adv-btn--ghost" data-layout-action="cancelDraw">Cancel</button>
+                </div>
+                <div class="layout-adv-btn-row" style="display: ${showRectDrawRow ? "flex" : "none"}">
+                  <button type="button" class="layout-adv-btn" data-layout-action="deleteLastPoint" ${!hasRectCorner ? "disabled" : ""}>Undo point</button>
+                  <button type="button" class="layout-adv-btn layout-adv-btn--ghost" data-layout-action="cancelDraw">Cancel</button>
+                </div>
+                <div class="layout-adv-btn-row" style="display: ${siteMapDrawing ? "flex" : "none"}">
+                  <button type="button" class="layout-adv-btn layout-adv-btn--ghost" data-layout-action="cancelDraw">Cancel map draw</button>
+                </div>
+                <p class="layout-adv-hint">${exclusionHint}</p>
+                <div class="layout-excl-list">${exclusionRowsHtml}</div>
+              </div>
+            </div>
+            <div class="layout-adv-section">
+              <button type="button" class="layout-adv-section-head" data-layout-action="toggleSection" data-section="design">
+                <span class="layout-adv-chevron${sectionDesignOpen ? " is-open" : ""}">&rsaquo;</span>
+                Block design
+                ${blocks.length + equipment.length ? `<span class="layout-adv-badge">${blocks.length + equipment.length}</span>` : ""}
+              </button>
+              <div class="layout-adv-section-body" style="display: ${sectionDesignOpen ? "grid" : "none"}">
+                <div class="layout-adv-btn-row" style="display: ${drawObstacleMode ? "none" : "flex"}">
+                  <button type="button" class="layout-adv-btn" data-layout-action="openBlockModal" ${placing ? "disabled" : ""}>Add block</button>
+                  <button type="button" class="layout-adv-btn" data-layout-action="openEquipmentModal" ${placing ? "disabled" : ""}>Add equipment</button>
+                </div>
+                <div class="layout-adv-btn-row" style="display: ${drawObstacleMode ? "none" : "flex"}">
+                  <button type="button" class="layout-adv-btn" data-layout-action="drawBlockRectangle" ${placing || remainingBudget <= 0 ? "disabled" : ""} title="Draw a rectangle that auto-fills with modules">Auto block &middot; rect</button>
+                  <button type="button" class="layout-adv-btn" data-layout-action="drawBlockPolygon" ${placing || remainingBudget <= 0 ? "disabled" : ""} title="Draw a polygon that auto-fills with modules">Auto block &middot; poly</button>
+                </div>
+                <div class="layout-adv-btn-row">
+                  <button type="button" class="layout-adv-btn layout-adv-btn--ghost" data-layout-action="cancelPlacement" style="display:${placing ? "inline-block" : "none"}">Cancel placement</button>
+                  <button type="button" class="layout-adv-btn layout-adv-btn--ghost" data-layout-action="clearDesign" ${blocks.length || equipment.length ? "" : "disabled"}>Clear design</button>
+                </div>
+                <p class="layout-adv-hint">${designHint}</p>
+                <div class="layout-excl-list">${blockRowsHtml}${equipmentRowsHtml}</div>
+              </div>
+            </div>
+          </div>` : `
+          <button type="button" class="layout-adv-btn" data-layout-action="toggleAdvanced">Advanced</button>`}
+        </div>`;
+}
+
+export function wireLayoutAdvancedToolbar(roots, li, layout, config) {
+  const rootList = (Array.isArray(roots) ? roots : [roots]).filter(Boolean);
+  const blockModal = li.blockModal || null;
+  const placing = li.placing || null;
+
+  function readModalDraft(kind, root) {
+    const getVal = (field) => {
+      const el = root.querySelector(`[data-modal-field="${field}"]`);
+      return el ? el.value : "";
+    };
+    if (kind === "block") {
+      return {
+        name: getVal("name").trim() || "Block",
+        modulesPerString: Math.max(1, Math.floor(Number(getVal("modulesPerString")) || 1)),
+        strings: Math.max(1, Math.floor(Number(getVal("strings")) || 1)),
+      };
+    }
+    const type = getVal("type") || "combiner";
+    const typeDef = EQUIPMENT_TYPES[type] || EQUIPMENT_TYPES.combiner;
+    return {
+      type,
+      label: getVal("label").trim() || typeDef.label,
+      widthM: Math.max(0.5, Number(getVal("widthM")) || typeDef.widthM),
+      depthM: Math.max(0.5, Number(getVal("depthM")) || typeDef.depthM),
+    };
+  }
+
+  for (const root of rootList) {
+    root.querySelectorAll("[data-modal-field]").forEach((input) => {
+      const handler = () => {
+        if (!blockModal) return;
+        let draft = readModalDraft(blockModal.kind, root);
+        if (blockModal.kind === "equipment" && input.dataset.modalField === "type") {
+          const typeDef = EQUIPMENT_TYPES[draft.type] || EQUIPMENT_TYPES.combiner;
+          draft = {
+            ...draft,
+            label: typeDef.label,
+            widthM: typeDef.widthM,
+            depthM: typeDef.depthM,
+          };
+        }
+        li.onModalDraftChange?.(draft);
+      };
+      input.addEventListener("input", handler);
+      input.addEventListener("change", handler);
+    });
+
+    root.querySelectorAll("[data-layout-action]").forEach((btn) => {
+      btn.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        const act = btn.dataset.layoutAction;
+        if (act === "toggleAdvanced") li.onToggleAdvanced?.();
+        else if (act === "toggleSection") {
+          li.onToggleSection?.(ev.currentTarget.dataset.section);
+        } else if (act === "drawPolygon") li.onStartDrawPolygon?.();
+        else if (act === "drawRectangle") li.onStartDrawRectangle?.();
+        else if (act === "drawBlockPolygon") li.onStartDrawBlockPolygon?.();
+        else if (act === "drawBlockRectangle") li.onStartDrawBlockRectangle?.();
+        else if (act === "cancelDraw") li.onCancelDraw?.();
+        else if (act === "finishDraw") li.onCommitDraftRing?.();
+        else if (act === "deleteLastPoint") li.onUndoDraftPoint?.();
+        else if (act === "clearExclusions") li.onClearPolygons?.();
+        else if (act === "deleteExclusion") {
+          const idx = Number(ev.currentTarget.dataset.exclusionIndex);
+          if (Number.isFinite(idx)) li.onDeletePolygon?.(idx);
+        } else if (act === "openBlockModal") li.onOpenBlockModal?.();
+        else if (act === "openEquipmentModal") li.onOpenEquipmentModal?.();
+        else if (act === "closeModal") li.onCloseModal?.();
+        else if (act === "confirmBlock") {
+          const spec = readModalDraft("block", root);
+          li.onCreateAndPlace?.({ kind: "block", spec });
+        } else if (act === "saveBlockEdit") {
+          const spec = readModalDraft("block", root);
+          if (Number.isFinite(blockModal?.editIndex)) li.onSaveBlockEdit?.(blockModal.editIndex, spec);
+        } else if (act === "confirmEquipment") {
+          const spec = readModalDraft("equipment", root);
+          li.onCreateAndPlace?.({ kind: "equipment", spec });
+        } else if (act === "saveEquipmentEdit") {
+          const spec = readModalDraft("equipment", root);
+          if (Number.isFinite(blockModal?.editIndex)) li.onSaveEquipmentEdit?.(blockModal.editIndex, spec);
+        } else if (act === "cancelPlacement") li.onCancelPlacement?.();
+        else if (act === "clearDesign") li.onClearDesign?.();
+        else if (act === "selectBlock") {
+          const idx = Number(ev.currentTarget.dataset.blockIndex);
+          if (Number.isFinite(idx)) li.onSelectBlock?.(idx, { refresh: true });
+        } else if (act === "selectEquipment") {
+          const idx = Number(ev.currentTarget.dataset.equipmentIndex);
+          if (Number.isFinite(idx)) li.onSelectEquipment?.(idx, { refresh: true });
+        } else if (act === "editBlock") {
+          const idx = Number(ev.currentTarget.dataset.blockIndex);
+          if (Number.isFinite(idx)) li.onOpenEditBlockModal?.(idx);
+        } else if (act === "editEquipment") {
+          const idx = Number(ev.currentTarget.dataset.equipmentIndex);
+          if (Number.isFinite(idx)) li.onOpenEditEquipmentModal?.(idx);
+        } else if (act === "deleteBlock") {
+          const idx = Number(ev.currentTarget.dataset.blockIndex);
+          if (Number.isFinite(idx)) li.onDeleteBlock?.(idx);
+        } else if (act === "deleteEquipment") {
+          const idx = Number(ev.currentTarget.dataset.equipmentIndex);
+          if (Number.isFinite(idx)) li.onDeleteEquipment?.(idx);
+        }
+      });
+    });
+  }
+
+  if (layoutPlacementKeyHandler) {
+    window.removeEventListener("keydown", layoutPlacementKeyHandler);
+    layoutPlacementKeyHandler = null;
+  }
+  if (placing) {
+    layoutPlacementKeyHandler = (e) => {
+      if (e.key === "Escape") li.onCancelPlacement?.();
+    };
+    window.addEventListener("keydown", layoutPlacementKeyHandler);
+  }
 }
 
 export function renderPseudo3dLayout(container, layout, config, preview = {}, layoutUi = {}) {
@@ -513,12 +795,10 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
   const selectedExclusionIndex = Number.isFinite(li.selectedExclusionIndex)
     ? li.selectedExclusionIndex
     : -1;
-  const exclusionRowsHtml = exclusionPolygonsM
-    .map(
-      (_, i) =>
-        `<div class="layout-excl-row${i === selectedExclusionIndex ? " layout-excl-row--selected" : ""}"><span>Exclusion ${i + 1}${i === selectedExclusionIndex ? " — selected" : ""}</span><button type="button" class="layout-adv-btn layout-adv-btn--icon" data-layout-action="deleteExclusion" data-exclusion-index="${i}" title="Remove">×</button></div>`
-    )
-    .join("");
+  const selectedBlockIndex = Number.isFinite(li.selectedBlockIndex) ? li.selectedBlockIndex : -1;
+  const selectedEquipmentIndex = Number.isFinite(li.selectedEquipmentIndex)
+    ? li.selectedEquipmentIndex
+    : -1;
 
   const blocks = li.blocks || [];
   const equipment = li.equipment || [];
@@ -529,35 +809,12 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
   const drawTarget = li.drawTarget === "block" ? "block" : "exclusion";
   const drawingBlock = drawObstacleMode && drawTarget === "block";
   const drawingExclusion = drawObstacleMode && drawTarget === "exclusion";
-  const panelSections = li.panelSections || { exclusions: true, design: true };
-  const sectionExclusionsOpen = panelSections.exclusions !== false;
-  const sectionDesignOpen = panelSections.design !== false;
-  const usedBlockModules = blocks.reduce((s, b) => s + (b.moduleCount || 0), 0);
-  const remainingBudget = Math.max(
-    0,
-    (layout.autoModuleCount || layout.moduleCount || 0) - usedBlockModules
-  );
 
-  const blockRowsHtml = blocks
-    .map(
-      (b, i) =>
-        `<div class="layout-excl-row layout-design-row"><span class="layout-design-dot${b.kind === "area" ? "" : " layout-design-dot--block"}"${b.kind === "area" ? ' style="background:#16a34a"' : ""}></span><span>${escapeHtml(b.name)} — ${b.moduleCount} mod${b.truncated ? " (capped)" : ""}</span><button type="button" class="layout-adv-btn layout-adv-btn--icon" data-layout-action="deleteBlock" data-block-index="${i}" title="Remove">×</button></div>`
-    )
-    .join("");
-  const equipmentRowsHtml = equipment
-    .map((eq, i) => {
-      const typeDef = EQUIPMENT_TYPES[eq.type] || EQUIPMENT_TYPES.combiner;
-      return `<div class="layout-excl-row layout-design-row"><span class="layout-design-dot" style="background:${typeDef.color}"></span><span>${escapeHtml(eq.label || typeDef.label)}</span><button type="button" class="layout-adv-btn layout-adv-btn--icon" data-layout-action="deleteEquipment" data-equipment-index="${i}" title="Remove">×</button></div>`;
-    })
-    .join("");
-
-  const designHint = drawingBlock
-    ? `Auto block: draw the area to fill with modules (${remainingBudget.toLocaleString()} modules remaining). ${obstacleDrawKind === "polygon" ? "Add corners, then <strong>Finish</strong> or click the <strong>first point</strong>." : "Click one corner, then the opposite corner."}`
-    : placing
-      ? `Click on the field to place <strong>${placing.kind === "block" ? escapeHtml(placing.spec?.name || "block") : escapeHtml(placing.spec?.label || "equipment")}</strong>. Red outline = invalid position.`
-      : "Use <strong>Add block</strong>, <strong>Auto block</strong> (draw-to-fill), or <strong>Add equipment</strong>. Blocks replace auto rows.";
-
-  const modalHtml = buildLayoutModalHtml(blockModal, layoutCtx, modulePowerWp, li.modulesPerStringDefault || 20);
+  const advancedToolbarHtml = buildLayoutAdvancedToolbarHtml(li, layout, config);
+  const modalHtml =
+    blockModal && li.showLayoutModal !== false
+      ? buildLayoutModalHtml(blockModal, layoutCtx, modulePowerWp, li.modulesPerStringDefault || 20)
+      : "";
 
   const grossWidthM = Math.max(Number(config.manualWidthM) || layout.netWidthM || 1, 1);
   const grossDepthM = Math.max(Number(config.manualHeightM) || layout.netDepthM || 1, 1);
@@ -678,64 +935,7 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
           <button type="button" class="layout-zoom-btn" data-zoom="out" title="Zoom out">&minus;</button>
           <button type="button" class="layout-zoom-btn" data-zoom="reset" title="Reset view (double-click)">&#8634;</button>
         </div>
-        <div class="layout-advanced-toolbar">
-          ${advancedMode ? `
-          <div class="layout-adv-panel">
-            <div class="layout-adv-panel-header">
-              <span class="layout-adv-panel-title">Advanced design</span>
-              <button type="button" class="layout-adv-panel-close" data-layout-action="toggleAdvanced" title="Exit advanced">&times;</button>
-            </div>
-            <div class="layout-adv-section">
-              <button type="button" class="layout-adv-section-head" data-layout-action="toggleSection" data-section="exclusions">
-                <span class="layout-adv-chevron${sectionExclusionsOpen ? " is-open" : ""}">&rsaquo;</span>
-                Exclusions
-                ${exclusionPolygonsM.length ? `<span class="layout-adv-badge">${exclusionPolygonsM.length}</span>` : ""}
-              </button>
-              <div class="layout-adv-section-body" style="display: ${sectionExclusionsOpen ? "grid" : "none"}">
-                <div class="layout-adv-btn-row" style="display: ${drawObstacleMode ? "none" : "flex"}">
-                  <button type="button" class="layout-adv-btn" data-layout-action="drawPolygon">Polygon</button>
-                  <button type="button" class="layout-adv-btn" data-layout-action="drawRectangle">Rectangle</button>
-                  <button type="button" class="layout-adv-btn layout-adv-btn--ghost" data-layout-action="clearExclusions" ${exclusionPolygonsM.length ? "" : "disabled"}>Clear</button>
-                </div>
-                <div class="layout-adv-btn-row" style="display: ${drawObstacleMode && obstacleDrawKind === "polygon" ? "flex" : "none"}">
-                  <button type="button" class="layout-adv-btn layout-adv-btn--primary" data-layout-action="finishDraw" title="${drawTarget === "block" ? "Fill the drawn area with modules" : "Apply exclusion and recalculate modules"}" ${draftRingM.length < 3 ? "disabled" : ""}>Finish</button>
-                  <button type="button" class="layout-adv-btn" data-layout-action="deleteLastPoint" ${draftRingM.length < 1 ? "disabled" : ""}>Undo point</button>
-                  <button type="button" class="layout-adv-btn layout-adv-btn--ghost" data-layout-action="cancelDraw">Cancel</button>
-                </div>
-                <div class="layout-adv-btn-row" style="display: ${drawObstacleMode && obstacleDrawKind === "rectangle" ? "flex" : "none"}">
-                  <button type="button" class="layout-adv-btn" data-layout-action="deleteLastPoint" ${!hasRectCorner ? "disabled" : ""}>Undo point</button>
-                  <button type="button" class="layout-adv-btn layout-adv-btn--ghost" data-layout-action="cancelDraw">Cancel</button>
-                </div>
-                <p class="layout-adv-hint">${drawingExclusion && obstacleDrawKind === "polygon" ? "Polygon: add corners on the field, then <strong>Finish</strong> or click the <strong>first point</strong> (blue). Double-click also applies." : drawingExclusion && obstacleDrawKind === "rectangle" ? "Rectangle: click one corner, then the opposite corner (axis-aligned in field meters). The exclusion applies after the second click." : exclusionPolygonsM.length ? "Click an exclusion to select it: <strong>drag</strong> to move, drag a <strong>corner</strong> to reshape, drag the <strong>round handle</strong> to rotate." : "Choose <strong>Polygon</strong> or <strong>Rectangle</strong> to carve out roads, MV zones, or pads."}</p>
-                <div class="layout-excl-list">${exclusionRowsHtml}</div>
-              </div>
-            </div>
-            <div class="layout-adv-section">
-              <button type="button" class="layout-adv-section-head" data-layout-action="toggleSection" data-section="design">
-                <span class="layout-adv-chevron${sectionDesignOpen ? " is-open" : ""}">&rsaquo;</span>
-                Block design
-                ${blocks.length + equipment.length ? `<span class="layout-adv-badge">${blocks.length + equipment.length}</span>` : ""}
-              </button>
-              <div class="layout-adv-section-body" style="display: ${sectionDesignOpen ? "grid" : "none"}">
-                <div class="layout-adv-btn-row" style="display: ${drawObstacleMode ? "none" : "flex"}">
-                  <button type="button" class="layout-adv-btn" data-layout-action="openBlockModal" ${placing ? "disabled" : ""}>Add block</button>
-                  <button type="button" class="layout-adv-btn" data-layout-action="openEquipmentModal" ${placing ? "disabled" : ""}>Add equipment</button>
-                </div>
-                <div class="layout-adv-btn-row" style="display: ${drawObstacleMode ? "none" : "flex"}">
-                  <button type="button" class="layout-adv-btn" data-layout-action="drawBlockRectangle" ${placing || remainingBudget <= 0 ? "disabled" : ""} title="Draw a rectangle that auto-fills with modules">Auto block &middot; rect</button>
-                  <button type="button" class="layout-adv-btn" data-layout-action="drawBlockPolygon" ${placing || remainingBudget <= 0 ? "disabled" : ""} title="Draw a polygon that auto-fills with modules">Auto block &middot; poly</button>
-                </div>
-                <div class="layout-adv-btn-row">
-                  <button type="button" class="layout-adv-btn layout-adv-btn--ghost" data-layout-action="cancelPlacement" style="display:${placing ? "inline-block" : "none"}">Cancel placement</button>
-                  <button type="button" class="layout-adv-btn layout-adv-btn--ghost" data-layout-action="clearDesign" ${blocks.length || equipment.length ? "" : "disabled"}>Clear design</button>
-                </div>
-                <p class="layout-adv-hint">${designHint}</p>
-                <div class="layout-excl-list">${blockRowsHtml}${equipmentRowsHtml}</div>
-              </div>
-            </div>
-          </div>` : `
-          <button type="button" class="layout-adv-btn" data-layout-action="toggleAdvanced">Advanced</button>`}
-        </div>
+        ${advancedToolbarHtml}
         ${modalHtml}
         <div class="layout-stage-caption">Top-down layout — right-drag to rotate</div>
       </div>
@@ -767,6 +967,9 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
   /** Radians — right-mouse drag on canvas */
   let previewRotationRad = 0;
   let previewRotating = false;
+  let rotateMoved = false;
+  /** Ignore spurious primary clicks after context menu / right-drag rotate (macOS). */
+  let blockPrimaryClickUntil = 0;
   let lastRotClientX = 0;
   let cachedBgImage = null;
   /** Field meters [x,y] — second corner preview while drawing a rectangle */
@@ -793,6 +996,180 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
   let rotateCenterF = null;
   let rotateStartAngle = 0;
 
+  // -- block / equipment selection and editing (row meters)
+  let selectedBlockIdx = Number.isFinite(li.selectedBlockIndex) ? li.selectedBlockIndex : -1;
+  if (selectedBlockIdx >= blocks.length) selectedBlockIdx = -1;
+  let selectedEquipIdx = Number.isFinite(li.selectedEquipmentIndex) ? li.selectedEquipmentIndex : -1;
+  if (selectedEquipIdx >= equipment.length) selectedEquipIdx = -1;
+  /** @type {null | 'move' | 'vertex'} */
+  let designEditMode = null;
+  /** @type {{ kind: 'block' | 'equipment', index: number } | null} */
+  let designEditTarget = null;
+  let designEditMoved = false;
+  let designEditValid = true;
+  /** @type {number[] | null} working origin during block/equipment move */
+  let designEditOrigin = null;
+  /** @type {number[][] | null} working ring during area-block move/reshape */
+  let designEditRing = null;
+  let designEditBaseOrigin = null;
+  let designEditBaseRing = null;
+  let designMoveStartRow = null;
+  let designEditVertexIdx = -1;
+
+  function eventToRowM(e) {
+    const r = canvas.getBoundingClientRect();
+    let lx = e.clientX - r.left;
+    let ly = e.clientY - r.top;
+    ({ lx, ly } = undoPreviewLogicalRotation(lx, ly));
+    const { scale, toX, toY } = getTransform();
+    const ox0 = toX(0);
+    const oy0 = toY(0);
+    const { xr, yr } = canvasLogicalToRotatedRowMeters(
+      lx,
+      ly,
+      ox0,
+      oy0,
+      scale,
+      grossWidthM,
+      grossDepthM,
+      azRotRad
+    );
+    return { lx, ly, xr, yr, scale, toX, toY };
+  }
+
+  function blockForDraw(index) {
+    const block = blocks[index];
+    if (!block) return block;
+    if (
+      designEditTarget?.kind === "block" &&
+      designEditTarget.index === index &&
+      designEditMode
+    ) {
+      if (block.kind === "area" && designEditRing) {
+        return { ...block, ringRowM: designEditRing };
+      }
+      if (block.kind !== "area" && designEditOrigin) {
+        return { ...block, originRowM: designEditOrigin };
+      }
+    }
+    return block;
+  }
+
+  function equipmentForDraw(index) {
+    const item = equipment[index];
+    if (!item) return item;
+    if (
+      designEditTarget?.kind === "equipment" &&
+      designEditTarget.index === index &&
+      designEditMode &&
+      designEditOrigin
+    ) {
+      return { ...item, originRowM: designEditOrigin };
+    }
+    return item;
+  }
+
+  function hitTestDesignAtRow(xr, yr) {
+    for (let i = equipment.length - 1; i >= 0; i--) {
+      const item = equipmentForDraw(i);
+      if (!item?.originRowM || item.originRowM.length < 2) continue;
+      const ring = equipmentRingRowM(item);
+      if (pointInPolygon(xr, yr, ring)) return { kind: "equipment", index: i };
+    }
+    for (let i = blocks.length - 1; i >= 0; i--) {
+      const block = blockForDraw(i);
+      const ring = blockAnyRingRowM(block, layoutCtx);
+      if (ring && ring.length >= 3 && pointInPolygon(xr, yr, ring)) {
+        return { kind: "block", index: i };
+      }
+    }
+    return null;
+  }
+
+  function placementCtxForDesign(exRingsRow, skipBlockIndex = -1, skipEquipmentIndex = -1) {
+    return {
+      rotatedPolyVerts: rotatedPolyVerts,
+      rotatedBoundsM: rotatedBoundsM,
+      setbackM: sw,
+      setbackDepthM: sd,
+      netWidthM,
+      netDepthM,
+      exclusionRingsRow: exRingsRow,
+      placedBlocks: blocks.filter((_, i) => i !== skipBlockIndex),
+      placedEquipment: equipment.filter((_, i) => i !== skipEquipmentIndex),
+      layoutCtx: layoutCtx || {
+        moduleSpanInRowM,
+        moduleGapM,
+        rowPitchM,
+        collectorProjectionM,
+      },
+    };
+  }
+
+  function exclusionRingsRow() {
+    const azDegDraw = Number(config.azimuthDeg) || 180;
+    return (li.exclusionPolygonsM || [])
+      .filter((r) => r && r.length >= 3)
+      .map((r) => rotateFieldRingToRowSpace(r, grossWidthM, grossDepthM, azDegDraw));
+  }
+
+  function validateDesignOrigin(kind, index, originRowM, exRingsRow) {
+    const pctx = placementCtxForDesign(
+      exRingsRow,
+      kind === "block" ? index : -1,
+      kind === "equipment" ? index : -1
+    );
+    if (kind === "block") {
+      const block = blocks[index];
+      if (!block || block.kind === "area") return false;
+      const { widthM, depthM } = blockFootprintM(block, pctx.layoutCtx);
+      const snapped = snapBlockOriginRowM(originRowM, widthM, depthM, pctx.layoutCtx);
+      return isPlacementValid(footprintRingRowM(snapped, widthM, depthM), pctx);
+    }
+    const item = equipment[index];
+    if (!item) return false;
+    const trial = { ...item, originRowM };
+    const { widthM, depthM } = equipmentFootprintM(trial);
+    return isPlacementValid(footprintRingRowM(originRowM, widthM, depthM), pctx);
+  }
+
+  function drawDesignSelection(ctx, toX, toY, exRingsRow, drawStyle) {
+    const selBlock = selectedBlockIdx >= 0 ? blocks[selectedBlockIdx] : null;
+    const selEquip = selectedEquipIdx >= 0 ? equipment[selectedEquipIdx] : null;
+    let ring = null;
+    let strokeColor = "rgba(37, 99, 235, 0.95)";
+    if (selBlock) {
+      const block = blockForDraw(selectedBlockIdx);
+      ring = blockAnyRingRowM(block, layoutCtx);
+      if (block?.kind === "area") strokeColor = "rgba(22, 163, 74, 0.95)";
+    } else if (selEquip) {
+      ring = equipmentRingRowM(equipmentForDraw(selectedEquipIdx));
+    }
+    if (!ring || ring.length < 3) return;
+
+    const invalid =
+      designEditMode &&
+      designEditTarget &&
+      ((designEditTarget.kind === "block" && designEditTarget.index === selectedBlockIdx) ||
+        (designEditTarget.kind === "equipment" && designEditTarget.index === selectedEquipIdx)) &&
+      !designEditValid;
+
+    ctx.strokeStyle = invalid ? "rgba(220, 38, 38, 0.95)" : strokeColor;
+    ctx.lineWidth = 2.5;
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(toX(ring[0][0]), toY(ring[0][1]));
+    for (let i = 1; i < ring.length; i++) {
+      ctx.lineTo(toX(ring[i][0]), toY(ring[i][1]));
+    }
+    ctx.closePath();
+    ctx.stroke();
+
+    if (selBlock?.kind === "area") {
+      drawPolygonEditHandles(ctx, ring, toX, toY, invalid ? "rgba(220, 38, 38, 0.95)" : strokeColor);
+    }
+  }
+
   function ringCentroidF(ring) {
     let sx = 0;
     let sy = 0;
@@ -801,6 +1178,106 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
       sy += p[1];
     }
     return [sx / ring.length, sy / ring.length];
+  }
+
+  const EDGE_INSERT_PX = 9;
+  const MIDPOINT_HANDLE_PX = 4;
+
+  function ringEdgeMidpoints(ring) {
+    const mids = [];
+    for (let i = 0; i < ring.length; i++) {
+      const j = (i + 1) % ring.length;
+      mids.push({
+        afterIndex: i,
+        x: (ring[i][0] + ring[j][0]) / 2,
+        y: (ring[i][1] + ring[j][1]) / 2,
+      });
+    }
+    return mids;
+  }
+
+  function insertVertexAfter(ring, afterIndex, point) {
+    const next = ring.map((p) => [p[0], p[1]]);
+    next.splice(afterIndex + 1, 0, [Number(point[0]), Number(point[1])]);
+    return next;
+  }
+
+  /** Closest point on any edge; returns field/row coords + screen distance. */
+  function hitRingEdgeInsert(lx, ly, ring, toX, toY, thresholdPx = EDGE_INSERT_PX) {
+    if (!ring || ring.length < 3) return null;
+    let best = null;
+    for (let i = 0; i < ring.length; i++) {
+      const j = (i + 1) % ring.length;
+      const x1 = toX(ring[i][0]);
+      const y1 = toY(ring[i][1]);
+      const x2 = toX(ring[j][0]);
+      const y2 = toY(ring[j][1]);
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+      const len2 = dx * dx + dy * dy;
+      let t = len2 > 1e-12 ? ((lx - x1) * dx + (ly - y1) * dy) / len2 : 0;
+      t = Math.max(0, Math.min(1, t));
+      const px = x1 + t * dx;
+      const py = y1 + t * dy;
+      const d = Math.hypot(lx - px, ly - py);
+      if (d <= thresholdPx && (!best || d < best.d)) {
+        const ix = ring[i][0] + t * (ring[j][0] - ring[i][0]);
+        const iy = ring[i][1] + t * (ring[j][1] - ring[i][1]);
+        best = { afterIndex: i, x: ix, y: iy, d };
+      }
+    }
+    return best;
+  }
+
+  function drawPolygonEditHandles(ctx, ring, toX, toY, strokeColor) {
+    for (const pt of ring) {
+      ctx.beginPath();
+      ctx.arc(toX(pt[0]), toY(pt[1]), 5, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
+      ctx.fill();
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = 1.75;
+      ctx.stroke();
+    }
+    for (const mid of ringEdgeMidpoints(ring)) {
+      const mx = toX(mid.x);
+      const my = toY(mid.y);
+      ctx.beginPath();
+      ctx.arc(mx, my, MIDPOINT_HANDLE_PX, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(255, 255, 255, 0.92)";
+      ctx.fill();
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = 1.25;
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(mx - 3, my);
+      ctx.lineTo(mx + 3, my);
+      ctx.moveTo(mx, my - 3);
+      ctx.lineTo(mx, my + 3);
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+    }
+  }
+
+  function beginExclusionVertexInsert(ring, afterIndex, point) {
+    const newRing = insertVertexAfter(ring, afterIndex, point);
+    editMode = "vertex";
+    editVertexIdx = afterIndex + 1;
+    baseRing = newRing.map((p) => [p[0], p[1]]);
+    editRing = newRing.map((p) => [p[0], p[1]]);
+    editMoved = true;
+  }
+
+  function beginAreaBlockVertexInsert(ring, blockIndex, afterIndex, point) {
+    const newRing = insertVertexAfter(ring, afterIndex, point);
+    designEditMode = "vertex";
+    designEditTarget = { kind: "block", index: blockIndex };
+    designEditVertexIdx = afterIndex + 1;
+    designEditBaseRing = newRing.map((p) => [p[0], p[1]]);
+    designEditRing = newRing.map((p) => [p[0], p[1]]);
+    designEditMoved = true;
+    designEditValid = true;
   }
 
   /** Client event -> logical canvas px (preview rotation undone) + field meters. */
@@ -1186,16 +1663,17 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
 
     if (hasBlockDesign) {
       for (let bi = 0; bi < blocks.length; bi++) {
-        const block = blocks[bi];
+        const block = blockForDraw(bi);
         if (block.kind === "area") {
           drawAreaBlock(ctx, block, bi, toX, toY, drawStyle, exRings);
         } else {
           drawBlockModules(ctx, block, toX, toY, drawStyle);
         }
       }
-      for (const eq of equipment) {
-        drawEquipmentItem(ctx, eq, toX, toY, drawStyle);
+      for (let ei = 0; ei < equipment.length; ei++) {
+        drawEquipmentItem(ctx, equipmentForDraw(ei), toX, toY, drawStyle);
       }
+      drawDesignSelection(ctx, toX, toY, exRings, drawStyle);
       drawPlacementGhost(ctx, toX, toY, exRings, drawStyle);
     } else if (useExclusionSlots) {
       rows: for (let i = 0; i < maxRows; i++) {
@@ -1380,16 +1858,7 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
       ctx.stroke();
 
       if (isSelected) {
-        // vertex handles (drag to reshape)
-        for (const pt of ring) {
-          ctx.beginPath();
-          ctx.arc(toX(pt[0]), toY(pt[1]), 5, 0, Math.PI * 2);
-          ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
-          ctx.fill();
-          ctx.strokeStyle = "rgba(37, 99, 235, 0.95)";
-          ctx.lineWidth = 1.75;
-          ctx.stroke();
-        }
+        drawPolygonEditHandles(ctx, ring, toX, toY, "rgba(37, 99, 235, 0.95)");
         // rotate handle above centroid (drag to rotate)
         const [cxF, cyF] = ringCentroidF(ring);
         const hx = toX(cxF);
@@ -1653,6 +2122,13 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
 
   canvas.addEventListener("contextmenu", (e) => {
     e.preventDefault();
+    blockPrimaryClickUntil = Date.now() + 400;
+  });
+
+  canvas.addEventListener("auxclick", (e) => {
+    if (e.button !== 0) {
+      e.preventDefault();
+    }
   });
 
   // -- wheel zoom (pointer-anchored; same clamp as +/- buttons)
@@ -1685,7 +2161,7 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
   let lastY = 0;
 
   canvas.addEventListener("mousemove", (e) => {
-    if (dragging || editMode) return;
+    if (dragging || editMode || designEditMode) return;
     if (placing) {
       const r = canvas.getBoundingClientRect();
       let lx = e.clientX - r.left;
@@ -1709,13 +2185,31 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
       return;
     }
     if (!drawObstacleMode) {
-      // hover cursor feedback over selected exclusion handles / any exclusion body
+      // hover cursor feedback over selected handles / design items / exclusions
       if (advancedMode && !blockModal) {
         const { lx, ly, xf, yf, toX, toY } = eventToFieldM(e);
+        const { xr, yr } = eventToRowM(e);
         const rings = li.exclusionPolygonsM || [];
         let cursor = "grab";
-        if (selectedExclIdx >= 0 && rings[selectedExclIdx]) {
-          const selRing = rings[selectedExclIdx];
+
+        if (selectedBlockIdx >= 0) {
+          const block = blocks[selectedBlockIdx];
+          if (block?.kind === "area" && block.ringRowM) {
+            const rowEvt = eventToRowM(e);
+            const activeRing =
+              designEditRing && designEditTarget?.kind === "block" && designEditTarget.index === selectedBlockIdx
+                ? designEditRing
+                : block.ringRowM;
+            if (activeRing.some((pt) => Math.hypot(rowEvt.lx - rowEvt.toX(pt[0]), rowEvt.ly - rowEvt.toY(pt[1])) <= 8)) {
+              cursor = "crosshair";
+            } else if (hitRingEdgeInsert(rowEvt.lx, rowEvt.ly, activeRing, rowEvt.toX, rowEvt.toY)) {
+              cursor = "copy";
+            }
+          }
+        }
+
+        if (cursor === "grab" && selectedExclIdx >= 0 && rings[selectedExclIdx]) {
+          const selRing = editRing && selectedExclIdx >= 0 ? editRing : rings[selectedExclIdx];
           const [cxF, cyF] = ringCentroidF(selRing);
           if (Math.hypot(lx - toX(cxF), ly - (toY(cyF) - ROTATE_HANDLE_PX)) <= 10) {
             cursor = "grabbing";
@@ -1723,7 +2217,12 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
             selRing.some((pt) => Math.hypot(lx - toX(pt[0]), ly - toY(pt[1])) <= 8)
           ) {
             cursor = "crosshair";
+          } else if (hitRingEdgeInsert(lx, ly, selRing, toX, toY)) {
+            cursor = "copy";
           }
+        }
+        if (cursor === "grab" && hitTestDesignAtRow(xr, yr)) {
+          cursor = "move";
         }
         if (cursor === "grab") {
           for (let i = rings.length - 1; i >= 0; i--) {
@@ -1795,11 +2294,16 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
     if (e.button === 2) {
       e.preventDefault();
       previewRotating = true;
+      rotateMoved = false;
       lastRotClientX = e.clientX;
       canvas.style.cursor = "grabbing";
       return;
     }
     if (e.button !== 0) return;
+    if (Date.now() < blockPrimaryClickUntil) {
+      e.preventDefault();
+      return;
+    }
     if (placing && li.onPlaceAt) {
       const rect = canvas.getBoundingClientRect();
       let lx = e.clientX - rect.left;
@@ -1822,7 +2326,167 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
       e.preventDefault();
       return;
     }
-    if (drawObstacleMode && (li.onAddDraftPoint || li.onRectangleFieldClick)) {
+    // -- block / equipment + exclusion edit (before draw mode so clicks hit handles, not new points)
+    if (advancedMode && !placing && !blockModal) {
+      const { lx, ly, xr, yr, toX, toY } = eventToRowM(e);
+      const { xf, yf } = eventToFieldM(e);
+      const onExclusion = (li.exclusionPolygonsM || []).some(
+        (r) => r && r.length >= 3 && pointInPolygon(xf, yf, r)
+      );
+
+      if (selectedBlockIdx >= 0 && !onExclusion) {
+        const block = blocks[selectedBlockIdx];
+        if (block?.kind === "area" && block.ringRowM) {
+          const activeRing =
+            designEditRing && designEditTarget?.kind === "block" && designEditTarget.index === selectedBlockIdx
+              ? designEditRing
+              : blockForDraw(selectedBlockIdx).ringRowM;
+          for (let vi = 0; vi < activeRing.length; vi++) {
+            if (Math.hypot(lx - toX(activeRing[vi][0]), ly - toY(activeRing[vi][1])) <= 8) {
+              designEditMode = "vertex";
+              designEditTarget = { kind: "block", index: selectedBlockIdx };
+              designEditVertexIdx = vi;
+              designEditBaseRing = activeRing.map((p) => [p[0], p[1]]);
+              designEditRing = activeRing.map((p) => [p[0], p[1]]);
+              designEditMoved = false;
+              designEditValid = true;
+              canvas.style.cursor = "crosshair";
+              e.preventDefault();
+              return;
+            }
+          }
+          const edgeHit = hitRingEdgeInsert(lx, ly, activeRing, toX, toY);
+          if (edgeHit) {
+            beginAreaBlockVertexInsert(activeRing, selectedBlockIdx, edgeHit.afterIndex, [edgeHit.x, edgeHit.y]);
+            canvas.style.cursor = "crosshair";
+            e.preventDefault();
+            return;
+          }
+        }
+      }
+
+      const hit = !onExclusion ? hitTestDesignAtRow(xr, yr) : null;
+      if (hit) {
+        selectedExclIdx = -1;
+        li.onSelectExclusion?.(-1);
+        if (hit.kind === "block") {
+          selectedBlockIdx = hit.index;
+          selectedEquipIdx = -1;
+          li.onSelectBlock?.(hit.index);
+          li.onSelectEquipment?.(-1);
+          const block = blocks[hit.index];
+          designEditMode = "move";
+          designEditTarget = { kind: "block", index: hit.index };
+          designMoveStartRow = [xr, yr];
+          designEditMoved = false;
+          designEditValid = true;
+          if (block.kind === "area" && block.ringRowM) {
+            designEditBaseRing = block.ringRowM.map((p) => [p[0], p[1]]);
+            designEditRing = block.ringRowM.map((p) => [p[0], p[1]]);
+          } else if (block.originRowM) {
+            designEditBaseOrigin = [block.originRowM[0], block.originRowM[1]];
+            designEditOrigin = [block.originRowM[0], block.originRowM[1]];
+          }
+        } else {
+          selectedEquipIdx = hit.index;
+          selectedBlockIdx = -1;
+          li.onSelectEquipment?.(hit.index);
+          li.onSelectBlock?.(-1);
+          const item = equipment[hit.index];
+          designEditMode = "move";
+          designEditTarget = { kind: "equipment", index: hit.index };
+          designMoveStartRow = [xr, yr];
+          designEditMoved = false;
+          designEditValid = true;
+          designEditBaseOrigin = [item.originRowM[0], item.originRowM[1]];
+          designEditOrigin = [item.originRowM[0], item.originRowM[1]];
+        }
+        canvas.style.cursor = "move";
+        draw(ctx, null);
+        e.preventDefault();
+        return;
+      }
+
+      if (!onExclusion && (selectedBlockIdx !== -1 || selectedEquipIdx !== -1)) {
+        selectedBlockIdx = -1;
+        selectedEquipIdx = -1;
+        li.onSelectBlock?.(-1);
+        li.onSelectEquipment?.(-1);
+        draw(ctx, null);
+      }
+
+      const rings = li.exclusionPolygonsM || [];
+      if (selectedExclIdx >= 0 && rings[selectedExclIdx]) {
+        const selRing = rings[selectedExclIdx];
+        const [cxF, cyF] = ringCentroidF(selRing);
+        const hx = toX(cxF);
+        const hy = toY(cyF) - ROTATE_HANDLE_PX;
+        if (Math.hypot(lx - hx, ly - hy) <= 10) {
+          editMode = "rotate";
+          baseRing = selRing.map((p) => [p[0], p[1]]);
+          editRing = selRing.map((p) => [p[0], p[1]]);
+          rotateCenterF = [cxF, cyF];
+          rotateStartAngle = Math.atan2(ly - toY(cyF), lx - toX(cxF));
+          editMoved = false;
+          canvas.style.cursor = "grabbing";
+          e.preventDefault();
+          return;
+        }
+        for (let vi = 0; vi < selRing.length; vi++) {
+          if (Math.hypot(lx - toX(selRing[vi][0]), ly - toY(selRing[vi][1])) <= 8) {
+            editMode = "vertex";
+            editVertexIdx = vi;
+            baseRing = selRing.map((p) => [p[0], p[1]]);
+            editRing = selRing.map((p) => [p[0], p[1]]);
+            editMoved = false;
+            canvas.style.cursor = "crosshair";
+            e.preventDefault();
+            return;
+          }
+        }
+        const activeRing = editRing || selRing;
+        const edgeHit = hitRingEdgeInsert(lx, ly, activeRing, toX, toY);
+        if (edgeHit) {
+          beginExclusionVertexInsert(activeRing, edgeHit.afterIndex, [edgeHit.x, edgeHit.y]);
+          canvas.style.cursor = "crosshair";
+          e.preventDefault();
+          return;
+        }
+      }
+
+      for (let i = rings.length - 1; i >= 0; i--) {
+        if (rings[i] && rings[i].length >= 3 && pointInPolygon(xf, yf, rings[i])) {
+          selectedExclIdx = i;
+          selectedBlockIdx = -1;
+          selectedEquipIdx = -1;
+          li.onSelectExclusion?.(i);
+          li.onSelectBlock?.(-1);
+          li.onSelectEquipment?.(-1);
+          editMode = "move";
+          moveStartF = [xf, yf];
+          baseRing = rings[i].map((p) => [p[0], p[1]]);
+          editRing = rings[i].map((p) => [p[0], p[1]]);
+          editMoved = false;
+          canvas.style.cursor = "move";
+          draw(ctx, null);
+          e.preventDefault();
+          return;
+        }
+      }
+
+      if (selectedExclIdx !== -1) {
+        selectedExclIdx = -1;
+        li.onSelectExclusion?.(-1);
+        draw(ctx, null);
+      }
+    }
+    if (
+      drawObstacleMode &&
+      !editMode &&
+      !designEditMode &&
+      selectedExclIdx < 0 &&
+      (li.onAddDraftPoint || li.onRectangleFieldClick)
+    ) {
       const rect = canvas.getBoundingClientRect();
       let lx = e.clientX - rect.left;
       let ly = e.clientY - rect.top;
@@ -1865,67 +2529,6 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
         return;
       }
     }
-    // -- exclusion select / move / reshape / rotate (advanced mode, idle)
-    if (advancedMode && !drawObstacleMode && !placing && !blockModal) {
-      const { lx, ly, xf, yf, toX, toY } = eventToFieldM(e);
-      const rings = li.exclusionPolygonsM || [];
-
-      if (selectedExclIdx >= 0 && rings[selectedExclIdx]) {
-        const selRing = rings[selectedExclIdx];
-        // rotate handle
-        const [cxF, cyF] = ringCentroidF(selRing);
-        const hx = toX(cxF);
-        const hy = toY(cyF) - ROTATE_HANDLE_PX;
-        if (Math.hypot(lx - hx, ly - hy) <= 10) {
-          editMode = "rotate";
-          baseRing = selRing.map((p) => [p[0], p[1]]);
-          editRing = selRing.map((p) => [p[0], p[1]]);
-          rotateCenterF = [cxF, cyF];
-          rotateStartAngle = Math.atan2(ly - toY(cyF), lx - toX(cxF));
-          editMoved = false;
-          canvas.style.cursor = "grabbing";
-          e.preventDefault();
-          return;
-        }
-        // vertex handle (reshape)
-        for (let vi = 0; vi < selRing.length; vi++) {
-          if (Math.hypot(lx - toX(selRing[vi][0]), ly - toY(selRing[vi][1])) <= 8) {
-            editMode = "vertex";
-            editVertexIdx = vi;
-            baseRing = selRing.map((p) => [p[0], p[1]]);
-            editRing = selRing.map((p) => [p[0], p[1]]);
-            editMoved = false;
-            canvas.style.cursor = "crosshair";
-            e.preventDefault();
-            return;
-          }
-        }
-      }
-
-      // body hit on any exclusion (topmost first): select + start move
-      for (let i = rings.length - 1; i >= 0; i--) {
-        if (rings[i] && rings[i].length >= 3 && pointInPolygon(xf, yf, rings[i])) {
-          selectedExclIdx = i;
-          li.onSelectExclusion?.(i);
-          editMode = "move";
-          moveStartF = [xf, yf];
-          baseRing = rings[i].map((p) => [p[0], p[1]]);
-          editRing = rings[i].map((p) => [p[0], p[1]]);
-          editMoved = false;
-          canvas.style.cursor = "move";
-          draw(ctx, null);
-          e.preventDefault();
-          return;
-        }
-      }
-
-      // clicked empty ground: deselect
-      if (selectedExclIdx !== -1) {
-        selectedExclIdx = -1;
-        li.onSelectExclusion?.(-1);
-        draw(ctx, null);
-      }
-    }
     dragging = true;
     lastX = e.clientX;
     lastY = e.clientY;
@@ -1934,6 +2537,7 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
 
   window.addEventListener("mousemove", (e) => {
     if (previewRotating) {
+      if (Math.abs(e.clientX - lastRotClientX) > 2) rotateMoved = true;
       previewRotationRad += (e.clientX - lastRotClientX) * 0.008;
       lastRotClientX = e.clientX;
       draw(ctx, null);
@@ -1966,6 +2570,43 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
       draw(ctx, null);
       return;
     }
+    if (designEditMode && designEditTarget) {
+      const { xr, yr } = eventToRowM(e);
+      const exRings = exclusionRingsRow();
+      if (designEditMode === "move" && designMoveStartRow) {
+        const dx = xr - designMoveStartRow[0];
+        const dy = yr - designMoveStartRow[1];
+        if (Math.abs(dx) > 1e-6 || Math.abs(dy) > 1e-6) designEditMoved = true;
+        if (designEditTarget.kind === "block") {
+          const block = blocks[designEditTarget.index];
+          if (block?.kind === "area" && designEditBaseRing) {
+            designEditRing = designEditBaseRing.map(([px, py]) => [px + dx, py + dy]);
+            designEditValid = true;
+          } else if (designEditBaseOrigin) {
+            let origin = [designEditBaseOrigin[0] + dx, designEditBaseOrigin[1] + dy];
+            const { widthM, depthM } = blockFootprintM(block, layoutCtx);
+            origin = snapBlockOriginRowM(origin, widthM, depthM, layoutCtx);
+            designEditOrigin = origin;
+            designEditValid = validateDesignOrigin("block", designEditTarget.index, origin, exRings);
+          }
+        } else if (designEditBaseOrigin) {
+          designEditOrigin = [designEditBaseOrigin[0] + dx, designEditBaseOrigin[1] + dy];
+          designEditValid = validateDesignOrigin(
+            "equipment",
+            designEditTarget.index,
+            designEditOrigin,
+            exRings
+          );
+        }
+      } else if (designEditMode === "vertex" && designEditVertexIdx >= 0 && designEditBaseRing) {
+        designEditRing = designEditBaseRing.map((p) => [p[0], p[1]]);
+        designEditRing[designEditVertexIdx] = [xr, yr];
+        designEditMoved = true;
+        designEditValid = true;
+      }
+      draw(ctx, null);
+      return;
+    }
     if (!dragging) return;
     panX += e.clientX - lastX;
     panY += e.clientY - lastY;
@@ -1974,9 +2615,13 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
     draw(ctx, null);
   });
 
-  window.addEventListener("mouseup", () => {
+  window.addEventListener("mouseup", (e) => {
     if (previewRotating) {
       previewRotating = false;
+      if (e.button === 2 || rotateMoved) {
+        blockPrimaryClickUntil = Date.now() + 350;
+      }
+      rotateMoved = false;
       canvas.style.cursor = drawObstacleMode || placing ? "crosshair" : "grab";
       return;
     }
@@ -1999,6 +2644,40 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
       }
       return;
     }
+    if (designEditMode) {
+      const target = designEditTarget;
+      const moved = designEditMoved;
+      const valid = designEditValid;
+      const mode = designEditMode;
+      const originOut = designEditOrigin;
+      const ringOut = designEditRing;
+      designEditMode = null;
+      designEditTarget = null;
+      designEditMoved = false;
+      designEditValid = true;
+      designEditOrigin = null;
+      designEditRing = null;
+      designEditBaseOrigin = null;
+      designEditBaseRing = null;
+      designMoveStartRow = null;
+      designEditVertexIdx = -1;
+      canvas.style.cursor = "grab";
+      if (moved && valid && target) {
+        if (target.kind === "block") {
+          const block = blocks[target.index];
+          if (mode === "vertex" || block?.kind === "area") {
+            if (ringOut) li.onUpdateBlock?.(target.index, { ringRowM: ringOut });
+          } else if (originOut) {
+            li.onUpdateBlock?.(target.index, { originRowM: originOut });
+          }
+        } else if (originOut) {
+          li.onUpdateEquipment?.(target.index, { originRowM: originOut });
+        }
+      } else {
+        draw(ctx, null);
+      }
+      return;
+    }
     if (!dragging) return;
     dragging = false;
     canvas.style.cursor = drawObstacleMode || placing ? "crosshair" : "grab";
@@ -2011,11 +2690,26 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
       if ((li.draftRingM || []).length >= 3) li.onCommitDraftRing?.();
       return;
     }
-    if (advancedMode && !placing) {
+    if (advancedMode && !placing && !drawObstacleMode && !blockModal) {
+      const { xr, yr } = eventToRowM(e);
+      const hit = hitTestDesignAtRow(xr, yr);
+      if (hit?.kind === "block") {
+        const block = blocks[hit.index];
+        if (block?.kind !== "area") {
+          e.preventDefault();
+          li.onOpenEditBlockModal?.(hit.index);
+          return;
+        }
+      }
+      if (hit?.kind === "equipment") {
+        e.preventDefault();
+        li.onOpenEditEquipmentModal?.(hit.index);
+        return;
+      }
       const { xf, yf } = eventToFieldM(e);
       const rings = li.exclusionPolygonsM || [];
       if (rings.some((r) => r && r.length >= 3 && pointInPolygon(xf, yf, r))) {
-        return; // double-click on an exclusion: keep view, selection handled by mousedown
+        return;
       }
     }
     zoom = 1;
@@ -2048,93 +2742,7 @@ export function renderPseudo3dLayout(container, layout, config, preview = {}, la
     });
   });
 
-  function readModalDraft(kind) {
-    const getVal = (field) => {
-      const el = container.querySelector(`[data-modal-field="${field}"]`);
-      return el ? el.value : "";
-    };
-    if (kind === "block") {
-      return {
-        name: getVal("name").trim() || "Block",
-        modulesPerString: Math.max(1, Math.floor(Number(getVal("modulesPerString")) || 1)),
-        strings: Math.max(1, Math.floor(Number(getVal("strings")) || 1)),
-      };
-    }
-    const type = getVal("type") || "combiner";
-    const typeDef = EQUIPMENT_TYPES[type] || EQUIPMENT_TYPES.combiner;
-    return {
-      type,
-      label: getVal("label").trim() || typeDef.label,
-      widthM: Math.max(0.5, Number(getVal("widthM")) || typeDef.widthM),
-      depthM: Math.max(0.5, Number(getVal("depthM")) || typeDef.depthM),
-    };
-  }
-
-  container.querySelectorAll("[data-modal-field]").forEach((input) => {
-    const handler = () => {
-      if (!blockModal) return;
-      let draft = readModalDraft(blockModal.kind);
-      if (blockModal.kind === "equipment" && input.dataset.modalField === "type") {
-        const typeDef = EQUIPMENT_TYPES[draft.type] || EQUIPMENT_TYPES.combiner;
-        draft = {
-          ...draft,
-          label: typeDef.label,
-          widthM: typeDef.widthM,
-          depthM: typeDef.depthM,
-        };
-      }
-      li.onModalDraftChange?.(draft);
-    };
-    input.addEventListener("input", handler);
-    input.addEventListener("change", handler);
-  });
-
-  container.querySelectorAll("[data-layout-action]").forEach((btn) => {
-    btn.addEventListener("click", (ev) => {
-      ev.preventDefault();
-      const act = btn.dataset.layoutAction;
-      if (act === "toggleAdvanced") li.onToggleAdvanced?.();
-      else if (act === "toggleSection") {
-        li.onToggleSection?.(ev.currentTarget.dataset.section);
-      }
-      else if (act === "drawPolygon") li.onStartDrawPolygon?.();
-      else if (act === "drawRectangle") li.onStartDrawRectangle?.();
-      else if (act === "drawBlockPolygon") li.onStartDrawBlockPolygon?.();
-      else if (act === "drawBlockRectangle") li.onStartDrawBlockRectangle?.();
-      else if (act === "cancelDraw") li.onCancelDraw?.();
-      else if (act === "finishDraw") li.onCommitDraftRing?.();
-      else if (act === "deleteLastPoint") li.onUndoDraftPoint?.();
-      else if (act === "clearExclusions") li.onClearPolygons?.();
-      else if (act === "deleteExclusion") {
-        const idx = Number(ev.currentTarget.dataset.exclusionIndex);
-        if (Number.isFinite(idx)) li.onDeletePolygon?.(idx);
-      } else if (act === "openBlockModal") li.onOpenBlockModal?.();
-      else if (act === "openEquipmentModal") li.onOpenEquipmentModal?.();
-      else if (act === "closeModal") li.onCloseModal?.();
-      else if (act === "confirmBlock") {
-        const spec = readModalDraft("block");
-        li.onCreateAndPlace?.({ kind: "block", spec });
-      } else if (act === "confirmEquipment") {
-        const spec = readModalDraft("equipment");
-        li.onCreateAndPlace?.({ kind: "equipment", spec });
-      } else if (act === "cancelPlacement") li.onCancelPlacement?.();
-      else if (act === "clearDesign") li.onClearDesign?.();
-      else if (act === "deleteBlock") {
-        const idx = Number(ev.currentTarget.dataset.blockIndex);
-        if (Number.isFinite(idx)) li.onDeleteBlock?.(idx);
-      } else if (act === "deleteEquipment") {
-        const idx = Number(ev.currentTarget.dataset.equipmentIndex);
-        if (Number.isFinite(idx)) li.onDeleteEquipment?.(idx);
-      }
-    });
-  });
-
-  const onPlacementKeyDown = (e) => {
-    if (e.key === "Escape" && placing) {
-      li.onCancelPlacement?.();
-    }
-  };
-  window.addEventListener("keydown", onPlacementKeyDown);
+  wireLayoutAdvancedToolbar(container, li, layout, config);
 }
 
 function roundRect(ctx, x, y, w, h, r) {

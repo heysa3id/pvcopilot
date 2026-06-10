@@ -5,7 +5,7 @@ import {
   simulateRepresentativeYear,
   winterSolsticeSpacing,
 } from "./pv-model.js";
-import { renderBarChart, renderLineChart, renderGroupedBarChart, renderDualAxisChart, renderPseudo3dLayout, renderLossDiagram, renderMonthlyTable, renderNormalizedProductionChart, renderMonthlyPrChart } from "./charts.js";
+import { renderBarChart, renderLineChart, renderGroupedBarChart, renderDualAxisChart, renderPseudo3dLayout, renderLossDiagram, renderMonthlyTable, renderNormalizedProductionChart, renderMonthlyPrChart, buildLayoutAdvancedToolbarHtml, wireLayoutAdvancedToolbar, buildLayoutModalHtml } from "./charts.js";
 import { buildAndSaveSimulationReport, captureElementAsPng } from "./simulation-report-pdf.js";
 import { fetchOpenMeteoArchiveWeather } from "./weather-openmeteo-direct.js";
 import {
@@ -31,6 +31,14 @@ import {
   snapBlockOriginRowM,
   validateBlockSpec,
 } from "./layout-blocks.js";
+import {
+  applyConfigToDom,
+  applyLayoutStateToMemory,
+  buildStateSnapshot,
+  deserializeWeather,
+  loadStateCache,
+  saveStateCache,
+} from "./state-cache.js";
 
 /** Set in index.html: empty for local dev (Vite proxies /api), or VITE_API_BASE on production (GitHub Pages). */
 function getPvApiBase() {
@@ -53,6 +61,18 @@ function apiUrl(path) {
 
 const DEFAULT_WEATHER_SUMMARY =
   "Fetch a typical meteorological year directly from PVGIS or historical weather from Open-Meteo ERA5 using the current site coordinates.";
+
+/** Used only for layout preview when the site polygon exists but module fields are still empty. */
+const LAYOUT_DESIGN_DEFAULTS = {
+  modulePowerWp: 650,
+  moduleLengthM: 2.45,
+  moduleWidthM: 1.35,
+  tiltDeg: 20,
+  azimuthDeg: 180,
+  frontClearanceM: 0.8,
+  rowSpacingM: 2.1,
+  moduleGapM: 0.03,
+};
 
 const state = {
   weather: { records: [], meta: { ready: false, issues: [] } },
@@ -80,6 +100,10 @@ const state = {
   layoutDrawTarget: "exclusion",
   /** Index into moduleExclusionPolygonsM of the exclusion selected for editing, or -1 */
   layoutSelectedExclusionIndex: -1,
+  /** Index into layoutBlocks of the block selected for editing, or -1 */
+  layoutSelectedBlockIndex: -1,
+  /** Index into layoutEquipment of the equipment selected for editing, or -1 */
+  layoutSelectedEquipmentIndex: -1,
   /** Collapsible sections of the advanced panel */
   layoutPanelSections: { exclusions: true, design: true },
   /** Leaflet group for exclusion overlays on the Site map */
@@ -98,7 +122,12 @@ const state = {
   /** @type {{ kind: 'block'|'equipment', draft: object } | null} */
   layoutBlockModal: null,
   layoutGhostRowM: null,
+  /** Restored from cache when drawnSiteRing is unavailable; field meters */
+  cachedPolygonVerticesM: null,
 };
+
+let isRestoringCache = false;
+let persistTimer = null;
 
 const monthFormatter = new Intl.DateTimeFormat(undefined, { month: "short" });
 const dateFormatter = new Intl.DateTimeFormat(undefined, {
@@ -187,6 +216,95 @@ function readOptionalNumber(id) {
 
   const value = Number.parseFloat(raw);
   return Number.isFinite(value) ? value : "";
+}
+
+function hasSiteCoordinates() {
+  const latEl = byId("siteLat");
+  const lngEl = byId("siteLng");
+  return Boolean(latEl && lngEl && latEl.value.trim() !== "" && lngEl.value.trim() !== "");
+}
+
+function buildPersistSnapshot() {
+  const drawnSiteRing = state.drawnLayer
+    ? layerToLatLngRing(state.drawnLayer).map((ll) => [ll.lat, ll.lng])
+    : null;
+  const mapView = state.map
+    ? {
+        lat: state.map.getCenter().lat,
+        lng: state.map.getCenter().lng,
+        zoom: state.map.getZoom(),
+      }
+    : null;
+  return buildStateSnapshot(state, getConfig(), { drawnSiteRing, mapView });
+}
+
+function persistStateCacheNow() {
+  if (isRestoringCache) return;
+  clearTimeout(persistTimer);
+  persistTimer = null;
+  saveStateCache(buildPersistSnapshot());
+}
+
+function schedulePersistStateCache() {
+  if (isRestoringCache) return;
+  clearTimeout(persistTimer);
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    saveStateCache(buildPersistSnapshot());
+  }, 300);
+}
+
+function siteGeometryReady(config) {
+  return Boolean(state.drawnLayer) || (Number(config.manualWidthM) > 0 && Number(config.manualHeightM) > 0);
+}
+
+function hasExplicitModuleDesign(config) {
+  return Number(config.modulePowerWp) > 0 && Number(config.moduleLengthM) > 0 && Number(config.moduleWidthM) > 0;
+}
+
+function withLayoutDesignDefaults(config) {
+  const out = { ...config };
+  for (const [key, defaultVal] of Object.entries(LAYOUT_DESIGN_DEFAULTS)) {
+    const n = Number(out[key]);
+    if (out[key] === "" || out[key] == null || !Number.isFinite(n) || n <= 0) {
+      out[key] = defaultVal;
+    }
+  }
+  return out;
+}
+
+function layoutDesignConfig(config) {
+  if (!siteGeometryReady(config) || hasExplicitModuleDesign(config)) {
+    return config;
+  }
+  return withLayoutDesignDefaults(config);
+}
+
+function setEmptyProjectState() {
+  setText("grossAreaText", formatArea(0));
+  setText("netAreaText", formatArea(0));
+  setText("mapCoordinateText", "—");
+  setText("mapBuildableAreaText", formatArea(0));
+  setText("siteCoordinateText", "—");
+  setText("mapLayoutText", "Waiting for sizing");
+  setText("installedDcText", formatPower(0, "dc"));
+  setText("installedModuleText", "0 modules");
+  setText("installedAcText", formatPower(0, "ac"));
+  setText("dcAcRatioText", "DC/AC —");
+  byId("siteStatus").textContent = "Waiting for shape";
+  byId("siteStatus").className = "status-pill";
+  setSimulationPlaceholders();
+}
+
+function restoreStateFromCache(snapshot) {
+  isRestoringCache = true;
+  applyConfigToDom(snapshot.config);
+  applyLayoutStateToMemory(state, snapshot.layout);
+  if (snapshot.weather) {
+    state.weather = deserializeWeather(snapshot.weather);
+  }
+  isRestoringCache = false;
+  return snapshot.layout;
 }
 
 function getConfig() {
@@ -283,7 +401,9 @@ function updateWeatherProviderNote() {
 }
 
 function updateSiteSummary(config, layout) {
-  const coordinateText = `${config.siteLat.toFixed(4)}, ${config.siteLng.toFixed(4)}`;
+  const coordinateText = hasSiteCoordinates()
+    ? `${config.siteLat.toFixed(4)}, ${config.siteLng.toFixed(4)}`
+    : "—";
   const siteReady = state.drawnLayer || (config.manualWidthM > 0 && config.manualHeightM > 0);
 
   const displayGrossArea = state.polygonAreaM2 || layout.grossAreaM2;
@@ -296,8 +416,12 @@ function updateSiteSummary(config, layout) {
   setText(
     "mapLayoutText",
     layout.moduleCount > 0
-      ? `${layout.moduleCount.toLocaleString()} modules / ${layout.rowCount.toLocaleString()} rows`
-      : "Waiting for sizing"
+      ? `${layout.moduleCount.toLocaleString()} modules / ${layout.rowCount.toLocaleString()} rows${
+          layout.usesLayoutDefaults ? " (preview defaults)" : ""
+        }`
+      : siteReady
+        ? "Site defined — set module specs in Layout"
+        : "Waiting for sizing"
   );
 
   byId("siteStatus").textContent = siteReady ? "Site geometry ready" : "Waiting for shape";
@@ -682,13 +806,51 @@ function renderWeatherPreview() {
   `;
 }
 
-function renderLayoutPreview(config) {
-  const view = byId("layoutPerspectiveView");
-  const summary = byId("layoutPerspectiveSummary");
+function isSitePanelActive() {
+  return byId("sitePanel")?.classList.contains("is-active");
+}
 
+function ensureLayoutPanelForInteraction() {
+  if (isSitePanelActive()) setActivePanel("layoutPanel");
+}
+
+function cancelSiteMapExclusionDraw() {
+  if (!state.pendingExclusionDrawKind) return;
+  state.pendingExclusionDrawKind = null;
+  restoreSiteMapDrawControl();
+  document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+}
+
+function renderSiteMapAdvancedToolbar(config, layoutUi) {
+  const toolbar = byId("siteMapAdvancedToolbar");
+  const modalHost = byId("siteMapLayoutModal");
+  if (!toolbar) return;
+  const siteUi = {
+    ...layoutUi,
+    siteMapMode: true,
+    hasDrawnSite: Boolean(state.drawnLayer),
+    pendingSiteExclusionDraw: state.pendingExclusionDrawKind,
+  };
+  const layoutStub = state.layout || { moduleCount: 0, autoModuleCount: 0 };
+  toolbar.innerHTML = buildLayoutAdvancedToolbarHtml(siteUi, layoutStub, config);
+  if (modalHost) {
+    modalHost.innerHTML =
+      state.layoutBlockModal && isSitePanelActive()
+        ? buildLayoutModalHtml(
+            state.layoutBlockModal,
+            siteUi.layoutCtx,
+            siteUi.modulePowerWp,
+            siteUi.modulesPerStringDefault
+          )
+        : "";
+  }
+  wireLayoutAdvancedToolbar([toolbar, modalHost].filter(Boolean), siteUi, layoutStub, config);
+}
+
+function createLayoutUi(config) {
   const layoutCtx = state.layout ? buildLayoutCtx(state.layout, config, state.layoutBlocks) : null;
 
-  const layoutUi = {
+  return {
     exclusionPolygonsM: state.moduleExclusionPolygonsM,
     draftRingM: state.layoutObstacleDraftM,
     advancedMode: state.layoutAdvancedMode,
@@ -704,11 +866,15 @@ function renderLayoutPreview(config) {
     modulePowerWp: Number(config.modulePowerWp) || 0,
     modulesPerStringDefault: Number(config.modulesPerString) || 20,
     selectedExclusionIndex: state.layoutSelectedExclusionIndex,
+    selectedBlockIndex: state.layoutSelectedBlockIndex,
+    selectedEquipmentIndex: state.layoutSelectedEquipmentIndex,
     panelSections: state.layoutPanelSections,
+    showLayoutModal: !isSitePanelActive(),
     onToggleSection(name) {
       if (!(name in state.layoutPanelSections)) return;
       state.layoutPanelSections[name] = !state.layoutPanelSections[name];
       renderLayoutPreview(getConfig());
+      schedulePersistStateCache();
     },
     onToggleAdvanced() {
       state.layoutAdvancedMode = !state.layoutAdvancedMode;
@@ -722,28 +888,43 @@ function renderLayoutPreview(config) {
         state.layoutBlockModal = null;
         state.layoutGhostRowM = null;
         state.layoutSelectedExclusionIndex = -1;
+        clearDesignSelection();
+        cancelSiteMapExclusionDraw();
       }
       refreshLayout();
     },
     onStartDrawPolygon() {
-      state.layoutDrawObstacleMode = true;
-      state.layoutObstacleDrawKind = "polygon";
       state.layoutDrawTarget = "exclusion";
       state.layoutObstacleDraftM = [];
       state.layoutRectFirstCornerM = null;
       state.layoutSelectedExclusionIndex = -1;
+      if (isSitePanelActive() && state.drawnLayer) {
+        state.layoutDrawObstacleMode = false;
+        beginSiteMapExclusionDraw("polygon");
+        renderLayoutPreview(getConfig());
+        return;
+      }
+      state.layoutDrawObstacleMode = true;
+      state.layoutObstacleDrawKind = "polygon";
       renderLayoutPreview(getConfig());
     },
     onStartDrawRectangle() {
-      state.layoutDrawObstacleMode = true;
-      state.layoutObstacleDrawKind = "rectangle";
       state.layoutDrawTarget = "exclusion";
       state.layoutObstacleDraftM = [];
       state.layoutRectFirstCornerM = null;
       state.layoutSelectedExclusionIndex = -1;
+      if (isSitePanelActive() && state.drawnLayer) {
+        state.layoutDrawObstacleMode = false;
+        beginSiteMapExclusionDraw("rectangle");
+        renderLayoutPreview(getConfig());
+        return;
+      }
+      state.layoutDrawObstacleMode = true;
+      state.layoutObstacleDrawKind = "rectangle";
       renderLayoutPreview(getConfig());
     },
     onStartDrawBlockPolygon() {
+      ensureLayoutPanelForInteraction();
       state.layoutDrawObstacleMode = true;
       state.layoutObstacleDrawKind = "polygon";
       state.layoutDrawTarget = "block";
@@ -755,6 +936,7 @@ function renderLayoutPreview(config) {
       renderLayoutPreview(getConfig());
     },
     onStartDrawBlockRectangle() {
+      ensureLayoutPanelForInteraction();
       state.layoutDrawObstacleMode = true;
       state.layoutObstacleDrawKind = "rectangle";
       state.layoutDrawTarget = "block";
@@ -766,6 +948,11 @@ function renderLayoutPreview(config) {
       renderLayoutPreview(getConfig());
     },
     onCancelDraw() {
+      if (state.pendingExclusionDrawKind) {
+        cancelSiteMapExclusionDraw();
+        renderLayoutPreview(getConfig());
+        return;
+      }
       state.layoutDrawObstacleMode = false;
       state.layoutObstacleDraftM = [];
       state.layoutRectFirstCornerM = null;
@@ -857,6 +1044,189 @@ function renderLayoutPreview(config) {
     onSelectExclusion(index) {
       // No re-render: the canvas closure tracks selection locally for smooth editing.
       state.layoutSelectedExclusionIndex = Number.isFinite(index) ? index : -1;
+      if (state.layoutSelectedExclusionIndex >= 0) {
+        clearDesignSelection();
+        state.layoutDrawObstacleMode = false;
+        state.layoutObstacleDraftM = [];
+        state.layoutRectFirstCornerM = null;
+      }
+      schedulePersistStateCache();
+    },
+    onSelectBlock(index, options = {}) {
+      if (options.refresh) ensureLayoutPanelForInteraction();
+      state.layoutSelectedBlockIndex = Number.isFinite(index) ? index : -1;
+      if (state.layoutSelectedBlockIndex >= 0) {
+        state.layoutSelectedEquipmentIndex = -1;
+        state.layoutSelectedExclusionIndex = -1;
+        state.layoutDrawObstacleMode = false;
+        state.layoutObstacleDraftM = [];
+        state.layoutRectFirstCornerM = null;
+      }
+      schedulePersistStateCache();
+      if (options.refresh) renderLayoutPreview(getConfig());
+    },
+    onSelectEquipment(index, options = {}) {
+      if (options.refresh) ensureLayoutPanelForInteraction();
+      state.layoutSelectedEquipmentIndex = Number.isFinite(index) ? index : -1;
+      if (state.layoutSelectedEquipmentIndex >= 0) {
+        state.layoutSelectedBlockIndex = -1;
+        state.layoutSelectedExclusionIndex = -1;
+      }
+      schedulePersistStateCache();
+      if (options.refresh) renderLayoutPreview(getConfig());
+    },
+    onUpdateBlock(index, patch) {
+      if (index < 0 || index >= state.layoutBlocks.length) return;
+      const block = state.layoutBlocks[index];
+      const configNow = getConfig();
+      const layoutCtx = buildLayoutCtx(state.layout, configNow, state.layoutBlocks);
+      if (patch.ringRowM && block.kind === "area") {
+        const ringRowM = patch.ringRowM.map(([a, b]) => [Number(a), Number(b)]);
+        if (ringRowM.length < 3) return;
+        block.ringRowM = ringRowM;
+        refreshLayout();
+        return;
+      }
+      if (patch.originRowM && patch.originRowM.length >= 2) {
+        const pctx = placementValidationCtx(configNow, { skipBlockIndex: index });
+        if (block.kind === "area") return;
+        const { widthM, depthM } = blockFootprintM(block, layoutCtx);
+        let origin = [Number(patch.originRowM[0]), Number(patch.originRowM[1])];
+        origin = snapBlockOriginRowM(origin, widthM, depthM, layoutCtx);
+        const ring = footprintRingRowM(origin, widthM, depthM);
+        if (!isPlacementValid(ring, pctx)) return;
+        block.originRowM = origin;
+        refreshLayout();
+        return;
+      }
+      if (patch.name != null) block.name = String(patch.name).trim() || block.name;
+      if (patch.modulesPerString != null) {
+        block.modulesPerString = Math.max(1, Math.floor(Number(patch.modulesPerString) || 1));
+      }
+      if (patch.strings != null) {
+        block.strings = Math.max(1, Math.floor(Number(patch.strings) || 1));
+      }
+      if (patch.modulesPerString != null || patch.strings != null) {
+        const v = validateBlockSpec(block, buildLayoutCtx(state.layout, configNow, state.layoutBlocks.filter((_, i) => i !== index)));
+        if (!v.valid) return;
+        block.moduleCount = v.moduleCount;
+        if (block.originRowM && block.originRowM.length >= 2) {
+          const { widthM, depthM } = v.footprint;
+          block.originRowM = snapBlockOriginRowM(block.originRowM, widthM, depthM, layoutCtx);
+          const pctx = placementValidationCtx(configNow, { skipBlockIndex: index });
+          const ring = footprintRingRowM(block.originRowM, widthM, depthM);
+          if (!isPlacementValid(ring, pctx)) return;
+        }
+      }
+      refreshLayout();
+    },
+    onUpdateEquipment(index, patch) {
+      if (index < 0 || index >= state.layoutEquipment.length) return;
+      const item = state.layoutEquipment[index];
+      const configNow = getConfig();
+      if (patch.originRowM && patch.originRowM.length >= 2) {
+        const pctx = placementValidationCtx(configNow, { skipEquipmentIndex: index });
+        const trial = { ...item, originRowM: [Number(patch.originRowM[0]), Number(patch.originRowM[1])] };
+        const { widthM, depthM } = equipmentFootprintM(trial);
+        const ring = footprintRingRowM(trial.originRowM, widthM, depthM);
+        if (!isPlacementValid(ring, pctx)) return;
+        item.originRowM = trial.originRowM;
+        refreshLayout();
+        return;
+      }
+      if (patch.type != null) item.type = patch.type;
+      if (patch.label != null) item.label = String(patch.label).trim() || item.label;
+      if (patch.widthM != null) item.widthM = Math.max(0.5, Number(patch.widthM) || item.widthM);
+      if (patch.depthM != null) item.depthM = Math.max(0.5, Number(patch.depthM) || item.depthM);
+      if (patch.type != null || patch.widthM != null || patch.depthM != null) {
+        const pctx = placementValidationCtx(configNow, { skipEquipmentIndex: index });
+        const { widthM, depthM } = equipmentFootprintM(item);
+        const ring = footprintRingRowM(item.originRowM, widthM, depthM);
+        if (!isPlacementValid(ring, pctx)) return;
+      }
+      refreshLayout();
+    },
+    onOpenEditBlockModal(index) {
+      ensureLayoutPanelForInteraction();
+      const block = state.layoutBlocks[index];
+      if (!block || block.kind === "area") return;
+      state.layoutBlockModal = {
+        kind: "block",
+        editIndex: index,
+        draft: {
+          name: block.name || `Block ${index + 1}`,
+          modulesPerString: block.modulesPerString,
+          strings: block.strings,
+        },
+      };
+      state.layoutPlacing = null;
+      state.layoutGhostRowM = null;
+      renderLayoutPreview(getConfig());
+    },
+    onOpenEditEquipmentModal(index) {
+      ensureLayoutPanelForInteraction();
+      const item = state.layoutEquipment[index];
+      if (!item) return;
+      state.layoutBlockModal = {
+        kind: "equipment",
+        editIndex: index,
+        draft: {
+          type: item.type || "combiner",
+          label: item.label || "",
+          widthM: item.widthM,
+          depthM: item.depthM,
+        },
+      };
+      state.layoutPlacing = null;
+      state.layoutGhostRowM = null;
+      renderLayoutPreview(getConfig());
+    },
+    onSaveBlockEdit(index, spec) {
+      if (index < 0 || index >= state.layoutBlocks.length) return;
+      const layoutCtx = buildLayoutCtx(
+        state.layout,
+        config,
+        state.layoutBlocks.filter((_, i) => i !== index)
+      );
+      const v = validateBlockSpec(spec, layoutCtx);
+      if (!v.valid) return;
+      const block = state.layoutBlocks[index];
+      const updated = {
+        ...block,
+        name: spec.name || block.name,
+        modulesPerString: spec.modulesPerString,
+        strings: spec.strings,
+        moduleCount: v.moduleCount,
+      };
+      if (updated.originRowM && updated.originRowM.length >= 2) {
+        const { widthM, depthM } = v.footprint;
+        const origin = snapBlockOriginRowM(updated.originRowM, widthM, depthM, layoutCtx);
+        const ring = footprintRingRowM(origin, widthM, depthM);
+        const pctx = placementValidationCtx(config, { skipBlockIndex: index });
+        if (!isPlacementValid(ring, pctx)) return;
+        updated.originRowM = origin;
+      }
+      state.layoutBlockModal = null;
+      state.layoutBlocks[index] = updated;
+      refreshLayout();
+    },
+    onSaveEquipmentEdit(index, spec) {
+      if (index < 0 || index >= state.layoutEquipment.length) return;
+      const typeDef = EQUIPMENT_TYPES[spec.type] || EQUIPMENT_TYPES.combiner;
+      const trial = {
+        ...state.layoutEquipment[index],
+        type: spec.type || "combiner",
+        label: spec.label || typeDef.label,
+        widthM: Math.max(0.5, Number(spec.widthM) || typeDef.widthM),
+        depthM: Math.max(0.5, Number(spec.depthM) || typeDef.depthM),
+      };
+      const pctx = placementValidationCtx(config, { skipEquipmentIndex: index });
+      const { widthM, depthM } = equipmentFootprintM(trial);
+      const ring = footprintRingRowM(trial.originRowM, widthM, depthM);
+      if (!isPlacementValid(ring, pctx)) return;
+      state.layoutBlockModal = null;
+      state.layoutEquipment[index] = trial;
+      refreshLayout();
     },
     onUpdateExclusion(index, ring) {
       if (!Array.isArray(ring) || ring.length < 3) return;
@@ -865,6 +1235,7 @@ function renderLayoutPreview(config) {
       refreshLayout();
     },
     onOpenBlockModal() {
+      ensureLayoutPanelForInteraction();
       const n = state.layoutBlocks.length + 1;
       state.layoutBlockModal = {
         kind: "block",
@@ -879,6 +1250,7 @@ function renderLayoutPreview(config) {
       renderLayoutPreview(getConfig());
     },
     onOpenEquipmentModal() {
+      ensureLayoutPanelForInteraction();
       const typeDef = EQUIPMENT_TYPES.combiner;
       state.layoutBlockModal = {
         kind: "equipment",
@@ -901,8 +1273,10 @@ function renderLayoutPreview(config) {
       if (!state.layoutBlockModal) return;
       state.layoutBlockModal = { ...state.layoutBlockModal, draft: { ...draft } };
       renderLayoutPreview(getConfig());
+      schedulePersistStateCache();
     },
     onCreateAndPlace(spec) {
+      ensureLayoutPanelForInteraction();
       if (spec.kind === "block" && layoutCtx) {
         const v = validateBlockSpec(spec.spec, layoutCtx);
         if (!v.valid) return;
@@ -956,10 +1330,20 @@ function renderLayoutPreview(config) {
     },
     onDeleteBlock(index) {
       state.layoutBlocks.splice(index, 1);
+      if (state.layoutSelectedBlockIndex === index) {
+        state.layoutSelectedBlockIndex = -1;
+      } else if (state.layoutSelectedBlockIndex > index) {
+        state.layoutSelectedBlockIndex--;
+      }
       refreshLayout();
     },
     onDeleteEquipment(index) {
       state.layoutEquipment.splice(index, 1);
+      if (state.layoutSelectedEquipmentIndex === index) {
+        state.layoutSelectedEquipmentIndex = -1;
+      } else if (state.layoutSelectedEquipmentIndex > index) {
+        state.layoutSelectedEquipmentIndex--;
+      }
       refreshLayout();
     },
     onClearDesign() {
@@ -968,6 +1352,7 @@ function renderLayoutPreview(config) {
       state.layoutPlacing = null;
       state.layoutBlockModal = null;
       state.layoutGhostRowM = null;
+      clearDesignSelection();
       refreshLayout();
     },
     onGhostMove(xy) {
@@ -976,8 +1361,16 @@ function renderLayoutPreview(config) {
     validateBlockSpec: (spec) =>
       layoutCtx ? validateBlockSpec(spec, layoutCtx) : { valid: false, reasons: ["Layout not ready"] },
   };
+}
+
+function renderLayoutPreview(config) {
+  const view = byId("layoutPerspectiveView");
+  const summary = byId("layoutPerspectiveSummary");
+
+  const layoutUi = createLayoutUi(config);
 
   renderPseudo3dLayout(view, state.layout, config, state.layoutPreview, layoutUi);
+  renderSiteMapAdvancedToolbar(config, layoutUi);
 
   if (!state.layout || state.layout.moduleCount <= 0) {
     summary.innerHTML = `
@@ -1251,7 +1644,7 @@ function commitAutoBlockRing(ringFieldM, config) {
   return true;
 }
 
-function placementValidationCtx(config) {
+function placementValidationCtx(config, { skipBlockIndex = -1, skipEquipmentIndex = -1 } = {}) {
   const layoutCtx = buildLayoutCtx(state.layout, config, state.layoutBlocks);
   const grossW = Number(config.manualWidthM) || 1;
   const grossD = Number(config.manualHeightM) || 1;
@@ -1263,15 +1656,23 @@ function placementValidationCtx(config) {
     netWidthM: layoutCtx.netWidthM,
     netDepthM: layoutCtx.netDepthM,
     exclusionRingsRow: rotatedExclusionRingsFromState(config),
-    placedBlocks: state.layoutBlocks,
-    placedEquipment: state.layoutEquipment,
+    placedBlocks: state.layoutBlocks.filter((_, i) => i !== skipBlockIndex),
+    placedEquipment: state.layoutEquipment.filter((_, i) => i !== skipEquipmentIndex),
     layoutCtx,
   };
 }
 
+function clearDesignSelection() {
+  state.layoutSelectedBlockIndex = -1;
+  state.layoutSelectedEquipmentIndex = -1;
+}
+
 function refreshLayout() {
   const config = getConfig();
-  state.layout = computeLayout(config, config);
+  const designConfig = layoutDesignConfig(config);
+  state.layout = computeLayout(config, designConfig);
+  state.layout.usesLayoutDefaults =
+    siteGeometryReady(config) && !hasExplicitModuleDesign(config) && state.layout.moduleCount > 0;
 
   // Attach polygon vertices in meters (relative to bounding box origin) if a polygon is drawn
   if (state.drawnLayer && typeof state.drawnLayer.getLatLngs === "function") {
@@ -1288,12 +1689,15 @@ function refreshLayout() {
         const yFrac = bboxD > 0 ? haversineDistanceMeters({ lat: sw.lat, lng: sw.lng }, { lat: ll.lat, lng: sw.lng }) / bboxD : 0;
         return [xFrac * grossW, (1 - yFrac) * grossD];
       });
+      state.cachedPolygonVerticesM = state.layout.polygonVerticesM.map(([x, y]) => [x, y]);
     }
+  } else if (state.cachedPolygonVerticesM && state.cachedPolygonVerticesM.length >= 3) {
+    state.layout.polygonVerticesM = state.cachedPolygonVerticesM.map(([x, y]) => [x, y]);
   }
 
   // Compute rotated polygon in row-aligned space and correct module count for azimuth
   {
-    const azimuthDeg = Number(config.azimuthDeg) || 180;
+    const azimuthDeg = Number(designConfig.azimuthDeg) || 180;
     const grossW = Number(config.manualWidthM) || 1;
     const grossD = Number(config.manualHeightM) || 1;
     const cx = grossW / 2, cy = grossD / 2;
@@ -1335,10 +1739,10 @@ function refreshLayout() {
     const rowPitchM = state.layout.rowPitchM;
     const collectorProjectionM = state.layout.winterSpacing?.collectorProjectionM || rowPitchM * 0.5;
     const moduleSpanInRowM = state.layout.moduleSpanInRowM || 1;
-    const moduleGapM = Number(config.moduleGapM) || 0.03;
-    const maxRowWidthM = Number(config.maxRowWidthM) || 0;
-    const minRowWidthM = Number(config.minRowWidthM) || 0;
-    const rowWidthGapM = Number(config.rowWidthGapM) || 0;
+    const moduleGapM = Number(designConfig.moduleGapM) || 0.03;
+    const maxRowWidthM = Number(designConfig.maxRowWidthM) || 0;
+    const minRowWidthM = Number(designConfig.minRowWidthM) || 0;
+    const rowWidthGapM = Number(designConfig.rowWidthGapM) || 0;
     const moduleStep = Math.max(moduleSpanInRowM + moduleGapM, 0.001);
     const mPerSeg = maxRowWidthM > 0
       ? Math.max(Math.floor((maxRowWidthM + moduleGapM) / moduleStep), 1) : 0;
@@ -1350,7 +1754,7 @@ function refreshLayout() {
         ? 0
         : Math.max(
             Math.floor(
-              (innerMaxY - innerMinY + (Number(config.rowSpacingM) || 0)) / Math.max(rowPitchM, 0.001)
+              (innerMaxY - innerMinY + (Number(designConfig.rowSpacingM) || 0)) / Math.max(rowPitchM, 0.001)
             ),
             0
           );
@@ -1461,7 +1865,7 @@ function refreshLayout() {
     }
 
     state.layout.moduleCount = moduleCount;
-    state.layout.dcCapacityKw = (moduleCount * Number(config.modulePowerWp)) / 1000;
+    state.layout.dcCapacityKw = (moduleCount * Number(designConfig.modulePowerWp)) / 1000;
     const targetRatio = Math.max(Number(config.targetDcAcRatio) || 1.2, 0.1);
     const manualAcKw = Number(config.manualAcCapacityKw);
     state.layout.acCapacityKw = Number.isFinite(manualAcKw) && manualAcKw > 0
@@ -1481,7 +1885,7 @@ function refreshLayout() {
   renderLayoutPreview(config);
   renderModuleRowsOnMap();
   syncModuleExclusionMapLayers();
-  updateSiteExclusionToolsUi();
+  schedulePersistStateCache();
 }
 
 function renderModuleRowsOnMap() {
@@ -1803,13 +2207,21 @@ function setActivePanel(targetId) {
     stage.classList.toggle("is-active", stage.dataset.stageFor === targetId);
   }
 
-  if (targetId === "sitePanel" && state.map) {
-    window.setTimeout(() => {
-      state.map.invalidateSize();
-      if (state.drawnLayer) {
-        captureLayoutSnapshot(true);
-      }
-    }, 30);
+  if (targetId === "sitePanel") {
+    renderLayoutPreview(getConfig());
+    if (state.map) {
+      window.setTimeout(() => {
+        state.map.invalidateSize();
+        if (state.drawnLayer) {
+          captureLayoutSnapshot(true);
+        }
+      }, 30);
+    }
+  }
+
+  if (targetId === "layoutPanel" && state.drawnLayer) {
+    refreshLayout();
+    window.setTimeout(() => captureLayoutSnapshot(true), 80);
   }
 }
 
@@ -1880,6 +2292,7 @@ async function fetchWeatherFromApi() {
     setSimulationPlaceholders();
   } finally {
     button.disabled = false;
+    schedulePersistStateCache();
   }
 }
 
@@ -1961,14 +2374,30 @@ function syncModuleExclusionMapLayers() {
   }
 }
 
-function updateSiteExclusionToolsUi() {
-  const hasSite = Boolean(state.drawnLayer);
-  const polyBtn = byId("siteMapExclusionPolygon");
-  const rectBtn = byId("siteMapExclusionRectangle");
-  const clearBtn = byId("siteMapExclusionClear");
-  if (polyBtn) polyBtn.disabled = !hasSite || Boolean(state.pendingExclusionDrawKind);
-  if (rectBtn) rectBtn.disabled = !hasSite || Boolean(state.pendingExclusionDrawKind);
-  if (clearBtn) clearBtn.disabled = !state.moduleExclusionPolygonsM.length;
+function restoreMapDrawnLayer(drawnSiteRing, mapView) {
+  if (!state.map || !window.L || !state.drawnItems) return;
+
+  if (mapView && Number.isFinite(mapView.lat) && Number.isFinite(mapView.lng)) {
+    state.map.setView([mapView.lat, mapView.lng], Number.isFinite(mapView.zoom) ? mapView.zoom : 17);
+  }
+
+  if (state.marker && hasSiteCoordinates()) {
+    state.marker.setLatLng([readNumber("siteLat"), readNumber("siteLng")]);
+  }
+
+  if (!Array.isArray(drawnSiteRing) || drawnSiteRing.length < 3) return;
+
+  const latLngs = drawnSiteRing.map(([lat, lng]) => L.latLng(lat, lng));
+  const layer = L.polygon(latLngs, {
+    color: "#3b82f6",
+    weight: 2,
+  });
+
+  state.drawnItems.clearLayers();
+  state.drawnLayer = layer;
+  state.drawnItems.addLayer(layer);
+  syncModuleExclusionMapLayers();
+  applyDrawnShape(layer);
 }
 
 function restoreSiteMapDrawControl() {
@@ -1988,7 +2417,7 @@ function beginSiteMapExclusionDraw(kind) {
     }
   }
   state.pendingExclusionDrawKind = kind;
-  updateSiteExclusionToolsUi();
+  renderLayoutPreview(getConfig());
   const shape = {
     color: "#dc2626",
     weight: 2,
@@ -2068,6 +2497,7 @@ function applyDrawnShape(layer) {
   }
 
   refreshAll();
+  persistStateCacheNow();
 }
 
 function initMap() {
@@ -2083,9 +2513,14 @@ function initMap() {
     return;
   }
 
-  const initialLat = readNumber("siteLat");
-  const initialLng = readNumber("siteLng");
-  state.map = L.map(mapCanvas, { zoomControl: true, maxZoom: 18 }).setView([initialLat, initialLng], 17);
+  const hasCoords = hasSiteCoordinates();
+  const initialLat = hasCoords ? readNumber("siteLat") : 20;
+  const initialLng = hasCoords ? readNumber("siteLng") : 0;
+  const initialZoom = hasCoords ? 17 : 2;
+  state.map = L.map(mapCanvas, { zoomControl: true, maxZoom: 18 }).setView(
+    [initialLat, initialLng],
+    initialZoom
+  );
   const baseLayer = L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}", {
     maxNativeZoom: 17,
     maxZoom: 18,
@@ -2199,7 +2634,6 @@ function initMap() {
   state.map.on(L.Draw.Event.CREATED, (event) => {
     if (state.pendingExclusionDrawKind) {
       state.pendingExclusionDrawKind = null;
-      updateSiteExclusionToolsUi();
       handleExclusionDrawCreated(event.layer);
       return;
     }
@@ -2214,13 +2648,14 @@ function initMap() {
 
   state.map.on(L.Draw.Event.DRAWSTOP, () => {
     state.pendingExclusionDrawKind = null;
-    updateSiteExclusionToolsUi();
     restoreSiteMapDrawControl();
+    renderLayoutPreview(getConfig());
   });
 
   state.map.on(L.Draw.Event.DELETED, () => {
     state.drawnLayer = null;
     state.polygonAreaM2 = null;
+    state.cachedPolygonVerticesM = null;
     state.moduleExclusionPolygonsM = [];
     if (state.moduleExclusionMapGroup) state.moduleExclusionMapGroup.clearLayers();
     clearLayoutSnapshot();
@@ -2248,7 +2683,6 @@ function initMap() {
   });
 
   syncModuleExclusionMapLayers();
-  updateSiteExclusionToolsUi();
 }
 
 function runSimulation() {
@@ -2270,7 +2704,7 @@ function runSimulation() {
 function refreshAll() {
   refreshLayout();
   renderWeatherPreview();
-  if (state.map && state.marker) {
+  if (state.map && state.marker && hasSiteCoordinates()) {
     state.marker.setLatLng([readNumber("siteLat"), readNumber("siteLng")]);
   }
 
@@ -2279,6 +2713,7 @@ function refreshAll() {
   } else {
     setSimulationPlaceholders();
   }
+  schedulePersistStateCache();
 }
 
 function wireEvents() {
@@ -2286,7 +2721,7 @@ function wireEvents() {
     if (control.closest(".db-search")) continue;
     control.addEventListener("change", () => {
       if (control.id === "siteLat" || control.id === "siteLng") {
-        if (state.map) {
+        if (state.map && hasSiteCoordinates()) {
           state.map.setView([readNumber("siteLat"), readNumber("siteLng")], state.map.getZoom());
         }
       }
@@ -2311,35 +2746,6 @@ function wireEvents() {
   byId("fetchWeather").addEventListener("click", () => {
     fetchWeatherFromApi();
   });
-
-  const siteExclusionToggle = byId("siteExclusionToggleAdvanced");
-  const siteExclusionExtras = byId("siteExclusionExtras");
-  if (siteExclusionToggle && siteExclusionExtras) {
-    siteExclusionToggle.addEventListener("click", () => {
-      const open =
-        siteExclusionExtras.style.display === "none" || siteExclusionExtras.style.display === "";
-      siteExclusionExtras.style.display = open ? "flex" : "none";
-      siteExclusionToggle.textContent = open ? "Exit advanced" : "Advanced";
-      siteExclusionToggle.setAttribute("aria-expanded", open ? "true" : "false");
-    });
-  }
-
-  const siteMapExclPoly = byId("siteMapExclusionPolygon");
-  if (siteMapExclPoly) {
-    siteMapExclPoly.addEventListener("click", () => beginSiteMapExclusionDraw("polygon"));
-  }
-  const siteMapExclRect = byId("siteMapExclusionRectangle");
-  if (siteMapExclRect) {
-    siteMapExclRect.addEventListener("click", () => beginSiteMapExclusionDraw("rectangle"));
-  }
-  const siteMapExclClear = byId("siteMapExclusionClear");
-  if (siteMapExclClear) {
-    siteMapExclClear.addEventListener("click", () => {
-      state.moduleExclusionPolygonsM = [];
-      syncModuleExclusionMapLayers();
-      refreshLayout();
-    });
-  }
 
   byId("resetWeather").addEventListener("click", () => {
     state.weather = emptyWeatherState();
@@ -2626,22 +3032,33 @@ function wireEvents() {
 }
 
 function initialize() {
-  const baseArea = rectangleMetrics(
-    readNumber("manualWidthM"),
-    readNumber("manualHeightM"),
-    readNumber("edgeSetbackM"),
-    readNumber("edgeSetbackDepthM")
-  );
-  setText("grossAreaText", formatArea(baseArea.grossAreaM2));
-  setText("netAreaText", formatArea(baseArea.netAreaM2));
-  updateWeatherProviderNote();
-  updateWeatherStatus();
-  setSimulationPlaceholders();
-  refreshLayout();
-  renderWeatherPreview();
-  initMap();
   wireEvents();
-  byId("weatherSummary").textContent = DEFAULT_WEATHER_SUMMARY;
+  updateWeatherProviderNote();
+
+  const cached = loadStateCache();
+  let cachedLayout = null;
+  if (cached) {
+    cachedLayout = restoreStateFromCache(cached);
+  } else {
+    setEmptyProjectState();
+  }
+
+  updateWeatherStatus();
+  initMap();
+
+  if (cachedLayout?.drawnSiteRing?.length >= 3) {
+    restoreMapDrawnLayer(cachedLayout.drawnSiteRing, cachedLayout.mapView);
+  } else {
+    refreshAll();
+  }
+
+  if (cached && state.weather.meta.ready) {
+    byId("weatherSummary").textContent =
+      state.weather.source?.note || "Weather source restored from cache.";
+  } else {
+    byId("weatherSummary").textContent = DEFAULT_WEATHER_SUMMARY;
+  }
+
   normalizeSiteNameField();
 }
 

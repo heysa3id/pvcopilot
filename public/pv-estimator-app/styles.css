@@ -1133,6 +1133,23 @@ label span {
   pointer-events: auto;
 }
 
+.layout-advanced-toolbar--map,
+#siteMapAdvancedToolbar .layout-advanced-toolbar {
+  z-index: 1000;
+  bottom: 52px;
+}
+
+.site-map-modal-host {
+  position: absolute;
+  inset: 0;
+  z-index: 1100;
+  pointer-events: none;
+}
+
+.site-map-modal-host:not(:empty) {
+  pointer-events: auto;
+}
+
 .layout-adv-btn {
   font-size: 11px;
   font-weight: 700;
@@ -1258,6 +1275,42 @@ label span {
 
 .layout-design-row {
   gap: 6px;
+}
+
+.layout-design-row-select {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.layout-design-row-select span:last-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layout-design-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.layout-adv-panel .layout-design-row-select {
+  color: inherit;
+}
+
+.layout-adv-panel .layout-design-row-select:hover {
+  color: #fff;
 }
 
 /* ── Advanced panel (dark glass) ───────────────────────────── */

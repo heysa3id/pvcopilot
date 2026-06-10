@@ -428,28 +428,28 @@
       <section class="dash-hero">
         <article class="hero-kpi">
           <span class="kpi-label">Year-1 Net Energy</span>
-          <strong id="yearOneEnergyText" class="kpi-value">3,425 MWh</strong>
-          <small id="specificYieldText" class="kpi-sub">1,730 kWh/kWp</small>
+          <strong id="yearOneEnergyText" class="kpi-value">Waiting for weather</strong>
+          <small id="specificYieldText" class="kpi-sub">Fetch data to compute yield</small>
         </article>
         <div class="kpi-strip">
           <article class="kpi-card">
             <span class="kpi-label">Installed DC</span>
-            <strong id="installedDcText">1.98 MWdc</strong>
-            <small id="installedModuleText">3,216 modules</small>
+            <strong id="installedDcText">0 kWdc</strong>
+            <small id="installedModuleText">0 modules</small>
           </article>
           <article class="kpi-card">
             <span class="kpi-label">AC Export</span>
-            <strong id="installedAcText">1.65 MWac</strong>
-            <small id="dcAcRatioText">DC/AC 1.20</small>
+            <strong id="installedAcText">0 kWac</strong>
+            <small id="dcAcRatioText">DC/AC —</small>
           </article>
           <article class="kpi-card">
             <span class="kpi-label">25-Year Cumulative</span>
-            <strong id="lifetimeEnergyText">80.4 GWh</strong>
-            <small id="lastYearText">Year 25: 2,995 MWh</small>
+            <strong id="lifetimeEnergyText">Run 25-year model</strong>
+            <small id="lastYearText">Year 25 unavailable</small>
           </article>
           <article class="kpi-card">
             <span class="kpi-label">Site</span>
-            <strong id="siteCoordinateText">32.2222, -7.9283</strong>
+            <strong id="siteCoordinateText">—</strong>
             <small id="weatherModeText">Awaiting API fetch</small>
           </article>
           <article class="kpi-card">
@@ -494,15 +494,15 @@
                 <h3>Location &amp; rectangle</h3>
               </div>
               <div class="field-grid">
-                <label><span>Latitude</span><input id="siteLat" type="number" step="0.0001" value="32.2222" /></label>
-                <label><span>Longitude</span><input id="siteLng" type="number" step="0.0001" value="-7.9283" /></label>
+                <label><span>Latitude</span><input id="siteLat" type="number" step="0.0001" value="" placeholder="e.g. 32.22" /></label>
+                <label><span>Longitude</span><input id="siteLng" type="number" step="0.0001" value="" placeholder="e.g. -7.93" /></label>
                 <label><span>UTC offset (hours)</span><input id="timezoneOffset" type="number" step="1" value="0" /></label>
                 <label><span>Ground albedo</span><input id="surfaceAlbedo" type="number" step="0.01" value="0.2" /></label>
-                <label><span>Rectangle width (m)</span><input id="manualWidthM" type="number" step="0.1" value="120" /></label>
-                <label><span>Rectangle depth (m)</span><input id="manualHeightM" type="number" step="0.1" value="80" /></label>
-                <label><span>Edge setback — left / right (m)</span><input id="edgeSetbackM" type="number" step="0.1" value="2" /></label>
-                <label><span>Edge setback — top / bottom (m)</span><input id="edgeSetbackDepthM" type="number" step="0.1" value="2" /></label>
-                <label><span>Azimuth (deg N)</span><input id="azimuthDegSite" type="number" step="0.1" value="180" /></label>
+                <label><span>Rectangle width (m)</span><input id="manualWidthM" type="number" step="0.1" value="" placeholder="e.g. 120" /></label>
+                <label><span>Rectangle depth (m)</span><input id="manualHeightM" type="number" step="0.1" value="" placeholder="e.g. 80" /></label>
+                <label><span>Edge setback — left / right (m)</span><input id="edgeSetbackM" type="number" step="0.1" value="0" /></label>
+                <label><span>Edge setback — top / bottom (m)</span><input id="edgeSetbackDepthM" type="number" step="0.1" value="0" /></label>
+                <label><span>Azimuth (deg N)</span><input id="azimuthDegSite" type="number" step="0.1" value="" placeholder="e.g. 180" /></label>
               </div>
             </section>
 
@@ -559,21 +559,21 @@
               <div class="field-grid two">
                 <label><span>Module manufacturer</span><input id="moduleManufacturer" type="text" value="" placeholder="e.g. Jinko Solar" /></label>
                 <label><span>Module model</span><input id="moduleModel" type="text" value="" placeholder="e.g. Tiger Neo 615" /></label>
-                <label><span>Module power (Wp)</span><input id="modulePowerWp" type="number" step="1" value="650" /></label>
+                <label><span>Module power (Wp)</span><input id="modulePowerWp" type="number" step="1" value="" placeholder="e.g. 650" /></label>
                 <label><span>Module count</span><input id="manualModuleCount" type="number" step="1" value="" placeholder="Auto" /></label>
-                <label><span>Module length (m)</span><input id="moduleLengthM" type="number" step="0.001" value="2.45" /></label>
-                <label><span>Module width (m)</span><input id="moduleWidthM" type="number" step="0.001" value="1.35" /></label>
+                <label><span>Module length (m)</span><input id="moduleLengthM" type="number" step="0.001" value="" placeholder="e.g. 2.45" /></label>
+                <label><span>Module width (m)</span><input id="moduleWidthM" type="number" step="0.001" value="" placeholder="e.g. 1.35" /></label>
                 <label><span>Orientation</span>
                   <select id="moduleOrientation">
                     <option value="portrait">Portrait</option>
                     <option value="landscape">Landscape</option>
                   </select>
                 </label>
-                <label><span>Tilt (deg)</span><input id="tiltDeg" type="number" step="0.1" value="20" /></label>
-                <label><span>Azimuth (deg N)</span><input id="azimuthDeg" type="number" step="0.1" value="180" /></label>
-                <label><span>Front clearance (m)</span><input id="frontClearanceM" type="number" step="0.05" value="0.8" /></label>
-                <label><span>Row spacing (m)</span><input id="rowSpacingM" type="number" step="0.05" value="2.1" /></label>
-                <label><span>Module gap (m)</span><input id="moduleGapM" type="number" step="0.01" value="0.03" /></label>
+                <label><span>Tilt (deg)</span><input id="tiltDeg" type="number" step="0.1" value="" placeholder="e.g. 20" /></label>
+                <label><span>Azimuth (deg N)</span><input id="azimuthDeg" type="number" step="0.1" value="" placeholder="e.g. 180" /></label>
+                <label><span>Front clearance (m)</span><input id="frontClearanceM" type="number" step="0.05" value="" placeholder="e.g. 0.8" /></label>
+                <label><span>Row spacing (m)</span><input id="rowSpacingM" type="number" step="0.05" value="" placeholder="e.g. 2.1" /></label>
+                <label><span>Module gap (m)</span><input id="moduleGapM" type="number" step="0.01" value="" placeholder="e.g. 0.03" /></label>
                 <label><span>Max row width (m)</span><input id="maxRowWidthM" type="number" step="0.5" value="0" /></label>
                 <label><span>Min row width (m)</span><input id="minRowWidthM" type="number" step="0.5" value="0" title="0 = off. Rows narrower than this get no modules." /></label>
                 <label><span>Row width gap (m)</span><input id="rowWidthGapM" type="number" step="0.1" value="0" /></label>
@@ -647,38 +647,26 @@
                   <p class="kicker">Map builder</p>
                   <h2>Installation area</h2>
                 </div>
-                <span class="badge">Draw a rectangle to define the usable block</span>
+                <span class="badge">Draw a polygon or rectangle to define the site</span>
               </div>
               <div class="map-info-strip">
                 <div><span>Site</span><strong id="mapSiteName">Untitled project</strong></div>
-                <div><span>Coordinates</span><strong id="mapCoordinateText">32.2222, -7.9283</strong></div>
-                <div><span>Buildable area</span><strong id="mapBuildableAreaText">8,736 m²</strong></div>
+                <div><span>Coordinates</span><strong id="mapCoordinateText">—</strong></div>
+                <div><span>Buildable area</span><strong id="mapBuildableAreaText">0 m²</strong></div>
                 <div><span>Layout status</span><strong id="mapLayoutText">Waiting for sizing</strong></div>
-              </div>
-              <div class="site-exclusion-toolbar">
-                <button type="button" class="layout-adv-btn" id="siteExclusionToggleAdvanced" aria-expanded="false">Advanced</button>
-                <div id="siteExclusionExtras" class="site-exclusion-extras info-box" style="display: none; margin: 0;">
-                  <p class="kicker" style="margin: 0 0 6px;">Module exclusions (same as Layout advanced)</p>
-                  <p class="layout-adv-hint muted-text" style="margin: 0 0 10px; font-size: 11px;">
-                    Draw roads, MV corridors, or substation pads on the satellite map. Requires a drawn site area first; exclusions share the Layout preview and module count.
-                  </p>
-                  <div class="layout-exclusion-type-btns">
-                    <button type="button" class="layout-adv-btn" id="siteMapExclusionPolygon" disabled>Polygon on map</button>
-                    <button type="button" class="layout-adv-btn" id="siteMapExclusionRectangle" disabled>Rectangle on map</button>
-                    <button type="button" class="layout-adv-btn" id="siteMapExclusionClear" disabled>Clear exclusions</button>
-                  </div>
-                </div>
               </div>
               <div class="map-wrap">
                 <div id="mapCanvas" class="map-canvas"></div>
+                <div id="siteMapAdvancedToolbar"></div>
+                <div id="siteMapLayoutModal" class="site-map-modal-host"></div>
                 <div class="map-hint">
-                  Draw the plant rectangle, then fetch a TMY and refine layout in the left panel.
+                  Draw the site boundary (polygon or rectangle). The layout is saved automatically and previewed in the Layout tab.
                 </div>
               </div>
             </article>
             <div class="area-chips">
-              <div class="area-chip"><span>Gross area</span><strong id="grossAreaText">9,600 m²</strong></div>
-              <div class="area-chip"><span>Net buildable</span><strong id="netAreaText">8,736 m²</strong></div>
+              <div class="area-chip"><span>Gross area</span><strong id="grossAreaText">0 m²</strong></div>
+              <div class="area-chip"><span>Net buildable</span><strong id="netAreaText">0 m²</strong></div>
             </div>
           </section>
 
